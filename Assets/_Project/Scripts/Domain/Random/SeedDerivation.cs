@@ -13,7 +13,10 @@ namespace Eden.Domain
         Presentation = 4,
 
         /// <summary>Per-creature streams for stochastic brains; see <see cref="SeedDerivation.CreateCreatureStream"/>.</summary>
-        Brain = 5
+        Brain = 5,
+
+        /// <summary>Per-creature streams for initial random genomes.</summary>
+        Genome = 6
     }
 
     /// <summary>
