@@ -1,19 +1,26 @@
+using Eden.Application;
 using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace Eden.Presentation
 {
-    /// <summary>Thin binding to the lab UXML: run summary on the left, creature inspector on the right.</summary>
+    /// <summary>
+    /// Thin binding to the lab UXML: run summary on the left, creature inspector on the right and, for a
+    /// selected neural creature, the network diagram below the inspector.
+    /// </summary>
     [RequireComponent(typeof(UIDocument))]
     public sealed class LabHud : MonoBehaviour
     {
         private Label runStats;
         private Label inspector;
         private VisualElement inspectorPanel;
+        private VisualElement networkPanel;
         private bool inspectorVisible;
 
         public string RunText => Bind() ? runStats.text : string.Empty;
         public string InspectorText => Bind() && inspectorVisible ? inspector.text : string.Empty;
+        public bool NetworkVisible { get; private set; }
+        public NetworkGraph Graph { get; private set; }
 
         public void ShowRun(string text)
         {
@@ -31,6 +38,22 @@ namespace Eden.Presentation
             inspector.text = text ?? string.Empty;
         }
 
+        /// <summary>Shows the diagram for a snapshot, or hides it (no drawing at all) when null.</summary>
+        public void ShowNetwork(NeuralSnapshot snapshot)
+        {
+            if (!Bind())
+                return;
+            var visible = snapshot != null;
+            if (visible != NetworkVisible)
+            {
+                networkPanel.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+                NetworkVisible = visible;
+            }
+
+            if (visible)
+                Graph.Show(snapshot);
+        }
+
         private bool Bind()
         {
             if (runStats != null)
@@ -38,10 +61,21 @@ namespace Eden.Presentation
             var root = GetComponent<UIDocument>().rootVisualElement;
             if (root == null)
                 return false;
-            runStats = root.Q<Label>("run-stats");
-            inspector = root.Q<Label>("inspector");
-            inspectorPanel = root.Q<VisualElement>("inspector-panel");
-            return runStats != null && inspector != null && inspectorPanel != null;
+            var stats = root.Q<Label>("run-stats");
+            var inspectorLabel = root.Q<Label>("inspector");
+            var inspectorElement = root.Q<VisualElement>("inspector-panel");
+            var networkElement = root.Q<VisualElement>("network-panel");
+            var host = root.Q<VisualElement>("network-graph-host");
+            if (stats == null || inspectorLabel == null || inspectorElement == null || networkElement == null || host == null)
+                return false;
+
+            inspector = inspectorLabel;
+            inspectorPanel = inspectorElement;
+            networkPanel = networkElement;
+            Graph = new NetworkGraph();
+            host.Add(Graph);
+            runStats = stats;
+            return true;
         }
     }
 }

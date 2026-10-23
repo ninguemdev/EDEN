@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using Eden.Application;
 using Eden.Brains;
@@ -23,12 +24,15 @@ namespace Eden.Presentation
     /// <summary>
     /// Composition root of the lab scene: builds a run from the Inspector settings, converts frame time into
     /// fixed ticks with <see cref="FixedStepClock"/>, handles lab controls and selection, and writes a metrics CSV
-    /// under persistentDataPath/SimulationRuns. Frame rate never reaches the simulation.
+    /// under persistentDataPath/SimulationRuns. Frame rate never reaches the simulation. The network diagram of a
+    /// selected neural creature is refreshed at 10 Hz and costs nothing while no creature is selected.
+    /// Command line (builds): -eden-brain heuristic|random|neural, -eden-seed N, -eden-select ID.
     /// </summary>
     public sealed class LabRunner : MonoBehaviour
     {
         private const float HudRefreshSeconds = 0.25f;
         private const float SelectRadius = 1.5f;
+        private const float NetworkRefreshSeconds = 0.1f;
 
         [SerializeField] private SimulationSettings settings = new SimulationSettings();
         [SerializeField, Min(0)] private int seed = 1;
@@ -42,6 +46,8 @@ namespace Eden.Presentation
         private MetricsCsvLog metricsLog;
         private CreatureDeath? selectedDeath;
         private float hudTimer;
+        private float networkTimer;
+        private readonly NeuralSnapshot networkSnapshot = new NeuralSnapshot();
 
         public WorldSimulation Simulation { get; private set; }
         public FixedStepClock Clock { get; private set; }
@@ -53,6 +59,12 @@ namespace Eden.Presentation
         public string RunDirectory { get; private set; }
         public WorldView View => worldView;
         public LabHud Hud => hud;
+
+        /// <summary>Last captured network state of the selected neural creature (diagram data).</summary>
+        public NeuralSnapshot Network => networkSnapshot;
+
+        public bool TryGetHeldAction(CreatureId creature, out CreatureAction action) =>
+            controller.TryGetLastAction(creature, out action);
 
         public void StartRun()
         {
@@ -72,6 +84,8 @@ namespace Eden.Presentation
             metrics = new MetricsRecorder(config, config.TicksPerSecond);
             Selected = null;
             selectedDeath = null;
+            networkSnapshot.Clear();
+            hud?.ShowNetwork(null);
 
             if (writeMetrics)
                 OpenMetricsLog(config);
@@ -103,6 +117,9 @@ namespace Eden.Presentation
         {
             Selected = creature;
             selectedDeath = null;
+            controller.Watch(creature);
+            networkSnapshot.Clear();
+            RefreshNetwork();
             RefreshHud();
         }
 
@@ -110,7 +127,36 @@ namespace Eden.Presentation
         {
             Selected = null;
             selectedDeath = null;
+            controller.Watch(null);
+            networkSnapshot.Clear();
+            hud?.ShowNetwork(null);
             RefreshHud();
+        }
+
+        /// <summary>
+        /// Captures the selected creature's network for its last decision (or its current sensors before the first
+        /// decision) and shows the diagram; hides it for reference brains, dead creatures or no selection.
+        /// </summary>
+        public void RefreshNetwork()
+        {
+            networkTimer = 0f;
+            if (hud == null)
+                return;
+            if (!Selected.HasValue || !controller.TryGetBrain(Selected.Value, out var selectedBrain) ||
+                !(selectedBrain is MlpBrain network))
+            {
+                hud.ShowNetwork(null);
+                return;
+            }
+
+            if (!controller.TryGetWatchedDecision(out var observation) && !TryObserve(Selected.Value, out observation))
+            {
+                hud.ShowNetwork(null);
+                return;
+            }
+
+            networkSnapshot.Capture(Selected.Value, network, observation);
+            hud.ShowNetwork(networkSnapshot);
         }
 
         /// <summary>Selects the living creature with the next higher (or lower) id, wrapping around.</summary>
@@ -143,7 +189,13 @@ namespace Eden.Presentation
             metricsLog = null;
         }
 
-        private void Awake() => StartRun();
+        private void Awake()
+        {
+            var selectAtStart = ApplyCommandLine(Environment.GetCommandLineArgs());
+            StartRun();
+            if (selectAtStart > 0)
+                Select(new CreatureId(selectAtStart));
+        }
 
         private void OnDestroy() => CloseMetricsLog();
 
@@ -155,6 +207,13 @@ namespace Eden.Presentation
                 StepOnce();
 
             worldView.Render(Simulation.World, Selected);
+            if (Selected.HasValue)
+            {
+                networkTimer += Time.unscaledDeltaTime;
+                if (networkTimer >= NetworkRefreshSeconds)
+                    RefreshNetwork();
+            }
+
             hudTimer += Time.unscaledDeltaTime;
             if (hudTimer >= HudRefreshSeconds)
                 RefreshHud();
@@ -238,6 +297,45 @@ namespace Eden.Presentation
             }
 
             return LabText.DeadCreature(id, selectedDeath);
+        }
+
+        private bool TryObserve(CreatureId id, out Observation observation)
+        {
+            foreach (var creature in Simulation.World.Creatures)
+            {
+                if (creature.Id != id)
+                    continue;
+                observation = Sensors.Observe(Simulation.World, creature);
+                return true;
+            }
+
+            observation = default;
+            return false;
+        }
+
+        // Returns the creature id to select at start, or 0.
+        private int ApplyCommandLine(string[] arguments)
+        {
+            var select = 0;
+            for (var i = 0; i + 1 < arguments.Length; i++)
+            {
+                var value = arguments[i + 1];
+                switch (arguments[i])
+                {
+                    case "-eden-brain" when Enum.TryParse(value, true, out LabBrainKind kind) &&
+                                            Enum.IsDefined(typeof(LabBrainKind), kind):
+                        brain = kind;
+                        break;
+                    case "-eden-seed" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var parsedSeed):
+                        seed = parsedSeed;
+                        break;
+                    case "-eden-select" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var id):
+                        select = id;
+                        break;
+                }
+            }
+
+            return select;
         }
 
         private BrainController CreateController(SimulationConfig config)
