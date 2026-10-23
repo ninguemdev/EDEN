@@ -15,6 +15,9 @@ namespace Eden.Domain
         public float ArenaHeight = 50f;
         public int TicksPerSecond = 20;
 
+        /// <summary>Brains decide every this many ticks and the action is held in between (2 = 10 Hz at 20 Hz).</summary>
+        public int DecisionIntervalTicks = 2;
+
         public int InitialPopulation = 64;
         public int InitialFood = 128;
         public float FoodEnergy = 10f;

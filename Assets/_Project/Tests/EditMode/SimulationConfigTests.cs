@@ -17,6 +17,7 @@ namespace Eden.Tests.EditMode
             Assert.That(config.ArenaHeight, Is.EqualTo(50f));
             Assert.That(config.TicksPerSecond, Is.EqualTo(20));
             Assert.That(config.TickDuration, Is.EqualTo(0.05f));
+            Assert.That(config.DecisionIntervalTicks, Is.EqualTo(2));
             Assert.That(config.InitialPopulation, Is.EqualTo(64));
             Assert.That(config.InitialFood, Is.EqualTo(128));
             Assert.That(config.MaxAgeTicks, Is.EqualTo(3600));
@@ -66,6 +67,7 @@ namespace Eden.Tests.EditMode
             yield return Case("ArenaWidth", "NaN", s => s.ArenaWidth = float.NaN);
             yield return Case("ArenaHeight", "Infinity", s => s.ArenaHeight = float.PositiveInfinity);
             yield return Case("TicksPerSecond", "Zero", s => s.TicksPerSecond = 0);
+            yield return Case("DecisionIntervalTicks", "Zero", s => s.DecisionIntervalTicks = 0);
             yield return Case("InitialPopulation", "Negative", s => s.InitialPopulation = -1);
             yield return Case("MaxEnergy", "Zero", s => s.MaxEnergy = 0f);
             yield return Case("InitialEnergy", "AboveMax", s => s.InitialEnergy = 150f);

@@ -9,8 +9,9 @@ namespace Eden.Domain
     /// </summary>
     public sealed class SimulationConfig
     {
-        public const int CurrentSchemaVersion = 2;
+        public const int CurrentSchemaVersion = 3;
         public const int MaxTicksPerSecond = 240;
+        public const int MaxDecisionIntervalTicks = 1000;
         public const int MaxPopulation = 4096;
         public const int MaxFood = 65536;
         public const float MaxArenaSize = 10000f;
@@ -26,6 +27,7 @@ namespace Eden.Domain
             RequireRange(errors, nameof(s.ArenaWidth), s.ArenaWidth, 1f, MaxArenaSize);
             RequireRange(errors, nameof(s.ArenaHeight), s.ArenaHeight, 1f, MaxArenaSize);
             RequireRange(errors, nameof(s.TicksPerSecond), s.TicksPerSecond, 1, MaxTicksPerSecond);
+            RequireRange(errors, nameof(s.DecisionIntervalTicks), s.DecisionIntervalTicks, 1, MaxDecisionIntervalTicks);
             RequireRange(errors, nameof(s.InitialPopulation), s.InitialPopulation, 0, MaxPopulation);
             RequireRange(errors, nameof(s.InitialFood), s.InitialFood, 0, MaxFood);
             RequirePositive(errors, nameof(s.FoodEnergy), s.FoodEnergy);
@@ -51,6 +53,7 @@ namespace Eden.Domain
             ArenaWidth = s.ArenaWidth;
             ArenaHeight = s.ArenaHeight;
             TicksPerSecond = s.TicksPerSecond;
+            DecisionIntervalTicks = s.DecisionIntervalTicks;
             InitialPopulation = s.InitialPopulation;
             InitialFood = s.InitialFood;
             FoodEnergy = s.FoodEnergy;
@@ -80,6 +83,10 @@ namespace Eden.Domain
         public float ArenaWidth { get; }
         public float ArenaHeight { get; }
         public int TicksPerSecond { get; }
+
+        /// <summary>Ticks between brain decisions; actions are held in between.</summary>
+        public int DecisionIntervalTicks { get; }
+
         public int InitialPopulation { get; }
         public int InitialFood { get; }
         public float FoodEnergy { get; }
