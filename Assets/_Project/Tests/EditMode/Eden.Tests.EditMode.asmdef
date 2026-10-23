@@ -4,6 +4,8 @@
   "references": [
     "Eden.Domain",
     "Eden.Simulation",
+    "Eden.Brains",
+    "Eden.Application",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],
