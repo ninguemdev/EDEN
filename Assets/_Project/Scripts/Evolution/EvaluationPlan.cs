@@ -17,6 +17,15 @@ namespace Eden.Evolution
         public int TrainingSeedsPerGeneration = 3;
 
         /// <summary>
+        /// Seed of the validation scenarios, separate from <see cref="ExperimentSeed"/> so that independent runs of a
+        /// battery can be compared on the same held-out scenarios.
+        /// </summary>
+        public ulong ValidationSeed = 1;
+
+        /// <summary>Held-out seeds that never feed selection (proposed 5); the same ones in every generation.</summary>
+        public int ValidationSeedCount = 5;
+
+        /// <summary>
         /// World of an isolated episode. Population is always forced to one creature; food is proposed at 32 so that
         /// foraging alone in the 50 × 50 arena is not trivial. Values are starting points to be measured.
         /// </summary>
@@ -36,6 +45,15 @@ namespace Eden.Evolution
 
         /// <summary>Standard deviation of the Gaussian noise added to a mutated weight (proposed 0.10).</summary>
         public float MutationSigma = 0.10f;
+
+        /// <summary>Deep copy with another experiment seed (e.g. one run of a battery); this instance is not changed.</summary>
+        public EvolutionSettings WithExperimentSeed(ulong experimentSeed)
+        {
+            var copy = (EvolutionSettings)MemberwiseClone();
+            copy.ExperimentSeed = experimentSeed;
+            copy.World = World?.Clone();
+            return copy;
+        }
     }
 
     /// <summary>Kind of evaluation a result belongs to. Persisted in reports: never renumber.</summary>
@@ -56,6 +74,8 @@ namespace Eden.Evolution
     /// world built from the same seed, so all genomes face identical starting conditions and never compete.
     /// Training seed scheme (version 1): SplitMix64 output (index + 1) of seed (SplitMix64 output (generation + 1)
     /// of seed (SplitMix64 output <see cref="TrainingTag"/> of the experiment seed)).
+    /// Validation seeds: SplitMix64 output (index + 1) of seed (SplitMix64 output <see cref="ValidationTag"/> of the
+    /// validation seed). They are fixed for the whole experiment and are never passed to selection.
     /// </summary>
     public sealed class EvaluationPlan
     {
@@ -63,9 +83,11 @@ namespace Eden.Evolution
         public const int MaxTrainingSeeds = 64;
         public const float MaxEpisodeSeconds = 100000f;
         private const ulong TrainingTag = 0x74726169UL; // "trai"
+        private const ulong ValidationTag = 0x76616C69UL; // "vali"
 
         private readonly SimulationSettings world;
         private readonly ulong trainingRoot;
+        private readonly ulong[] validationSeeds;
 
         public EvaluationPlan(EvolutionSettings settings)
         {
@@ -80,6 +102,9 @@ namespace Eden.Evolution
             if (settings.TrainingSeedsPerGeneration < 1 || settings.TrainingSeedsPerGeneration > MaxTrainingSeeds)
                 errors.Add($"{nameof(settings.TrainingSeedsPerGeneration)} must be in [1, {MaxTrainingSeeds}] " +
                            $"(was {settings.TrainingSeedsPerGeneration})");
+            if (settings.ValidationSeedCount < 1 || settings.ValidationSeedCount > MaxTrainingSeeds)
+                errors.Add($"{nameof(settings.ValidationSeedCount)} must be in [1, {MaxTrainingSeeds}] " +
+                           $"(was {settings.ValidationSeedCount})");
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid evolution settings: " + string.Join("; ", errors));
 
@@ -92,11 +117,18 @@ namespace Eden.Evolution
             TrainingSeedsPerGeneration = settings.TrainingSeedsPerGeneration;
             EpisodeTicks = Math.Max(1L, (long)Math.Round((double)EpisodeSeconds * validated.TicksPerSecond));
             trainingRoot = SplitMix64.Output(ExperimentSeed, TrainingTag);
+            ValidationSeed = settings.ValidationSeed;
+            var validationRoot = SplitMix64.Output(ValidationSeed, ValidationTag);
+            validationSeeds = new ulong[settings.ValidationSeedCount];
+            for (var i = 0; i < validationSeeds.Length; i++)
+                validationSeeds[i] = SplitMix64.Output(validationRoot, (ulong)i + 1);
         }
 
         public ulong ExperimentSeed { get; }
         public float EpisodeSeconds { get; }
         public int TrainingSeedsPerGeneration { get; }
+        public ulong ValidationSeed { get; }
+        public int ValidationSeedCount => validationSeeds.Length;
 
         /// <summary>Configured episode length in ticks; an episode always counts as this long, even after a death.</summary>
         public long EpisodeTicks { get; }
@@ -118,6 +150,9 @@ namespace Eden.Evolution
                 seeds[i] = TrainingSeed(generation, i);
             return seeds;
         }
+
+        /// <summary>Held-out seeds, identical for every generation of the experiment (a fresh copy).</summary>
+        public ulong[] ValidationSeeds() => (ulong[])validationSeeds.Clone();
 
         /// <summary>World configuration of one isolated episode (single creature) for a seed.</summary>
         public SimulationConfig EpisodeConfig(ulong episodeSeed)

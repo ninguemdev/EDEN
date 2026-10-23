@@ -10,11 +10,14 @@ using UnityEngine;
 namespace Eden.Editor
 {
     /// <summary>
-    /// Runs a generational experiment in isolated episodes without a scene and exports it with
-    /// <see cref="EvolutionCsvLog"/> to persistentDataPath/EvolutionRuns/&lt;UTC&gt;-seed&lt;n&gt;. From the command line:
+    /// Runs generational experiments in isolated episodes without a scene and exports them to
+    /// persistentDataPath/EvolutionRuns/&lt;UTC&gt;-… (or -eden-output DIR). From the command line:
     /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.RunFromCommandLine
     ///   [-eden-seed N] [-eden-generations N] [-eden-food N] [-eden-output DIR] -logFile -
-    /// Settings not given keep the proposed defaults of <see cref="EvolutionSettings"/>.
+    /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.RunBatteryFromCommandLine
+    ///   [-eden-seed N] [-eden-runs N] [-eden-generations N] [-eden-validation-interval N] [-eden-food N]
+    ///   [-eden-output DIR] -logFile -
+    /// Settings not given keep the proposed defaults of <see cref="EvolutionSettings"/> and <see cref="BatterySettings"/>.
     /// </summary>
     public static class EvolutionBatch
     {
@@ -28,40 +31,24 @@ namespace Eden.Editor
 
         public static void RunFromCommandLine()
         {
-            try
+            RunAndExit(() =>
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
-                var generations = DefaultGenerations;
-                string output = null;
-                var args = Environment.GetCommandLineArgs();
-                for (var i = 0; i + 1 < args.Length; i++)
-                {
-                    var value = args[i + 1];
-                    switch (args[i])
-                    {
-                        case "-eden-seed":
-                            settings.ExperimentSeed = ulong.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
-                            break;
-                        case "-eden-generations":
-                            generations = int.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
-                            break;
-                        case "-eden-food":
-                            settings.World.InitialFood = int.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
-                            break;
-                        case "-eden-output":
-                            output = value;
-                            break;
-                    }
-                }
+                var battery = new BatterySettings { Generations = DefaultGenerations };
+                var output = ReadArguments(settings, battery);
+                Run(settings, battery.Generations, output);
+            });
+        }
 
-                Run(settings, generations, output);
-                EditorApplication.Exit(0);
-            }
-            catch (Exception exception)
+        public static void RunBatteryFromCommandLine()
+        {
+            RunAndExit(() =>
             {
-                Debug.LogException(exception);
-                EditorApplication.Exit(1);
-            }
+                var settings = new EvolutionSettings { ExperimentSeed = 1 };
+                var battery = new BatterySettings();
+                var output = ReadArguments(settings, battery);
+                RunBattery(settings, battery, output);
+            });
         }
 
         private static void Run(EvolutionSettings settings, int generations, string output)
@@ -70,8 +57,7 @@ namespace Eden.Editor
                 throw new ArgumentOutOfRangeException(nameof(generations), "At least one generation is required.");
 
             var evolution = new GenerationalEvolution(settings);
-            var directory = output ?? Path.Combine(UnityEngine.Application.persistentDataPath, "EvolutionRuns",
-                $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-seed{settings.ExperimentSeed}");
+            var directory = output ?? DefaultDirectory($"seed{settings.ExperimentSeed}");
             var info = EvolutionCsvLog.Describe(evolution.Plan, evolution.Rules, UnityEngine.Application.version,
                 DateTime.UtcNow);
             var started = DateTime.UtcNow;
@@ -82,12 +68,7 @@ namespace Eden.Editor
                 {
                     var report = evolution.Advance();
                     log.Append(report);
-                    var summary = report.Summary;
-                    Debug.Log(string.Format(CultureInfo.InvariantCulture,
-                        "EDEN evolution gen={0} best={1:0.###} median={2:0.###} lower_quartile={3:0.###} " +
-                        "survival={4:0.###} weight_std={5:0.####} distinct_parents={6}",
-                        summary.Generation, summary.Best, summary.Median, summary.LowerQuartile,
-                        summary.MeanSurvivalRate, summary.WeightStdDev, summary.DistinctParents));
+                    LogSummary(0, report.Summary);
                 }
             }
 
@@ -95,5 +76,100 @@ namespace Eden.Editor
                 "EDEN evolution finished: generations={0}, seconds={1:0.0}, output={2}",
                 generations, (DateTime.UtcNow - started).TotalSeconds, directory));
         }
+
+        private static void RunBattery(EvolutionSettings settings, BatterySettings battery, string output)
+        {
+            var runner = new EvolutionBattery(settings, battery);
+            var directory = output ?? DefaultDirectory($"battery-seed{settings.ExperimentSeed}x{battery.Runs}");
+            var logs = new EvolutionCsvLog[battery.Runs];
+            try
+            {
+                var result = runner.Run((run, report) =>
+                {
+                    if (logs[run] == null)
+                    {
+                        var runSettings = settings.WithExperimentSeed(runner.RunSeed(run));
+                        logs[run] = new EvolutionCsvLog(
+                            Path.Combine(directory, $"run{run}-seed{runner.RunSeed(run)}"),
+                            EvolutionCsvLog.Describe(new EvaluationPlan(runSettings), new ReproductionRules(runSettings),
+                                UnityEngine.Application.version, DateTime.UtcNow));
+                    }
+
+                    logs[run].Append(report);
+                    LogSummary(run, report.Summary);
+                });
+
+                BatteryReport.Write(directory, result);
+                foreach (var line in BatteryReport.Describe(result))
+                    Debug.Log("EDEN battery | " + line);
+                Debug.Log("EDEN battery finished: output=" + directory);
+            }
+            finally
+            {
+                foreach (var log in logs)
+                    log?.Dispose();
+            }
+        }
+
+        private static string ReadArguments(EvolutionSettings settings, BatterySettings battery)
+        {
+            string output = null;
+            var args = Environment.GetCommandLineArgs();
+            for (var i = 0; i + 1 < args.Length; i++)
+            {
+                var value = args[i + 1];
+                switch (args[i])
+                {
+                    case "-eden-seed":
+                        settings.ExperimentSeed = ulong.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
+                        break;
+                    case "-eden-generations":
+                        battery.Generations = Integer(value);
+                        break;
+                    case "-eden-runs":
+                        battery.Runs = Integer(value);
+                        break;
+                    case "-eden-validation-interval":
+                        battery.ValidationInterval = Integer(value);
+                        break;
+                    case "-eden-food":
+                        settings.World.InitialFood = Integer(value);
+                        break;
+                    case "-eden-output":
+                        output = value;
+                        break;
+                }
+            }
+
+            return output;
+        }
+
+        private static void RunAndExit(Action run)
+        {
+            try
+            {
+                run();
+                EditorApplication.Exit(0);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogException(exception);
+                EditorApplication.Exit(1);
+            }
+        }
+
+        private static void LogSummary(int run, GenerationSummary summary)
+        {
+            Debug.Log(string.Format(CultureInfo.InvariantCulture,
+                "EDEN evolution run={0} gen={1} mode={2} best={3:0.###} median={4:0.###} lower_quartile={5:0.###} " +
+                "survival={6:0.###} weight_std={7:0.####} distinct_parents={8}",
+                run, summary.Generation, EvaluationCsv.ModeName(summary.Mode), summary.Best, summary.Median,
+                summary.LowerQuartile, summary.MeanSurvivalRate, summary.WeightStdDev, summary.DistinctParents));
+        }
+
+        private static int Integer(string value) => int.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
+
+        private static string DefaultDirectory(string name) =>
+            Path.Combine(UnityEngine.Application.persistentDataPath, "EvolutionRuns", $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{name}");
     }
 }

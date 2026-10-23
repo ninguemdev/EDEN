@@ -63,10 +63,26 @@ namespace Eden.Application
             return report;
         }
 
-        private static Genome[] GenomesOf(Individual[] members)
+        /// <summary>
+        /// Evaluates the individuals of a training report on the validation seeds. Read-only: the result never reaches
+        /// selection, ids or the next generation, which depend on training results alone.
+        /// </summary>
+        public GenerationReport Validate(GenerationReport training)
         {
-            var genomes = new Genome[members.Length];
-            for (var i = 0; i < members.Length; i++)
+            if (training == null)
+                throw new ArgumentNullException(nameof(training));
+            if (training.Evaluation.Mode != EvaluationMode.Training)
+                throw new ArgumentException("Validation starts from a training report.", nameof(training));
+
+            return new GenerationReport(
+                evaluator.EvaluateValidation(GenomesOf(training.Individuals), training.Evaluation.Generation),
+                training.Individuals);
+        }
+
+        private static Genome[] GenomesOf(IReadOnlyList<Individual> members)
+        {
+            var genomes = new Genome[members.Count];
+            for (var i = 0; i < members.Count; i++)
                 genomes[i] = members[i].Genome;
             return genomes;
         }

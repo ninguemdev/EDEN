@@ -23,19 +23,12 @@ namespace Eden.Application
         }
 
         /// <summary>Training evaluation of a generation of genomes on its training seeds.</summary>
-        public GenerationEvaluation EvaluateTraining(IReadOnlyList<Genome> genomes, int generation)
-        {
-            if (genomes == null)
-                throw new ArgumentNullException(nameof(genomes));
-            var candidates = new Func<IBrain>[genomes.Count];
-            for (var i = 0; i < genomes.Count; i++)
-            {
-                var genome = genomes[i] ?? throw new ArgumentException($"Genome {i} is null.", nameof(genomes));
-                candidates[i] = () => new MlpBrain(genome);
-            }
+        public GenerationEvaluation EvaluateTraining(IReadOnlyList<Genome> genomes, int generation) =>
+            Evaluate(BrainsOf(genomes), plan.TrainingSeeds(generation), generation, EvaluationMode.Training);
 
-            return Evaluate(candidates, plan.TrainingSeeds(generation), generation, EvaluationMode.Training);
-        }
+        /// <summary>Evaluation of a generation of genomes on the held-out validation seeds.</summary>
+        public GenerationEvaluation EvaluateValidation(IReadOnlyList<Genome> genomes, int generation) =>
+            Evaluate(BrainsOf(genomes), plan.ValidationSeeds(), generation, EvaluationMode.Validation);
 
         /// <summary>Evaluates any brains (genomes or reference brains) on explicit seeds.</summary>
         public GenerationEvaluation Evaluate(IReadOnlyList<Func<IBrain>> candidates, IReadOnlyList<ulong> seeds,
@@ -77,6 +70,20 @@ namespace Eden.Application
 
             return new EpisodeResult(mode, generation, candidate, seedIndex, episodeSeed, plan.EpisodeTicks,
                 plan.EpisodeSeconds, creature.FoodEnergyEaten, creature.AgeTicks, creature.IsAlive, creature.Energy);
+        }
+
+        private static Func<IBrain>[] BrainsOf(IReadOnlyList<Genome> genomes)
+        {
+            if (genomes == null)
+                throw new ArgumentNullException(nameof(genomes));
+            var candidates = new Func<IBrain>[genomes.Count];
+            for (var i = 0; i < genomes.Count; i++)
+            {
+                var genome = genomes[i] ?? throw new ArgumentException($"Genome {i} is null.", nameof(genomes));
+                candidates[i] = () => new MlpBrain(genome);
+            }
+
+            return candidates;
         }
     }
 }

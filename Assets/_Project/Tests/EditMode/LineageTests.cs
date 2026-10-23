@@ -215,10 +215,10 @@ namespace Eden.Tests.EditMode
 
                 var individuals = File.ReadAllLines(Path.Combine(directory, "individuals.csv"));
                 Assert.That(individuals, Has.Length.EqualTo(1 + 16));
-                Assert.That(individuals[1], Does.StartWith("0,0,1,,0,0,0,1,"), "founder: no parents, not elite");
+                Assert.That(individuals[1], Does.StartWith("0,training,0,1,,0,0,0,1,"), "founder: no parents, not elite");
                 var secondGeneration = individuals.Skip(9).Select(l => l.Split(',')).ToArray();
-                Assert.That(secondGeneration.Count(f => f[5] == "1"), Is.EqualTo(2), "two elites carried over");
-                Assert.That(secondGeneration.Where(f => f[5] == "0").Select(f => f[3]), Is.All.Not.Empty, "children name a parent");
+                Assert.That(secondGeneration.Count(f => f[6] == "1"), Is.EqualTo(2), "two elites carried over");
+                Assert.That(secondGeneration.Where(f => f[6] == "0").Select(f => f[4]), Is.All.Not.Empty, "children name a parent");
 
                 var episodes = File.ReadAllLines(Path.Combine(directory, "episodes.csv"));
                 Assert.That(episodes, Has.Length.EqualTo(1 + 2 * 8 * 2));
