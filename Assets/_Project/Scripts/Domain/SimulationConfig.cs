@@ -4,52 +4,76 @@ using System.Collections.Generic;
 namespace Eden.Domain
 {
     /// <summary>
-    /// Immutable run configuration, validated on construction. Any change means a different run.
-    /// Energy is in abstract energy units; distances are arena units with the origin at the arena's lower-left corner.
+    /// Immutable, validated run configuration. Any change means a different run.
+    /// Distances are arena units with the origin at the arena's lower-left corner; angles are radians.
     /// </summary>
     public sealed class SimulationConfig
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
         public const int MaxTicksPerSecond = 240;
         public const int MaxPopulation = 4096;
         public const int MaxFood = 65536;
         public const float MaxArenaSize = 10000f;
+        public const float MaxDurationSeconds = 1000000f;
 
-        public SimulationConfig(ulong seed, float arenaWidth, float arenaHeight, int ticksPerSecond,
-            int initialPopulation, int initialFood, float maxEnergy, float initialEnergy, float foodEnergy)
+        public SimulationConfig(SimulationSettings settings)
         {
+            if (settings == null)
+                throw new ArgumentNullException(nameof(settings));
+
+            var s = settings;
             var errors = new List<string>();
-            RequireRange(errors, nameof(arenaWidth), arenaWidth, 1f, MaxArenaSize);
-            RequireRange(errors, nameof(arenaHeight), arenaHeight, 1f, MaxArenaSize);
-            if (ticksPerSecond < 1 || ticksPerSecond > MaxTicksPerSecond)
-                errors.Add($"{nameof(ticksPerSecond)} must be in [1, {MaxTicksPerSecond}] (was {ticksPerSecond})");
-            if (initialPopulation < 0 || initialPopulation > MaxPopulation)
-                errors.Add($"{nameof(initialPopulation)} must be in [0, {MaxPopulation}] (was {initialPopulation})");
-            if (initialFood < 0 || initialFood > MaxFood)
-                errors.Add($"{nameof(initialFood)} must be in [0, {MaxFood}] (was {initialFood})");
-            RequirePositive(errors, nameof(maxEnergy), maxEnergy);
-            RequirePositive(errors, nameof(foodEnergy), foodEnergy);
-            RequirePositive(errors, nameof(initialEnergy), initialEnergy);
-            if (initialEnergy > maxEnergy)
-                errors.Add($"{nameof(initialEnergy)} ({initialEnergy}) must not exceed {nameof(maxEnergy)} ({maxEnergy})");
+            RequireRange(errors, nameof(s.ArenaWidth), s.ArenaWidth, 1f, MaxArenaSize);
+            RequireRange(errors, nameof(s.ArenaHeight), s.ArenaHeight, 1f, MaxArenaSize);
+            RequireRange(errors, nameof(s.TicksPerSecond), s.TicksPerSecond, 1, MaxTicksPerSecond);
+            RequireRange(errors, nameof(s.InitialPopulation), s.InitialPopulation, 0, MaxPopulation);
+            RequireRange(errors, nameof(s.InitialFood), s.InitialFood, 0, MaxFood);
+            RequirePositive(errors, nameof(s.FoodEnergy), s.FoodEnergy);
+            RequirePositive(errors, nameof(s.FoodRespawnSeconds), s.FoodRespawnSeconds, MaxDurationSeconds);
+            RequirePositive(errors, nameof(s.MaxEnergy), s.MaxEnergy);
+            RequirePositive(errors, nameof(s.InitialEnergy), s.InitialEnergy);
+            if (s.InitialEnergy > s.MaxEnergy)
+                errors.Add($"{nameof(s.InitialEnergy)} ({s.InitialEnergy}) must not exceed {nameof(s.MaxEnergy)} ({s.MaxEnergy})");
+            RequirePositive(errors, nameof(s.MaxAgeSeconds), s.MaxAgeSeconds, MaxDurationSeconds);
+            RequireNonNegative(errors, nameof(s.MetabolismPerSecond), s.MetabolismPerSecond);
+            RequireNonNegative(errors, nameof(s.MovementCostPerSecond), s.MovementCostPerSecond);
+            RequireNonNegative(errors, nameof(s.SensorCostPerSecond), s.SensorCostPerSecond);
+            RequirePositive(errors, nameof(s.SensorRange), s.SensorRange, MaxArenaSize);
+            RequirePositive(errors, nameof(s.EatRadius), s.EatRadius, MaxArenaSize);
+            RequirePositive(errors, nameof(s.MaxSpeed), s.MaxSpeed);
+            RequirePositive(errors, nameof(s.MaxAcceleration), s.MaxAcceleration);
+            RequirePositive(errors, nameof(s.MaxTurnRate), s.MaxTurnRate);
+            RequireNonNegative(errors, nameof(s.Damping), s.Damping);
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid simulation config: " + string.Join("; ", errors));
 
-            Seed = seed;
-            ArenaWidth = arenaWidth;
-            ArenaHeight = arenaHeight;
-            TicksPerSecond = ticksPerSecond;
-            InitialPopulation = initialPopulation;
-            InitialFood = initialFood;
-            MaxEnergy = maxEnergy;
-            InitialEnergy = initialEnergy;
-            FoodEnergy = foodEnergy;
+            Seed = s.Seed;
+            ArenaWidth = s.ArenaWidth;
+            ArenaHeight = s.ArenaHeight;
+            TicksPerSecond = s.TicksPerSecond;
+            InitialPopulation = s.InitialPopulation;
+            InitialFood = s.InitialFood;
+            FoodEnergy = s.FoodEnergy;
+            FoodRespawnSeconds = s.FoodRespawnSeconds;
+            MaxEnergy = s.MaxEnergy;
+            InitialEnergy = s.InitialEnergy;
+            MaxAgeSeconds = s.MaxAgeSeconds;
+            MetabolismPerSecond = s.MetabolismPerSecond;
+            MovementCostPerSecond = s.MovementCostPerSecond;
+            SensorCostPerSecond = s.SensorCostPerSecond;
+            SensorRange = s.SensorRange;
+            EatRadius = s.EatRadius;
+            MaxSpeed = s.MaxSpeed;
+            MaxAcceleration = s.MaxAcceleration;
+            MaxTurnRate = s.MaxTurnRate;
+            Damping = s.Damping;
+
+            TickDuration = 1f / TicksPerSecond;
+            MaxAgeTicks = Math.Max(1L, (long)Math.Round((double)MaxAgeSeconds * TicksPerSecond));
+            FoodRespawnTicks = Math.Max(1L, (long)Math.Round((double)FoodRespawnSeconds * TicksPerSecond));
         }
 
-        /// <summary>Starting values proposed in the planning docs, meant to be measured and tuned.</summary>
-        public static SimulationConfig CreateDefault(ulong seed) => new SimulationConfig(
-            seed, arenaWidth: 50f, arenaHeight: 50f, ticksPerSecond: 20,
-            initialPopulation: 64, initialFood: 128, maxEnergy: 100f, initialEnergy: 50f, foodEnergy: 10f);
+        public static SimulationConfig CreateDefault(ulong seed) => new SimulationConfig(new SimulationSettings { Seed = seed });
 
         public int SchemaVersion => CurrentSchemaVersion;
         public ulong Seed { get; }
@@ -58,12 +82,36 @@ namespace Eden.Domain
         public int TicksPerSecond { get; }
         public int InitialPopulation { get; }
         public int InitialFood { get; }
+        public float FoodEnergy { get; }
+        public float FoodRespawnSeconds { get; }
         public float MaxEnergy { get; }
         public float InitialEnergy { get; }
-        public float FoodEnergy { get; }
+        public float MaxAgeSeconds { get; }
+        public float MetabolismPerSecond { get; }
+
+        /// <summary>Extra energy per second at full effort; effort is thrust² + strafe².</summary>
+        public float MovementCostPerSecond { get; }
+
+        public float SensorCostPerSecond { get; }
+        public float SensorRange { get; }
+
+        /// <summary>Maximum creature-to-food distance at which food is eaten.</summary>
+        public float EatRadius { get; }
+
+        public float MaxSpeed { get; }
+        public float MaxAcceleration { get; }
+
+        /// <summary>Radians per second at full turn.</summary>
+        public float MaxTurnRate { get; }
+
+        /// <summary>Fraction of velocity lost per second.</summary>
+        public float Damping { get; }
 
         /// <summary>Fixed simulated time per tick, in seconds. Never scaled to speed a run up.</summary>
-        public float TickDuration => 1f / TicksPerSecond;
+        public float TickDuration { get; }
+
+        public long MaxAgeTicks { get; }
+        public long FoodRespawnTicks { get; }
 
         private static void RequireRange(List<string> errors, string name, float value, float min, float max)
         {
@@ -71,10 +119,22 @@ namespace Eden.Domain
                 errors.Add($"{name} must be a finite value in [{min}, {max}] (was {value})");
         }
 
-        private static void RequirePositive(List<string> errors, string name, float value)
+        private static void RequireRange(List<string> errors, string name, int value, int min, int max)
         {
-            if (float.IsNaN(value) || float.IsInfinity(value) || value <= 0f)
-                errors.Add($"{name} must be finite and positive (was {value})");
+            if (value < min || value > max)
+                errors.Add($"{name} must be in [{min}, {max}] (was {value})");
+        }
+
+        private static void RequirePositive(List<string> errors, string name, float value, float max = float.MaxValue)
+        {
+            if (float.IsNaN(value) || value <= 0f || value > max)
+                errors.Add($"{name} must be finite, positive and at most {max} (was {value})");
+        }
+
+        private static void RequireNonNegative(List<string> errors, string name, float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value) || value < 0f)
+                errors.Add($"{name} must be finite and not negative (was {value})");
         }
     }
 }

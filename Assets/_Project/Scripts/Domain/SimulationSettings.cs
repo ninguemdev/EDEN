@@ -1,0 +1,39 @@
+using System;
+
+namespace Eden.Domain
+{
+    /// <summary>
+    /// Editable run parameters (e.g. filled from an Inspector asset). Freeze them into a validated
+    /// <see cref="SimulationConfig"/> before a run starts. Defaults are the proposed starting values from the
+    /// planning docs and still have to be measured and tuned. Units: arena units, seconds, energy units.
+    /// </summary>
+    public sealed class SimulationSettings
+    {
+        public ulong Seed;
+
+        public float ArenaWidth = 50f;
+        public float ArenaHeight = 50f;
+        public int TicksPerSecond = 20;
+
+        public int InitialPopulation = 64;
+        public int InitialFood = 128;
+        public float FoodEnergy = 10f;
+        public float FoodRespawnSeconds = 5f;
+
+        public float MaxEnergy = 100f;
+        public float InitialEnergy = 50f;
+        public float MaxAgeSeconds = 180f;
+        public float MetabolismPerSecond = 1f;
+        public float MovementCostPerSecond = 2f;
+        public float SensorCostPerSecond = 0.25f;
+
+        public float SensorRange = 10f;
+        public float EatRadius = 0.75f;
+        public float MaxSpeed = 5f;
+        public float MaxAcceleration = 10f;
+        public float MaxTurnRate = MathF.PI;
+        public float Damping = 1f;
+
+        public SimulationSettings Clone() => (SimulationSettings)MemberwiseClone();
+    }
+}

@@ -87,7 +87,10 @@ namespace Eden.Tests.EditMode
         [Test]
         public void EmptyWorld_IsValidAndDeterministic()
         {
-            var config = new SimulationConfig(8, 10f, 10f, 20, 0, 0, 100f, 50f, 10f);
+            var config = new SimulationConfig(new SimulationSettings
+            {
+                Seed = 8, ArenaWidth = 10f, ArenaHeight = 10f, InitialPopulation = 0, InitialFood = 0
+            });
             var world = WorldFactory.CreateInitial(config);
             Assert.That(world.Creatures, Is.Empty);
             Assert.That(WorldFingerprint.Compute(world), Is.EqualTo(WorldFingerprint.Compute(WorldFactory.CreateInitial(config))));
