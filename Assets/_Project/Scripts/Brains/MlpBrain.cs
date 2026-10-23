@@ -48,9 +48,10 @@ namespace Eden.Brains
             Array.Copy(parameters, destination, parameters.Length);
         }
 
+        /// <summary>Inputs follow the <see cref="ObservationLimits"/> policy, so NaN or out-of-range values never reach the network.</summary>
         public CreatureAction Evaluate(in Observation observation, BrainState state)
         {
-            observation.CopyTo(input, 0);
+            ObservationLimits.Sanitize(observation, out _).CopyTo(input, 0);
             Forward(input, hidden, output);
             return ToAction(output);
         }
@@ -66,7 +67,7 @@ namespace Eden.Brains
             if (outputActivations == null || outputActivations.Length < NeuralLayout.Outputs)
                 throw new ArgumentException($"Needs at least {NeuralLayout.Outputs} values.", nameof(outputActivations));
 
-            observation.CopyTo(input, 0);
+            ObservationLimits.Sanitize(observation, out _).CopyTo(input, 0);
             Forward(input, hiddenActivations, outputActivations);
         }
 

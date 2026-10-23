@@ -20,6 +20,8 @@ namespace Eden.Presentation
             text.AppendLine(clock.IsPaused ? "  ·  PAUSADO" : string.Empty);
             if (clock.DroppedTicks > 0)
                 text.AppendLine($"Ticks descartados por sobrecarga: {clock.DroppedTicks}");
+            if (simulation.CorrectedInputValues > 0)
+                text.AppendLine($"Entradas de sensor corrigidas (fora do contrato): {simulation.CorrectedInputValues}");
             text.AppendLine($"População {world.Creatures.Count} de {config.InitialPopulation}  ·  Comida {world.Food.Count}");
             text.AppendLine($"Seed {config.Seed}  ·  Cérebro: {BrainLabel(brain)}");
             if (metrics.HasSample)

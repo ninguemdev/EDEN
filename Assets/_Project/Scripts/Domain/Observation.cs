@@ -60,6 +60,30 @@ namespace Eden.Domain
         public float WallBack { get; }
         public float WallLeft { get; }
 
+        /// <summary>Input by brain order (0-based), same order as <see cref="CopyTo"/>.</summary>
+        public float this[int index]
+        {
+            get
+            {
+                switch (index)
+                {
+                    case 0: return Energy;
+                    case 1: return Age;
+                    case 2: return VelocityForward;
+                    case 3: return VelocityLeft;
+                    case 4: return FoodSin;
+                    case 5: return FoodCos;
+                    case 6: return FoodProximity;
+                    case 7: return FoodVisible;
+                    case 8: return WallFront;
+                    case 9: return WallRight;
+                    case 10: return WallBack;
+                    case 11: return WallLeft;
+                    default: throw new ArgumentOutOfRangeException(nameof(index));
+                }
+            }
+        }
+
         public void CopyTo(float[] buffer, int offset)
         {
             if (buffer == null)

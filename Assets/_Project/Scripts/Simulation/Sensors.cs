@@ -3,7 +3,11 @@ using Eden.Domain;
 
 namespace Eden.Simulation
 {
-    /// <summary>Builds a creature's local <see cref="Observation"/> from the current world state.</summary>
+    /// <summary>
+    /// Builds a creature's local <see cref="Observation"/> from the current world state. Readings are clamped to
+    /// their ranges, but non-finite state would pass through; <see cref="WorldSimulation"/> therefore checks every
+    /// observation with <see cref="ObservationLimits.Sanitize"/> before a brain sees it.
+    /// </summary>
     public static class Sensors
     {
         public static Observation Observe(WorldState world, CreatureState creature)
