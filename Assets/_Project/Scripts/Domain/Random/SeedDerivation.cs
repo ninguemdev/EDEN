@@ -10,7 +10,10 @@ namespace Eden.Domain
         World = 1,
         Spawn = 2,
         Mutation = 3,
-        Presentation = 4
+        Presentation = 4,
+
+        /// <summary>Per-creature streams for stochastic brains; see <see cref="SeedDerivation.CreateCreatureStream"/>.</summary>
+        Brain = 5
     }
 
     /// <summary>
@@ -26,6 +29,18 @@ namespace Eden.Domain
         {
             var index = (ulong)stream;
             return new Pcg32(SplitMix64.Output(runSeed, index), index);
+        }
+
+        /// <summary>
+        /// Independent stream per creature: initState = SplitMix64 output number <c>creature id</c> for seed
+        /// (SplitMix64 output number <c>stream</c> for <c>runSeed</c>); sequence = <c>stream</c>. Births and deaths
+        /// of other creatures never shift a creature's draws.
+        /// </summary>
+        public static Pcg32 CreateCreatureStream(ulong runSeed, RandomStream stream, CreatureId creature)
+        {
+            var index = (ulong)stream;
+            var streamSeed = SplitMix64.Output(runSeed, index);
+            return new Pcg32(SplitMix64.Output(streamSeed, (ulong)creature.Value), index);
         }
     }
 

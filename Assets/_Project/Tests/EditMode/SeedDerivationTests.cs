@@ -45,6 +45,21 @@ namespace Eden.Tests.EditMode
             Assert.That(FirstDraws(124, RandomStream.World), Is.Not.EqualTo(FirstDraws(123, RandomStream.World)));
         }
 
+        [Test]
+        public void CreatureStreams_FollowDocumentedSchemeAndDifferPerCreature()
+        {
+            const ulong seed = 555;
+            var creature = new CreatureId(7);
+            var streamSeed = SplitMix64.Output(seed, (ulong)RandomStream.Brain);
+            var expected = new Pcg32(SplitMix64.Output(streamSeed, 7), (ulong)RandomStream.Brain);
+
+            Assert.That(SeedDerivation.CreateCreatureStream(seed, RandomStream.Brain, creature).State, Is.EqualTo(expected.State));
+            Assert.That(SeedDerivation.CreateCreatureStream(seed, RandomStream.Brain, new CreatureId(8)).State,
+                Is.Not.EqualTo(expected.State));
+            Assert.That(SeedDerivation.CreateCreatureStream(seed + 1, RandomStream.Brain, creature).State,
+                Is.Not.EqualTo(expected.State));
+        }
+
         private static uint[] FirstDraws(ulong seed, RandomStream stream)
         {
             var random = SeedDerivation.CreateStream(seed, stream);
