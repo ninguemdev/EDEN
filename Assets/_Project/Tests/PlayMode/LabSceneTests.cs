@@ -79,6 +79,26 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Lab_RunsNeuralBrainsWithOneGenomePerCreature()
+        {
+            var initialRun = runner.RunDirectory;
+            runner.UseBrain(LabBrainKind.Neural);
+            if (initialRun != null && Directory.Exists(initialRun))
+                Directory.Delete(initialRun, true);
+            yield return WaitUntil(() => runner.Simulation.World.Tick > 0);
+
+            Assert.That(runner.BrainKind, Is.EqualTo(LabBrainKind.Neural));
+            Assert.That(runner.BrainName, Is.EqualTo(Eden.Brains.MlpBrain.BrainName));
+            StringAssert.Contains("rede neural 12-16-3", runner.Hud.RunText);
+
+            runner.TogglePause();
+            runner.Select(runner.Simulation.World.Creatures[0].Id);
+            yield return null;
+            StringAssert.Contains("genoma próprio", runner.Hud.InspectorText);
+            StringAssert.Contains("Sensores", runner.Hud.InspectorText);
+        }
+
+        [UnityTest]
         public IEnumerator Lab_WritesInvariantMetricsCsvOutsideTheProject()
         {
             runner.ScaleSpeed(16f);

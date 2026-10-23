@@ -10,10 +10,14 @@ using UnityEngine.InputSystem;
 
 namespace Eden.Presentation
 {
-    public enum BaselineBrainKind
+    /// <summary>Brains the lab can run. Values are serialized in the scene: never renumber.</summary>
+    public enum LabBrainKind
     {
-        Heuristic,
-        Random
+        Heuristic = 0,
+        Random = 1,
+
+        /// <summary>MLP 12-16-3, one random genome per creature (no evolution yet).</summary>
+        Neural = 2
     }
 
     /// <summary>
@@ -28,7 +32,7 @@ namespace Eden.Presentation
 
         [SerializeField] private SimulationSettings settings = new SimulationSettings();
         [SerializeField, Min(0)] private int seed = 1;
-        [SerializeField] private BaselineBrainKind brain = BaselineBrainKind.Heuristic;
+        [SerializeField] private LabBrainKind brain = LabBrainKind.Heuristic;
         [SerializeField] private bool writeMetrics = true;
         [SerializeField] private WorldView worldView;
         [SerializeField] private LabHud hud;
@@ -41,7 +45,10 @@ namespace Eden.Presentation
 
         public WorldSimulation Simulation { get; private set; }
         public FixedStepClock Clock { get; private set; }
-        public IBrain Brain { get; private set; }
+        public LabBrainKind BrainKind => brain;
+
+        /// <summary>Name recorded with the run (brain of the run, or the per-creature brain type).</summary>
+        public string BrainName { get; private set; }
         public CreatureId? Selected { get; private set; }
         public string RunDirectory { get; private set; }
         public WorldView View => worldView;
@@ -55,8 +62,7 @@ namespace Eden.Presentation
             var config = new SimulationConfig(runSettings);
 
             Simulation = new WorldSimulation(WorldFactory.CreateInitial(config));
-            Brain = brain == BaselineBrainKind.Heuristic ? (IBrain)new HeuristicBrain() : new RandomBrain();
-            controller = BrainController.Shared(config, Brain);
+            controller = CreateController(config);
             var speed = Clock?.RequestedSpeed ?? 1f;
             var paused = Clock?.IsPaused ?? false;
             Clock = new FixedStepClock(config.TicksPerSecond);
@@ -71,6 +77,13 @@ namespace Eden.Presentation
                 OpenMetricsLog(config);
             worldView.Bind(Simulation.World);
             RefreshHud();
+        }
+
+        /// <summary>Switches the brain kind and restarts the run with the same seed.</summary>
+        public void UseBrain(LabBrainKind kind)
+        {
+            brain = kind;
+            StartRun();
         }
 
         public void TogglePause()
@@ -172,10 +185,9 @@ namespace Eden.Presentation
                 if (keyboard.escapeKey.wasPressedThisFrame) ClearSelection();
                 if (keyboard.rKey.wasPressedThisFrame) StartRun();
                 if (keyboard.bKey.wasPressedThisFrame)
-                {
-                    brain = brain == BaselineBrainKind.Heuristic ? BaselineBrainKind.Random : BaselineBrainKind.Heuristic;
-                    StartRun();
-                }
+                    UseBrain(brain == LabBrainKind.Heuristic ? LabBrainKind.Random
+                        : brain == LabBrainKind.Random ? LabBrainKind.Neural
+                        : LabBrainKind.Heuristic);
             }
 
             var mouse = Mouse.current;
@@ -209,7 +221,7 @@ namespace Eden.Presentation
             hudTimer = 0f;
             if (hud == null || Simulation == null)
                 return;
-            hud.ShowRun(LabText.Run(Simulation, Clock, Brain, metrics, RunDirectory));
+            hud.ShowRun(LabText.Run(Simulation, Clock, BrainName, metrics, RunDirectory));
             hud.ShowInspector(Selected.HasValue ? DescribeSelected(Selected.Value) : null);
         }
 
@@ -220,10 +232,28 @@ namespace Eden.Presentation
                 if (creature.Id != id)
                     continue;
                 controller.TryGetLastAction(id, out var action);
-                return LabText.Creature(creature, Sensors.Observe(Simulation.World, creature), action, Simulation.World.Config);
+                controller.TryGetBrain(id, out var creatureBrain);
+                return LabText.Creature(creature, Sensors.Observe(Simulation.World, creature), action,
+                    creatureBrain?.Name ?? BrainName, Simulation.World.Config);
             }
 
             return LabText.DeadCreature(id, selectedDeath);
+        }
+
+        private BrainController CreateController(SimulationConfig config)
+        {
+            switch (brain)
+            {
+                case LabBrainKind.Neural:
+                    BrainName = MlpBrain.BrainName;
+                    return new BrainController(config, id => new MlpBrain(InitialGenomes.RandomFor(config, id)));
+                case LabBrainKind.Random:
+                    BrainName = RandomBrain.BrainName;
+                    return BrainController.Shared(config, new RandomBrain());
+                default:
+                    BrainName = HeuristicBrain.BrainName;
+                    return BrainController.Shared(config, new HeuristicBrain());
+            }
         }
 
         private void OpenMetricsLog(SimulationConfig config)
@@ -231,14 +261,14 @@ namespace Eden.Presentation
             try
             {
                 var root = Path.Combine(UnityEngine.Application.persistentDataPath, "SimulationRuns");
-                var runId = $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-seed{config.Seed}-{Brain.Name}";
+                var runId = $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-seed{config.Seed}-{BrainName}";
                 var directory = Path.Combine(root, runId);
                 for (var suffix = 2; Directory.Exists(directory); suffix++)
                     directory = Path.Combine(root, runId + "-" + suffix);
 
                 Directory.CreateDirectory(directory);
                 File.WriteAllLines(Path.Combine(directory, "run-info.txt"),
-                    RunInfo.Describe(config, Brain.Name, UnityEngine.Application.version, DateTime.UtcNow));
+                    RunInfo.Describe(config, BrainName, UnityEngine.Application.version, DateTime.UtcNow));
                 metricsLog = new MetricsCsvLog(Path.Combine(directory, "metrics.csv"));
                 RunDirectory = directory;
             }

@@ -9,7 +9,7 @@ namespace Eden.Presentation
     /// <summary>HUD texts (Portuguese, user locale). Only reads state; numbers are display-only.</summary>
     internal static class LabText
     {
-        public static string Run(WorldSimulation simulation, FixedStepClock clock, IBrain brain,
+        public static string Run(WorldSimulation simulation, FixedStepClock clock, string brainName,
             MetricsRecorder metrics, string runDirectory)
         {
             var world = simulation.World;
@@ -23,7 +23,7 @@ namespace Eden.Presentation
             if (simulation.CorrectedInputValues > 0)
                 text.AppendLine($"Entradas de sensor corrigidas (fora do contrato): {simulation.CorrectedInputValues}");
             text.AppendLine($"População {world.Creatures.Count} de {config.InitialPopulation}  ·  Comida {world.Food.Count}");
-            text.AppendLine($"Seed {config.Seed}  ·  Cérebro: {BrainLabel(brain)}");
+            text.AppendLine($"Seed {config.Seed}  ·  Cérebro: {BrainLabel(brainName)}");
             if (metrics.HasSample)
             {
                 var sample = metrics.LastSample;
@@ -40,10 +40,13 @@ namespace Eden.Presentation
         }
 
         public static string Creature(CreatureState creature, Observation sensed, CreatureAction action,
-            SimulationConfig config)
+            string brainName, SimulationConfig config)
         {
             var text = new StringBuilder();
             text.AppendLine($"Criatura {creature.Id}");
+            text.AppendLine(brainName == MlpBrain.BrainName
+                ? "Cérebro: rede 12-16-3 com genoma próprio"
+                : "Cérebro: " + BrainLabel(brainName));
             text.AppendLine($"Energia {creature.Energy:0.0} / {config.MaxEnergy:0}");
             text.AppendLine($"Idade {creature.AgeTicks * (double)config.TickDuration:0.0} s de {config.MaxAgeSeconds:0} s");
             text.AppendLine($"Comida ingerida {creature.FoodEnergyEaten:0} de energia");
@@ -71,13 +74,15 @@ namespace Eden.Presentation
             return $"Criatura {id}\nmorreu de {cause} no tick {death.Value.Tick}";
         }
 
-        private static string BrainLabel(IBrain brain)
+        private static string BrainLabel(string brainName)
         {
-            switch (brain.Name)
+            switch (brainName)
             {
                 case HeuristicBrain.BrainName: return "heurístico (regras fixas, sem memória nem aprendizado)";
                 case RandomBrain.BrainName: return "aleatório (ignora os sensores)";
-                default: return brain.Name;
+                case MlpBrain.BrainName:
+                    return "rede neural 12-16-3, genoma aleatório por criatura (ainda sem evolução; sem memória nem aprendizado)";
+                default: return brainName;
             }
         }
     }
