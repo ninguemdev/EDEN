@@ -1,6 +1,8 @@
 using System.Linq;
+using Eden.Application;
 using Eden.Brains;
 using Eden.Domain;
+using Eden.Simulation;
 using NUnit.Framework;
 
 namespace Eden.Tests.EditMode
@@ -36,6 +38,10 @@ namespace Eden.Tests.EditMode
             Assert.That(aheadLeft.Thrust, Is.EqualTo(1f));
             Assert.That(aheadLeft.Turn, Is.EqualTo(0.6f).Within(1e-5f));
 
+            var sideLeft = brain.Evaluate(Food(sin: 0.8f, cos: 0.6f), state);
+            Assert.That(sideLeft.Turn, Is.EqualTo(1f));
+            Assert.That(sideLeft.Thrust, Is.LessThan(0.5f), "slows down to turn toward food to the side");
+
             var behindRight = brain.Evaluate(Food(sin: -0.1f, cos: -0.99f), state);
             Assert.That(behindRight.Turn, Is.EqualTo(-1f));
             Assert.That(behindRight.Thrust, Is.LessThan(0.5f));
@@ -55,6 +61,23 @@ namespace Eden.Tests.EditMode
 
             Assert.That(brain.Evaluate(Walls(front: 0.1f, right: 0.2f, left: 0.9f), state).Turn, Is.EqualTo(1f));
             Assert.That(brain.Evaluate(Walls(front: 0.1f, right: 0.9f, left: 0.2f), state).Turn, Is.EqualTo(-1f));
+        }
+
+        [Test]
+        public void HeuristicBrain_ReachesFoodBesideItAtTopSpeed()
+        {
+            // v1 orbited this food forever: at 5 units/s its turning circle is wider than the eating radius.
+            var world = TestWorlds.Empty();
+            var creature = world.AddCreature(new Float2(25f, 25f), 0f, 100f);
+            creature.Velocity = new Float2(world.Config.MaxSpeed, 0f);
+            world.AddFood(new Float2(26.5f, 27f), world.Config.FoodEnergy);
+            var simulation = new WorldSimulation(world);
+            var controller = BrainController.Shared(world.Config, new HeuristicBrain());
+
+            for (var t = 0; t < 200 && creature.FoodEnergyEaten == 0f; t++)
+                simulation.Step(controller);
+
+            Assert.That(creature.FoodEnergyEaten, Is.EqualTo(world.Config.FoodEnergy));
         }
 
         private static Observation Food(float sin, float cos) =>

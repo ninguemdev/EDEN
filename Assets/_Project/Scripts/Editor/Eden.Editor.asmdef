@@ -3,6 +3,7 @@
   "rootNamespace": "Eden.Editor",
   "references": [
     "Eden.Domain",
+    "Eden.Brains",
     "Eden.Application",
     "Eden.Evolution",
     "Eden.Persistence"

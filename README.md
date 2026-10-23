@@ -41,7 +41,7 @@ Sem comida ao alcance, as entradas 5–8 valem zero. Um cérebro nunca recebe po
 **Cérebros.** Todos seguem o mesmo contrato (`IBrain`): recebem a observação e o próprio estado e devolvem uma ação.
 
 - **aleatório:** ignora os sensores e sorteia ações;
-- **heurístico:** regras fixas, sem memória nem aprendizado; vai até a comida visível e desvia das paredes;
+- **heurístico:** regras fixas, sem memória nem aprendizado; vai até a comida visível (reduz a velocidade para girar quando ela está de lado, senão ficaria orbitando a comida sem alcançá-la) e desvia das paredes;
 - **rede neural:** perceptron 12 → 16 → 3 com `tanh` (259 parâmetros). Cada criatura tem o seu **genoma** (topologia e pesos-base, imutável e separado de energia, idade e posição) e a sua própria rede. No laboratório os genomas ainda são aleatórios; a evolução roda à parte, nos [experimentos por gerações](#evolução-por-gerações). A rede é feed-forward: não guarda memória entre decisões nem aprende durante a vida.
 
 Os dois primeiros servem de linha de base para comparar as redes evoluídas. Baseline preliminar com a configuração padrão (64 criaturas, 5 seeds, 60 s simulados):
@@ -49,7 +49,7 @@ Os dois primeiros servem de linha de base para comparar as redes evoluídas. Bas
 | Cérebro | Comida consumida | Sobreviventes (de 320) |
 | --- | --- | --- |
 | Aleatório | 1179 | 25 |
-| Heurístico | 4117 | 175 |
+| Heurístico | 4839 | 260 |
 
 **Contrato de entradas.** As 12 entradas têm faixas documentadas. Um valor fora do contrato (NaN, infinito, fora da faixa, máscara de comida inconsistente) é corrigido por uma regra fixa antes de chegar a qualquer cérebro, e cada correção é contada e mostrada no HUD; em execuções normais o total é zero.
 
@@ -157,7 +157,14 @@ Primeira bateria de aceitação (valores propostos, 32 comidas por episódio, se
 | Mediana na geração 0 | 0,05 ± 0,01 | 0,03 – 0,07 |
 | Sobrevivência média | 0,61 ± 0,24 | 0,28 – 0,93 |
 
-Referências nos mesmos cenários: aleatório 0,13 e heurístico 1,38 (nenhum dos dois sobrevive aos 120 s). A mediana final superou a da geração 0, o aleatório e o heurístico nas 5 execuções, mas a variação entre execuções é grande e a diversidade dos pesos cai depressa nas primeiras gerações. É um resultado com esta configuração, não uma garantia; os valores da economia de energia ainda estão em calibração.
+Referências nos mesmos cenários: aleatório 0,13 (nunca sobrevive aos 120 s) e heurístico 4,65 (sempre sobrevive). A mediana final superou a da geração 0 e o aleatório nas 5 execuções, mas **não superou o heurístico em nenhuma**: depois de 30 gerações as redes evoluídas ainda ficam bem abaixo de regras simples escritas à mão. A variação entre execuções é grande e a diversidade dos pesos cai depressa nas primeiras gerações. É um resultado com esta configuração, não uma garantia.
+
+**Economia do episódio isolado.** Os valores (32 comidas, energia inicial 50, metabolismo 1/s, movimento 2/s, episódio de 120 s) foram medidos contra os cérebros de referência numa grade de combinações (comida 32/64/128, energia inicial 50/100, movimento 2/1, metabolismo 1/0,5, duração 120/60 s) em 20 seeds de calibração próprias, que não são de treino nem de validação. Com eles o heurístico sobrevive em todos os episódios (fitness 4,37 ± 0,36) e o aleatório em nenhum (0,09 ± 0,11), então foram mantidos. Para repetir a medição:
+
+```powershell
+& "C:\Program Files\Unity\Hub\Editor\6000.3.27f1\Editor\Unity.exe" -batchmode -projectPath . `
+  -executeMethod Eden.Editor.EpisodeCalibration.RunFromCommandLine -eden-seed 1 -eden-seeds 20 -logFile calibration.log
+```
 
 ## Testes
 
@@ -207,7 +214,7 @@ O código fica em `Assets/_Project` e é dividido em assemblies com responsabili
 | `Eden.Application` | liga criaturas a cérebros, avaliação isolada, laço de gerações e métricas (sem Unity) |
 | `Eden.Persistence` | gravação de métricas e experimentos em CSV e descrição do run (sem Unity) |
 | `Eden.Presentation` | cena do laboratório: execução em tempo real, visualização, HUD e controles |
-| `Eden.Editor` | build e execução de experimentos de evolução |
+| `Eden.Editor` | build, experimentos de evolução e calibração do episódio |
 | `Eden.Tests.EditMode`, `Eden.Tests.PlayMode` | testes |
 
 Outras pastas: `Scenes`, `UI` (UXML e tema do UI Toolkit), `Art` e `Settings` (assets do URP 2D).
