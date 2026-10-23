@@ -10,8 +10,8 @@ namespace Eden.Persistence
     /// <summary>
     /// Export of a generational experiment into one directory: <c>experiment.txt</c> (key=value settings),
     /// <c>generations.csv</c> (one summary row per generation), <c>individuals.csv</c> (one row per evaluated
-    /// individual, with id, parents and birth generation) and <c>episodes.csv</c> (one row per individual × seed,
-    /// before aggregation). Rows of the three CSV files join on generation and candidate. Numbers use the invariant
+    /// individual and evaluation mode, with id, parents and birth generation) and <c>episodes.csv</c> (one row per individual × seed,
+    /// before aggregation). Rows of the three CSV files join on generation, evaluation mode and candidate. Numbers use the invariant
     /// culture; non-finite values are written as empty fields.
     /// </summary>
     public sealed class EvolutionCsvLog : IDisposable
@@ -22,8 +22,8 @@ namespace Eden.Persistence
             "weight_std,mean_distance_to_centroid,new_individuals,elites,distinct_parents,mean_mutated_weights";
 
         public const string IndividualsHeader =
-            "generation,candidate,individual_id,parent_ids,birth_generation,elite,mutated_weights,valid,mean_fitness," +
-            "mean_food_energy,survival_rate,mean_survived_seconds,mean_final_energy";
+            "generation,evaluation_mode,candidate,individual_id,parent_ids,birth_generation,elite,mutated_weights,valid," +
+            "mean_fitness,mean_food_energy,survival_rate,mean_survived_seconds,mean_final_energy";
 
         private CsvFile generations;
         private CsvFile individuals;
@@ -101,6 +101,7 @@ namespace Eden.Persistence
 
             return string.Join(",",
                 generation.ToString(culture),
+                EvaluationCsv.ModeName(report.Evaluation.Mode),
                 candidate.ToString(culture),
                 individual.Id.ToString(culture),
                 string.Join(";", parents),
@@ -134,6 +135,8 @@ namespace Eden.Persistence
                 "evaluation_mode=isolated",
                 "seed_scheme=" + EvaluationPlan.SeedSchemeVersion.ToString(culture),
                 "training_seeds_per_generation=" + plan.TrainingSeedsPerGeneration.ToString(culture),
+                "validation_seed=" + plan.ValidationSeed.ToString(culture),
+                "validation_seeds=" + string.Join(";", Array.ConvertAll(plan.ValidationSeeds(), s => s.ToString(culture))),
                 "episode_seconds=" + plan.EpisodeSeconds.ToString(culture),
                 "episode_ticks=" + plan.EpisodeTicks.ToString(culture),
                 "config_schema=" + world.SchemaVersion.ToString(culture),
