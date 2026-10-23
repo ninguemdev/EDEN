@@ -1,6 +1,13 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements">
-    <ui:VisualElement name="bootstrap-root" picking-mode="Ignore" style="flex-grow: 1; justify-content: flex-end; align-items: center; padding-bottom: 72px;">
-        <ui:Label name="title" text="EDEN" style="font-size: 96px; -unity-font-style: bold; color: rgb(226, 240, 233); letter-spacing: 24px;" />
-        <ui:Label name="subtitle" text="Evolutionary Digital Ecosystem Network" style="font-size: 22px; color: rgb(140, 178, 164);" />
+    <ui:VisualElement name="bootstrap-root" picking-mode="Ignore" style="flex-grow: 1; flex-direction: row; justify-content: space-between; align-items: flex-start; padding: 16px;">
+        <ui:VisualElement name="run-panel" picking-mode="Ignore" style="width: 380px; padding: 14px; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; background-color: rgba(8, 16, 20, 0.82);">
+            <ui:Label name="title" text="EDEN" style="font-size: 44px; -unity-font-style: bold; color: rgb(226, 240, 233); letter-spacing: 10px;" />
+            <ui:Label name="subtitle" text="Evolutionary Digital Ecosystem Network" style="font-size: 14px; color: rgb(140, 178, 164); margin-bottom: 10px;" />
+            <ui:Label name="run-stats" text="" style="font-size: 16px; color: rgb(214, 226, 220); white-space: normal;" />
+        </ui:VisualElement>
+        <ui:VisualElement name="inspector-panel" picking-mode="Ignore" style="display: none; width: 380px; padding: 14px; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; background-color: rgba(8, 16, 20, 0.82);">
+            <ui:Label name="inspector" text="" style="font-size: 16px; color: rgb(214, 226, 220); white-space: normal;" />
+        </ui:VisualElement>
     </ui:VisualElement>
+    <ui:Label name="help" picking-mode="Ignore" text="Espaço pausar · . um tick · - / = velocidade · clique ou [ ] selecionar · Esc limpar · R reiniciar · B trocar cérebro" style="position: absolute; left: 16px; bottom: 12px; font-size: 15px; color: rgb(140, 178, 164);" />
 </ui:UXML>

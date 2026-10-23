@@ -1,0 +1,21 @@
+{
+  "name": "Eden.Presentation",
+  "rootNamespace": "Eden.Presentation",
+  "references": [
+    "Eden.Domain",
+    "Eden.Simulation",
+    "Eden.Brains",
+    "Eden.Application",
+    "Eden.Persistence",
+    "Unity.InputSystem"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": false
+}
