@@ -3,6 +3,7 @@
   "rootNamespace": "Eden.Tests.EditMode",
   "references": [
     "Eden.Domain",
+    "Eden.Simulation",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],
