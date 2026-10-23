@@ -1,7 +1,12 @@
 {
   "name": "Eden.Editor",
   "rootNamespace": "Eden.Editor",
-  "references": [],
+  "references": [
+    "Eden.Domain",
+    "Eden.Application",
+    "Eden.Evolution",
+    "Eden.Persistence"
+  ],
   "includePlatforms": [
     "Editor"
   ],
