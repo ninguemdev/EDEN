@@ -39,11 +39,19 @@ namespace Eden.Domain
         /// (SplitMix64 output number <c>stream</c> for <c>runSeed</c>); sequence = <c>stream</c>. Births and deaths
         /// of other creatures never shift a creature's draws.
         /// </summary>
-        public static Pcg32 CreateCreatureStream(ulong runSeed, RandomStream stream, CreatureId creature)
+        public static Pcg32 CreateCreatureStream(ulong runSeed, RandomStream stream, CreatureId creature) =>
+            CreateIndexedStream(runSeed, stream, (ulong)creature.Value);
+
+        /// <summary>
+        /// Independent sub-stream number <paramref name="index"/> of a stream (e.g. one per generation), with the same
+        /// derivation as <see cref="CreateCreatureStream"/>: initState = SplitMix64 output number <c>index</c> for seed
+        /// (SplitMix64 output number <c>stream</c> for <c>runSeed</c>); sequence = <c>stream</c>.
+        /// </summary>
+        public static Pcg32 CreateIndexedStream(ulong runSeed, RandomStream stream, ulong index)
         {
-            var index = (ulong)stream;
-            var streamSeed = SplitMix64.Output(runSeed, index);
-            return new Pcg32(SplitMix64.Output(streamSeed, (ulong)creature.Value), index);
+            var streamIndex = (ulong)stream;
+            var streamSeed = SplitMix64.Output(runSeed, streamIndex);
+            return new Pcg32(SplitMix64.Output(streamSeed, index), streamIndex);
         }
     }
 
