@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: o marco **M1** (simulação determinística e baseline) está concluído. A rede neural (M2) e a evolução por gerações (M3) são os próximos passos. Veja o [roadmap](#roadmap).
+> Estado atual: o marco **M1** (simulação determinística e baseline) está concluído e o **M2** (rede neural fixa) está em andamento: cada criatura já pode ter a sua própria rede 12 → 16 → 3, ainda com pesos aleatórios. A evolução por gerações (M3) vem em seguida. Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -38,19 +38,22 @@ Sem comida ao alcance, as entradas 5–8 valem zero. Um cérebro nunca recebe po
 
 **Ações.** Propulsão para frente [0, 1], giro [−1, 1] e propulsão lateral [−1, 1]. Valores fora da faixa são limitados e NaN vira zero. Por padrão os cérebros decidem a cada 2 ticks (10 Hz) e a ação é mantida entre as decisões.
 
-**Cérebros.** Todos seguem o mesmo contrato (`IBrain`): recebem a observação e o próprio estado e devolvem uma ação. Hoje existem dois cérebros de referência:
+**Cérebros.** Todos seguem o mesmo contrato (`IBrain`): recebem a observação e o próprio estado e devolvem uma ação.
 
 - **aleatório:** ignora os sensores e sorteia ações;
-- **heurístico:** regras fixas, sem memória nem aprendizado; vai até a comida visível e desvia das paredes.
+- **heurístico:** regras fixas, sem memória nem aprendizado; vai até a comida visível e desvia das paredes;
+- **rede neural:** perceptron 12 → 16 → 3 com `tanh` (259 parâmetros). Cada criatura tem o seu **genoma** (topologia e pesos-base, imutável e separado de energia, idade e posição) e a sua própria rede. Por enquanto os genomas são aleatórios; selecionar e mutar genomas é o M3. A rede é feed-forward: não guarda memória entre decisões nem aprende durante a vida.
 
-Eles servem de linha de base para comparar os cérebros de redes neurais que virão no M2/M3. Baseline preliminar com a configuração padrão (64 criaturas, 5 seeds, 60 s simulados):
+Os dois primeiros servem de linha de base para comparar as redes evoluídas. Baseline preliminar com a configuração padrão (64 criaturas, 5 seeds, 60 s simulados):
 
 | Cérebro | Comida consumida | Sobreviventes (de 320) |
 | --- | --- | --- |
 | Aleatório | 1179 | 25 |
 | Heurístico | 4117 | 175 |
 
-**Determinismo.** Toda aleatoriedade vem de um gerador PCG32 com estado salvo e de fluxos separados derivados da seed (mundo, posicionamento, mutação, visual e um fluxo por criatura). Assim, nascimentos, mortes ou efeitos visuais nunca deslocam os sorteios de outra parte da simulação. A igualdade exata é garantida no mesmo ambiente; não há promessa de resultado bit a bit idêntico entre processadores ou versões da Unity.
+**Contrato de entradas.** As 12 entradas têm faixas documentadas. Um valor fora do contrato (NaN, infinito, fora da faixa, máscara de comida inconsistente) é corrigido por uma regra fixa antes de chegar a qualquer cérebro, e cada correção é contada e mostrada no HUD; em execuções normais o total é zero.
+
+**Determinismo.** Toda aleatoriedade vem de um gerador PCG32 com estado salvo e de fluxos separados derivados da seed (mundo, posicionamento, mutação, visual e fluxos por criatura para cérebros e genomas). Assim, nascimentos, mortes ou efeitos visuais nunca deslocam os sorteios de outra parte da simulação. A igualdade exata é garantida no mesmo ambiente; não há promessa de resultado bit a bit idêntico entre processadores ou versões da Unity.
 
 ## Requisitos
 
@@ -81,7 +84,13 @@ A cena Bootstrap mostra a arena ao vivo. À esquerda ficam o estado do experimen
 | clique, `[` / `]` | selecionar criatura (mais próxima do clique, ou anterior/próxima por id) |
 | Esc | limpar seleção |
 | R | reiniciar com a mesma seed |
-| B | alternar entre cérebro heurístico e aleatório |
+| B | alternar entre cérebro heurístico, aleatório e rede neural (reinicia com a mesma seed) |
+
+### Ver a rede neural de uma criatura
+
+Com o cérebro **rede neural** ativo, selecionar uma criatura mostra, abaixo do inspetor, o diagrama da rede dela: 12 neurônios de entrada (com os nomes dos sensores), 16 ocultos e 3 de saída (propulsão, giro, lateral). A cor de cada neurônio é a sua ativação (verde positiva, vermelha negativa, cinza perto de zero) e a cor e a intensidade de cada conexão mostram o sinal que passa por ela (peso × ativação de origem). O diagrama é atualizado 10 vezes por segundo e corresponde exatamente à ação que a criatura está executando.
+
+O diagrama só existe enquanto há uma criatura neural selecionada: sem seleção (ou com Esc), nada da rede é calculado nem desenhado, para não pesar na simulação.
 
 Todos os parâmetros do run (seed, tamanho da arena, população, energia, custos, alcance do sensor, velocidade etc.) ficam editáveis no componente **LabRunner** do objeto `Lab`. Os valores padrão são pontos de partida para medição, não valores ajustados.
 
@@ -120,7 +129,15 @@ No Editor, menu **EDEN → Build → Windows x64**. Pela linha de comando (Edito
   -executeMethod Eden.Editor.WindowsBuild.BuildFromCommandLine -logFile build.log
 ```
 
-O executável sai em `Builds/Windows/EDEN.exe` e roda offline, sem o Editor.
+O executável sai em `Builds/Windows/EDEN.exe` e roda offline, sem o Editor. Opções de linha de comando do executável:
+
+| Opção | Efeito |
+| --- | --- |
+| `-eden-brain heuristic\|random\|neural` | cérebro inicial |
+| `-eden-seed N` | seed do run |
+| `-eden-select ID` | já começa com a criatura `ID` selecionada |
+
+Exemplo: `EDEN.exe -eden-brain neural -eden-select 5`.
 
 ## Estrutura
 
@@ -145,7 +162,7 @@ Outras pastas: `Scenes`, `UI` (UXML e tema do UI Toolkit), `Art` e `Settings` (a
 | --- | --- | --- |
 | M0 | projeto Unity, cena Bootstrap e build Windows | concluído |
 | M1 | simulação determinística, regras do mundo, cérebros de referência e laboratório visual | concluído |
-| M2 | rede neural fixa 12 → 16 → 3 na CPU | próximo |
+| M2 | rede neural fixa 12 → 16 → 3 na CPU, genoma por criatura e visualização da rede | em andamento |
 | M3 | evolução por gerações: avaliação isolada, elites, torneio, mutação, seeds de validação | planejado |
 | M4 | laboratório completo e checkpoints (MVP) | planejado |
 | M5 | biologia parametrizada: genes de corpo com custos e trade-offs | planejado |
