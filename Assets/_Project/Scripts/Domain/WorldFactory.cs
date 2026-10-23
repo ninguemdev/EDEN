@@ -16,18 +16,19 @@ namespace Eden.Domain
             var random = world.SpawnRandom;
             for (var i = 0; i < config.InitialPopulation; i++)
             {
-                var position = RandomPosition(random, config);
+                var position = RandomArenaPosition(random, config);
                 var heading = random.NextFloat() * FullTurn;
                 world.AddCreature(position, heading, config.InitialEnergy);
             }
 
             for (var i = 0; i < config.InitialFood; i++)
-                world.AddFood(RandomPosition(random, config), config.FoodEnergy);
+                world.AddFood(RandomArenaPosition(random, config), config.FoodEnergy);
 
             return world;
         }
 
-        private static Float2 RandomPosition(IRandomSource random, SimulationConfig config)
+        /// <summary>Uniform position inside the arena (borders included). Draws x, then y.</summary>
+        public static Float2 RandomArenaPosition(IRandomSource random, SimulationConfig config)
         {
             var x = random.NextFloat(0f, config.ArenaWidth);
             var y = random.NextFloat(0f, config.ArenaHeight);

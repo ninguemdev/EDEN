@@ -49,5 +49,11 @@ namespace Eden.Domain
             food.Add(item);
             return item;
         }
+
+        /// <summary>Removes eaten food, keeping id order. Returns how many items were removed.</summary>
+        public int RemoveEatenFood() => food.RemoveAll(item => item.IsEaten);
+
+        /// <summary>Removes dead creatures, keeping id order. Returns how many creatures were removed.</summary>
+        public int RemoveDeadCreatures() => creatures.RemoveAll(creature => !creature.IsAlive);
     }
 }

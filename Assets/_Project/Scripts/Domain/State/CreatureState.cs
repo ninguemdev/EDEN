@@ -1,5 +1,12 @@
 namespace Eden.Domain
 {
+    public enum DeathCause : byte
+    {
+        None = 0,
+        Starvation = 1,
+        OldAge = 2
+    }
+
     /// <summary>Living state of one creature. Not inherited: offspring start from their own initial state.</summary>
     public sealed class CreatureState
     {
@@ -16,12 +23,20 @@ namespace Eden.Domain
         public Float2 Position { get; set; }
         public Float2 Velocity { get; set; }
 
-        /// <summary>Facing angle in radians, counterclockwise from +X.</summary>
+        /// <summary>Facing angle in radians in [0, 2π), counterclockwise from +X.</summary>
         public float Heading { get; set; }
 
         public float Energy { get; set; }
 
         /// <summary>Age in simulated ticks; never derived from wall-clock time.</summary>
         public long AgeTicks { get; set; }
+
+        /// <summary>Total food energy eaten during this life, before clamping to the energy maximum.</summary>
+        public float FoodEnergyEaten { get; set; }
+
+        /// <summary>Set during the tick the creature dies; dead creatures leave the world at the end of that tick.</summary>
+        public DeathCause DeathCause { get; set; }
+
+        public bool IsAlive => DeathCause == DeathCause.None;
     }
 }
