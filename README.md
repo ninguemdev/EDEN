@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: o marco **M1** (simulação determinística e baseline) está concluído e o **M2** (rede neural fixa) está em andamento: cada criatura já pode ter a sua própria rede 12 → 16 → 3, ainda com pesos aleatórios. A evolução por gerações (M3) vem em seguida. Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline) e **M2** (rede neural fixa) estão concluídos e o **M3** (evolução por gerações) está em andamento: já é possível evoluir genomas em episódios isolados e exportar cada geração; faltam as seeds de validação e a comparação com os cérebros de referência. Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -42,7 +42,7 @@ Sem comida ao alcance, as entradas 5–8 valem zero. Um cérebro nunca recebe po
 
 - **aleatório:** ignora os sensores e sorteia ações;
 - **heurístico:** regras fixas, sem memória nem aprendizado; vai até a comida visível e desvia das paredes;
-- **rede neural:** perceptron 12 → 16 → 3 com `tanh` (259 parâmetros). Cada criatura tem o seu **genoma** (topologia e pesos-base, imutável e separado de energia, idade e posição) e a sua própria rede. Por enquanto os genomas são aleatórios; selecionar e mutar genomas é o M3. A rede é feed-forward: não guarda memória entre decisões nem aprende durante a vida.
+- **rede neural:** perceptron 12 → 16 → 3 com `tanh` (259 parâmetros). Cada criatura tem o seu **genoma** (topologia e pesos-base, imutável e separado de energia, idade e posição) e a sua própria rede. No laboratório os genomas ainda são aleatórios; a evolução roda à parte, nos [experimentos por gerações](#evolução-por-gerações). A rede é feed-forward: não guarda memória entre decisões nem aprende durante a vida.
 
 Os dois primeiros servem de linha de base para comparar as redes evoluídas. Baseline preliminar com a configuração padrão (64 criaturas, 5 seeds, 60 s simulados):
 
@@ -104,11 +104,38 @@ Cada execução grava um diretório em `%USERPROFILE%\AppData\LocalLow\NinguemDe
 - `metrics.csv`: uma linha por segundo simulado, com números em formato invariável (ponto decimal):
   `tick, simulated_seconds, population, food_available, food_eaten_window, starvation_deaths_window, old_age_deaths_window, mean_energy, total_food_eaten`.
 
+## Evolução por gerações
+
+Um experimento evolui uma população de genomas (padrão 64) sem a cena e sem competição entre eles:
+
+1. **Avaliação isolada.** Cada genoma vive sozinho num episódio de 120 s simulados, uma vez para cada uma das 3 seeds de treino da geração. Todos os genomas da geração enfrentam exatamente as mesmas condições iniciais (comida, posição, direção).
+2. **Fitness** = energia de comida consumida ÷ duração configurada do episódio (o denominador não diminui se a criatura morrer antes), em média nas 3 seeds. Sobrevivência, tempo vivo e energia final são medidos à parte, sem somar tudo numa nota só.
+3. **Próxima geração.** Os 4 melhores ficam sem alteração (e são avaliados de novo, sem levar a nota antiga); as demais vagas vêm de torneios de 3 com reposição. Cada filho é uma cópia do pai em que cada peso tem 5% de chance de receber ruído gaussiano (σ = 0,10), sempre limitado a [−3, 3]. Não há cruzamento: cada filho tem um único pai.
+4. **Linhagem.** Cada indivíduo novo recebe um id único, o id do pai e a geração em que nasceu; elites mantêm os seus. A partir de qualquer id dá para seguir a ascendência até a primeira geração.
+
+Esses valores são propostas iniciais a medir, não garantias de melhoria. Com a mesma seed o experimento repete as mesmas gerações, ids e resultados.
+
+Para rodar: menu **EDEN → Evolution → Run 20 generations (seed 1)** no Editor (o Editor fica ocupado durante a execução, cerca de 20 s) ou, com o Editor fechado:
+
+```powershell
+& "C:\Program Files\Unity\Hub\Editor\6000.3.27f1\Editor\Unity.exe" -batchmode -projectPath . `
+  -executeMethod Eden.Editor.EvolutionBatch.RunFromCommandLine -eden-seed 1 -eden-generations 20 -logFile evolution.log
+```
+
+Opções: `-eden-seed N`, `-eden-generations N`, `-eden-food N` (comida do episódio, padrão 32) e `-eden-output DIR`. Sem `-eden-output`, o resultado vai para `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\EvolutionRuns\<data>-seed<n>\`:
+
+- `experiment.txt`: todos os parâmetros do experimento;
+- `generations.csv`: uma linha por geração com melhor, quartis, mediana, pior e média do fitness, sobrevivência, diversidade dos pesos (desvio padrão médio por peso e distância média ao centróide), indivíduos novos, elites e pais distintos;
+- `individuals.csv`: cada indivíduo avaliado, com id, pai, geração de nascimento e resultados;
+- `episodes.csv`: cada indivíduo × seed, antes de qualquer média.
+
+Os três CSVs se ligam por geração e candidato. O fitness dessas tabelas é de **treino**: só as seeds de validação (próxima etapa do M3) separam progresso real de sobreajuste.
+
 ## Testes
 
 Pelo Editor: **Window → General → Test Runner**, abas EditMode e PlayMode.
 
-- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, controlador, métricas e CSV, além de execuções longas com verificação de invariantes e independência de FPS.
+- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, avaliação isolada, seleção, mutação, linhagem, métricas e CSV, além de execuções longas com verificação de invariantes e independência de FPS.
 - **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id e gravação do CSV.
 
 Pela linha de comando, com o Editor **fechado** para este projeto:
@@ -148,10 +175,11 @@ O código fica em `Assets/_Project` e é dividido em assemblies com responsabili
 | `Eden.Domain` | ids, configuração, estado do mundo, observação, ação, gerador aleatório e seeds (sem Unity) |
 | `Eden.Simulation` | tick fixo, relógio, agenda de eventos, sensores, movimento, alimentação, energia e morte (sem Unity) |
 | `Eden.Brains` | contrato de cérebro e cérebros de referência (sem Unity) |
-| `Eden.Application` | liga criaturas a cérebros e agrega métricas (sem Unity) |
-| `Eden.Persistence` | gravação de métricas em CSV e descrição do run (sem Unity) |
+| `Eden.Evolution` | plano de avaliação, fitness, seleção, mutação, linhagem e resumo por geração (sem Unity) |
+| `Eden.Application` | liga criaturas a cérebros, avaliação isolada, laço de gerações e métricas (sem Unity) |
+| `Eden.Persistence` | gravação de métricas e experimentos em CSV e descrição do run (sem Unity) |
 | `Eden.Presentation` | cena do laboratório: execução em tempo real, visualização, HUD e controles |
-| `Eden.Editor` | ferramenta de build |
+| `Eden.Editor` | build e execução de experimentos de evolução |
 | `Eden.Tests.EditMode`, `Eden.Tests.PlayMode` | testes |
 
 Outras pastas: `Scenes`, `UI` (UXML e tema do UI Toolkit), `Art` e `Settings` (assets do URP 2D).
@@ -162,8 +190,8 @@ Outras pastas: `Scenes`, `UI` (UXML e tema do UI Toolkit), `Art` e `Settings` (a
 | --- | --- | --- |
 | M0 | projeto Unity, cena Bootstrap e build Windows | concluído |
 | M1 | simulação determinística, regras do mundo, cérebros de referência e laboratório visual | concluído |
-| M2 | rede neural fixa 12 → 16 → 3 na CPU, genoma por criatura e visualização da rede | em andamento |
-| M3 | evolução por gerações: avaliação isolada, elites, torneio, mutação, seeds de validação | planejado |
+| M2 | rede neural fixa 12 → 16 → 3 na CPU, genoma por criatura e visualização da rede | concluído |
+| M3 | evolução por gerações: avaliação isolada, elites, torneio, mutação, seeds de validação | em andamento |
 | M4 | laboratório completo e checkpoints (MVP) | planejado |
 | M5 | biologia parametrizada: genes de corpo com custos e trade-offs | planejado |
 | M6 | ecossistema contínuo com reprodução local | planejado |

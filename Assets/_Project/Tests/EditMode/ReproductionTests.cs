@@ -193,8 +193,8 @@ namespace Eden.Tests.EditMode
             Assert.That(first.Origins, Is.Empty);
             for (var g = 0; g < 3; g++)
             {
-                var evaluation = first.Advance();
-                var again = second.Advance();
+                var evaluation = first.Advance().Evaluation;
+                var again = second.Advance().Evaluation;
                 other.Advance();
 
                 Assert.That(evaluation.Generation, Is.EqualTo(g));
@@ -210,7 +210,7 @@ namespace Eden.Tests.EditMode
             }
 
             var reevaluated = new IsolatedEvaluator(first.Plan).EvaluateTraining(first.Population, first.Generation);
-            var advanced = first.Advance();
+            var advanced = first.Advance().Evaluation;
             Assert.That(advanced.Candidates.Select(c => c.MeanFitness), Is.EqualTo(reevaluated.Candidates.Select(c => c.MeanFitness)));
             Assert.That(Enumerable.Range(0, 8).Any(i => !first.Population[i].HasSameContent(other.Population[i])), Is.True);
         }
@@ -223,7 +223,7 @@ namespace Eden.Tests.EditMode
             settings.World.InitialFood = 0;
             var evolution = new GenerationalEvolution(settings);
 
-            var evaluation = evolution.Advance();
+            var evaluation = evolution.Advance().Evaluation;
 
             Assert.That(evaluation.Candidates.Select(c => c.SurvivalRate), Is.All.EqualTo(0f));
             Assert.That(evaluation.Candidates.Select(c => c.MeanFitness), Is.All.EqualTo(0f));

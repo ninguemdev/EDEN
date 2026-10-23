@@ -1,7 +1,5 @@
 using System;
 using System.Globalization;
-using System.IO;
-using System.Text;
 using Eden.Application;
 
 namespace Eden.Persistence
@@ -16,21 +14,12 @@ namespace Eden.Persistence
             "tick,simulated_seconds,population,food_available,food_eaten_window," +
             "starvation_deaths_window,old_age_deaths_window,mean_energy,total_food_eaten";
 
-        private StreamWriter writer;
+        private CsvFile file;
 
         public MetricsCsvLog(string path)
         {
-            if (string.IsNullOrEmpty(path))
-                throw new ArgumentException("A file path is required.", nameof(path));
-
-            var directory = Path.GetDirectoryName(Path.GetFullPath(path));
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
+            file = new CsvFile(path, Header);
             FilePath = path;
-            writer = new StreamWriter(path, false, new UTF8Encoding(false)) { NewLine = "\n" };
-            writer.WriteLine(Header);
-            writer.Flush();
         }
 
         public string FilePath { get; }
@@ -38,10 +27,9 @@ namespace Eden.Persistence
 
         public void Append(MetricsSample sample)
         {
-            if (writer == null)
+            if (file == null)
                 throw new ObjectDisposedException(nameof(MetricsCsvLog));
-            writer.WriteLine(FormatRow(sample));
-            writer.Flush();
+            file.Append(FormatRow(sample));
             RowCount++;
         }
 
@@ -62,8 +50,8 @@ namespace Eden.Persistence
 
         public void Dispose()
         {
-            writer?.Dispose();
-            writer = null;
+            file?.Dispose();
+            file = null;
         }
     }
 }
