@@ -26,5 +26,18 @@
 *.blend binary
 *.ttf binary
 *.otf binary
+# Unity serializes YAML with trailing spaces (e.g. "userData: "); keep files as the Editor writes them.
+*.unity -whitespace
+*.prefab -whitespace
+*.asset -whitespace
+*.meta -whitespace
+*.mat -whitespace
+*.anim -whitespace
+*.controller -whitespace
+*.overrideController -whitespace
+*.physicsMaterial2D -whitespace
+*.scenetemplate -whitespace
+*.spriteatlasv2 -whitespace
+*.preset -whitespace
 # LFS intentionally not enabled: the bootstrap uses tiny primitives only.
 # Add targeted LFS rules before introducing large binary assets.
