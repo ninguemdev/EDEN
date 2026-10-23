@@ -5,6 +5,7 @@
     "Eden.Domain",
     "Eden.Simulation",
     "Eden.Brains",
+    "Eden.Application",
     "Eden.Presentation",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"

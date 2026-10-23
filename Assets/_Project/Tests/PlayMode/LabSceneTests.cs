@@ -99,6 +99,97 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator NeuralSelection_ShowsALiveDiagramMatchingTheHeldAction()
+        {
+            yield return SwitchToNeural();
+            runner.TogglePause();
+            var creature = runner.Simulation.World.Creatures[2].Id;
+            runner.Select(creature);
+            var tick = runner.Simulation.World.Tick;
+            runner.RequestStep();
+            runner.RequestStep();
+            yield return WaitUntil(() => runner.Simulation.World.Tick >= tick + 2);
+            runner.RefreshNetwork();
+            yield return WaitUntil(() => runner.Hud.Graph.RepaintCount > 0);
+
+            Assert.That(runner.Hud.NetworkVisible, Is.True);
+            Assert.That(runner.Network.HasData, Is.True);
+            Assert.That(runner.Network.Creature, Is.EqualTo(creature));
+            Assert.That(runner.TryGetHeldAction(creature, out var held), Is.True);
+            Assert.That(runner.Network.Action.Thrust, Is.EqualTo(held.Thrust));
+            Assert.That(runner.Network.Action.Turn, Is.EqualTo(held.Turn));
+            Assert.That(runner.Network.Action.Strafe, Is.EqualTo(held.Strafe));
+            Assert.That(runner.Hud.Graph.RepaintCount, Is.GreaterThan(0), "the diagram was drawn");
+
+            runner.TogglePause();
+            var captures = runner.Network.Captures;
+            yield return WaitSeconds(0.35f);
+            Assert.That(runner.Network.Captures, Is.GreaterThan(captures), "refreshed while running");
+        }
+
+        [UnityTest]
+        public IEnumerator ClearingSelection_HidesAndStopsTheDiagram()
+        {
+            yield return SwitchToNeural();
+            runner.Select(runner.Simulation.World.Creatures[0].Id);
+            yield return WaitSeconds(0.3f);
+            Assert.That(runner.Hud.NetworkVisible, Is.True);
+
+            runner.ClearSelection();
+            yield return null;
+            var captures = runner.Network.Captures;
+            var repaints = runner.Hud.Graph.RepaintCount;
+            yield return WaitSeconds(0.4f);
+
+            Assert.That(runner.Hud.NetworkVisible, Is.False);
+            Assert.That(runner.Network.Captures, Is.EqualTo(captures), "no network work without a selection");
+            Assert.That(runner.Hud.Graph.RepaintCount, Is.EqualTo(repaints), "no drawing without a selection");
+        }
+
+        [UnityTest]
+        public IEnumerator WithoutSelection_TheNetworkCostsNothing()
+        {
+            yield return SwitchToNeural();
+            yield return WaitSeconds(0.5f);
+
+            Assert.That(runner.Simulation.World.Tick, Is.GreaterThan(0));
+            Assert.That(runner.Network.Captures, Is.EqualTo(0));
+            Assert.That(runner.Hud.Graph.RepaintCount, Is.EqualTo(0));
+            Assert.That(runner.Hud.NetworkVisible, Is.False);
+        }
+
+        [UnityTest]
+        public IEnumerator ReferenceBrains_KeepTheTextInspectorWithoutDiagram()
+        {
+            Assert.That(runner.BrainKind, Is.EqualTo(LabBrainKind.Heuristic));
+            runner.Select(runner.Simulation.World.Creatures[0].Id);
+            yield return WaitSeconds(0.3f);
+
+            StringAssert.Contains("Sensores", runner.Hud.InspectorText);
+            Assert.That(runner.Hud.NetworkVisible, Is.False);
+            Assert.That(runner.Network.Captures, Is.EqualTo(0));
+        }
+
+        private IEnumerator SwitchToNeural()
+        {
+            var initialRun = runner.RunDirectory;
+            runner.UseBrain(LabBrainKind.Neural);
+            if (initialRun != null && Directory.Exists(initialRun))
+                Directory.Delete(initialRun, true);
+            yield return WaitUntil(() => runner.Simulation.World.Tick > 0);
+        }
+
+        private static IEnumerator WaitSeconds(float seconds)
+        {
+            var waited = 0f;
+            while (waited < seconds)
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+        }
+
+        [UnityTest]
         public IEnumerator Lab_WritesInvariantMetricsCsvOutsideTheProject()
         {
             runner.ScaleSpeed(16f);
@@ -107,7 +198,7 @@ namespace Eden.Tests.PlayMode
 
             var directory = runner.RunDirectory;
             Assert.That(directory, Is.Not.Null);
-            StringAssert.StartsWith(Path.GetFullPath(Application.persistentDataPath), Path.GetFullPath(directory));
+            StringAssert.StartsWith(Path.GetFullPath(UnityEngine.Application.persistentDataPath), Path.GetFullPath(directory));
             runner.CloseMetricsLog();
 
             var lines = File.ReadAllLines(Path.Combine(directory, "metrics.csv"));
