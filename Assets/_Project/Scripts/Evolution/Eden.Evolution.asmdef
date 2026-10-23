@@ -1,0 +1,16 @@
+{
+  "name": "Eden.Evolution",
+  "rootNamespace": "Eden.Evolution",
+  "references": [
+    "Eden.Domain"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

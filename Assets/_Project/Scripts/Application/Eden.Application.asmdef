@@ -4,7 +4,8 @@
   "references": [
     "Eden.Domain",
     "Eden.Simulation",
-    "Eden.Brains"
+    "Eden.Brains",
+    "Eden.Evolution"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
