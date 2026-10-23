@@ -1,0 +1,6 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="bootstrap-root" picking-mode="Ignore" style="flex-grow: 1; justify-content: flex-end; align-items: center; padding-bottom: 72px;">
+        <ui:Label name="title" text="EDEN" style="font-size: 96px; -unity-font-style: bold; color: rgb(226, 240, 233); letter-spacing: 24px;" />
+        <ui:Label name="subtitle" text="Evolutionary Digital Ecosystem Network" style="font-size: 22px; color: rgb(140, 178, 164);" />
+    </ui:VisualElement>
+</ui:UXML>
