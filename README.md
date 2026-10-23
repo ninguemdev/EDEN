@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline) e **M2** (rede neural fixa) estão concluídos e o **M3** (evolução por gerações) tem todas as tarefas implementadas: genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência. Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa) e **M3** (evolução por gerações) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O próximo marco é o **M4** (laboratório completo e checkpoints). Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -226,7 +226,7 @@ Outras pastas: `Scenes`, `UI` (UXML e tema do UI Toolkit), `Art` e `Settings` (a
 | M0 | projeto Unity, cena Bootstrap e build Windows | concluído |
 | M1 | simulação determinística, regras do mundo, cérebros de referência e laboratório visual | concluído |
 | M2 | rede neural fixa 12 → 16 → 3 na CPU, genoma por criatura e visualização da rede | concluído |
-| M3 | evolução por gerações: avaliação isolada, elites, torneio, mutação, seeds de validação | em andamento |
+| M3 | evolução por gerações: avaliação isolada, elites, torneio, mutação, seeds de validação | concluído |
 | M4 | laboratório completo e checkpoints (MVP) | planejado |
 | M5 | biologia parametrizada: genes de corpo com custos e trade-offs | planejado |
 | M6 | ecossistema contínuo com reprodução local | planejado |
