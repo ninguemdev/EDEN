@@ -19,23 +19,28 @@ namespace Eden.Brains
         private readonly float[] hidden = new float[NeuralLayout.Hidden];
         private readonly float[] output = new float[NeuralLayout.Outputs];
 
+        /// <summary>Builds a brain from raw parameters, validated with the same rules as a <see cref="Domain.Genome"/>.</summary>
         public MlpBrain(float[] parameters)
+            : this(new Genome(NetworkTopology.Mlp12x16x3, parameters))
         {
-            if (parameters == null)
-                throw new ArgumentNullException(nameof(parameters));
-            if (parameters.Length != NeuralLayout.ParameterCount)
-                throw new ArgumentException(
-                    $"Expected {NeuralLayout.ParameterCount} parameters, got {parameters.Length}.", nameof(parameters));
-            for (var i = 0; i < parameters.Length; i++)
-            {
-                if (float.IsNaN(parameters[i]) || float.IsInfinity(parameters[i]))
-                    throw new ArgumentException($"Parameter {i} is not finite ({parameters[i]}).", nameof(parameters));
-            }
+        }
 
-            Array.Copy(parameters, this.parameters, parameters.Length);
+        public MlpBrain(Genome genome)
+        {
+            if (genome == null)
+                throw new ArgumentNullException(nameof(genome));
+            if (!genome.Topology.Equals(NetworkTopology.Mlp12x16x3) || genome.WeightCount != NeuralLayout.ParameterCount)
+                throw new ArgumentException($"MlpBrain needs a {NetworkTopology.Mlp12x16x3} genome, got {genome.Topology}.",
+                    nameof(genome));
+
+            Genome = genome;
+            genome.CopyWeightsTo(parameters);
         }
 
         public string Name => BrainName;
+
+        /// <summary>The heritable description this brain was built from.</summary>
+        public Genome Genome { get; }
 
         public float GetParameter(int index) => parameters[index];
 

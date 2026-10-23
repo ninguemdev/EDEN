@@ -95,7 +95,7 @@ namespace Eden.Tests.EditMode
         [Test]
         public void InvalidParameters_AreRejected()
         {
-            Assert.Throws<ArgumentNullException>(() => new MlpBrain(null));
+            Assert.Throws<ArgumentNullException>(() => new MlpBrain((float[])null));
             Assert.Throws<ArgumentException>(() => new MlpBrain(new float[258]));
             var nan = ReferenceParameters();
             nan[100] = float.NaN;
