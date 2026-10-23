@@ -71,18 +71,22 @@ namespace Eden.Simulation
             return best;
         }
 
+        // Direction components this small are float noise (e.g. sin(π) ≈ -8.7e-8): a ray along a wall must not
+        // read distance 0 just because the creature touches that wall.
+        private const float ParallelEpsilon = 1e-6f;
+
         // Distance along a unit direction to the arena border, divided by the sensor range and capped at 1.
         private static float WallReading(WorldState world, Float2 position, float directionX, float directionY)
         {
             var config = world.Config;
             var distance = float.MaxValue;
-            if (directionX > 0f)
+            if (directionX > ParallelEpsilon)
                 distance = MathF.Min(distance, (config.ArenaWidth - position.X) / directionX);
-            else if (directionX < 0f)
+            else if (directionX < -ParallelEpsilon)
                 distance = MathF.Min(distance, -position.X / directionX);
-            if (directionY > 0f)
+            if (directionY > ParallelEpsilon)
                 distance = MathF.Min(distance, (config.ArenaHeight - position.Y) / directionY);
-            else if (directionY < 0f)
+            else if (directionY < -ParallelEpsilon)
                 distance = MathF.Min(distance, -position.Y / directionY);
             return Clamp(distance / config.SensorRange, 0f, 1f);
         }

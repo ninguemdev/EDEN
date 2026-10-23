@@ -88,6 +88,20 @@ namespace Eden.Tests.EditMode
         }
 
         [Test]
+        public void RaysAlongAWall_AreNotBlockedByThatWall()
+        {
+            var world = TestWorlds.Empty();
+            var onBottomWall = world.AddCreature(new Float2(25f, 0f), MathF.PI, 50f);
+
+            var reading = Sensors.Observe(world, onBottomWall);
+
+            // sin(MathF.PI) is about -8.7e-8; the front ray runs along the wall and must see 25 units ahead.
+            Assert.That(reading.WallFront, Is.EqualTo(1f));
+            Assert.That(reading.WallLeft, Is.EqualTo(0f).Within(Tolerance), "facing -x, the bottom wall is on the left");
+            Assert.That(reading.WallRight, Is.EqualTo(1f));
+        }
+
+        [Test]
         public void SelfState_IsNormalized()
         {
             var world = TestWorlds.Empty();
