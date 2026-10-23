@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline) e **M2** (rede neural fixa) estão concluídos e o **M3** (evolução por gerações) está em andamento: já é possível evoluir genomas em episódios isolados e exportar cada geração; faltam as seeds de validação e a comparação com os cérebros de referência. Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline) e **M2** (rede neural fixa) estão concluídos e o **M3** (evolução por gerações) tem todas as tarefas implementadas: genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência. Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -129,13 +129,41 @@ Opções: `-eden-seed N`, `-eden-generations N`, `-eden-food N` (comida do epis�
 - `individuals.csv`: cada indivíduo avaliado, com id, pai, geração de nascimento e resultados;
 - `episodes.csv`: cada indivíduo × seed, antes de qualquer média.
 
-Os três CSVs se ligam por geração e candidato. O fitness dessas tabelas é de **treino**: só as seeds de validação (próxima etapa do M3) separam progresso real de sobreajuste.
+Os três CSVs se ligam por geração, modo de avaliação e candidato. O fitness de treino sozinho não separa progresso real de sobreajuste; para isso servem a validação e a bateria abaixo.
+
+### Validação e bateria de execuções
+
+- **Seeds de validação:** 5 cenários fixos para o experimento inteiro, derivados de uma seed própria (`ValidationSeed`) e nunca usados na seleção, na escolha de elites nem no ajuste de parâmetros. Validar uma geração só observa: a evolução segue idêntica com ou sem validação.
+- **Campeão do treino:** o indivíduo que a seleção colocaria em primeiro. O resultado dele na validação é uma estimativa honesta; o "melhor da validação" é escolhido pela própria validação e por isso é otimista.
+- **Bateria:** execuções independentes (seeds de experimento consecutivas) que compartilham as mesmas seeds de validação, mais os cérebros aleatório e heurístico nos mesmos cenários e com o mesmo número de episódios. A bateria de aceitação proposta é 5 execuções × 30 gerações, 3 seeds de treino e 5 de validação; com orçamento menor o relatório se marca como **preliminar**.
+
+```powershell
+& "C:\Program Files\Unity\Hub\Editor\6000.3.27f1\Editor\Unity.exe" -batchmode -projectPath . `
+  -executeMethod Eden.Editor.EvolutionBatch.RunBatteryFromCommandLine -eden-seed 1 -logFile battery.log
+```
+
+Opções extras: `-eden-runs N`, `-eden-generations N`, `-eden-validation-interval N` (padrão 5: valida a população inteira nas gerações 0, 5, 10… e na última), `-eden-food N` e `-eden-output DIR`. O diretório da bateria contém:
+
+- `report.txt`: orçamento, referências, cada execução (geração 0 → final), média ± desvio entre execuções e as comparações contadas por execução (mediana e campeão contra aleatório, heurístico e a própria geração 0), inclusive quando não há ganho;
+- `validation.csv` e `baselines.csv`: os mesmos números em CSV;
+- uma pasta por execução com os CSVs de treino e validação descritos acima.
+
+Primeira bateria de aceitação (valores propostos, 32 comidas por episódio, seeds de experimento 1–5, seed de validação 1):
+
+| Na validação, geração final | Média ± desvio entre execuções | Mín – máx |
+| --- | --- | --- |
+| Mediana da população | 2,43 ± 0,93 | 1,53 – 3,76 |
+| Campeão do treino | 2,53 ± 0,94 | 1,58 – 3,88 |
+| Mediana na geração 0 | 0,05 ± 0,01 | 0,03 – 0,07 |
+| Sobrevivência média | 0,61 ± 0,24 | 0,28 – 0,93 |
+
+Referências nos mesmos cenários: aleatório 0,13 e heurístico 1,38 (nenhum dos dois sobrevive aos 120 s). A mediana final superou a da geração 0, o aleatório e o heurístico nas 5 execuções, mas a variação entre execuções é grande e a diversidade dos pesos cai depressa nas primeiras gerações. É um resultado com esta configuração, não uma garantia; os valores da economia de energia ainda estão em calibração.
 
 ## Testes
 
 Pelo Editor: **Window → General → Test Runner**, abas EditMode e PlayMode.
 
-- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, avaliação isolada, seleção, mutação, linhagem, métricas e CSV, além de execuções longas com verificação de invariantes e independência de FPS.
+- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, além de execuções longas com verificação de invariantes e independência de FPS.
 - **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id e gravação do CSV.
 
 Pela linha de comando, com o Editor **fechado** para este projeto:
