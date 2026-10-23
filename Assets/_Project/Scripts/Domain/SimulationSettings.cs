@@ -7,6 +7,7 @@ namespace Eden.Domain
     /// <see cref="SimulationConfig"/> before a run starts. Defaults are the proposed starting values from the
     /// planning docs and still have to be measured and tuned. Units: arena units, seconds, energy units.
     /// </summary>
+    [Serializable]
     public sealed class SimulationSettings
     {
         public ulong Seed;

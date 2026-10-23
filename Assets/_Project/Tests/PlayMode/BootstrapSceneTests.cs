@@ -36,6 +36,8 @@ namespace Eden.Tests.PlayMode
             Assert.That(titleBounds.width, Is.GreaterThan(0f), message);
             Assert.That(titleBounds.height, Is.GreaterThan(0f), message);
             Assert.That(panelBounds.Contains(titleBounds.min) && panelBounds.Contains(titleBounds.max), Is.True, message);
+
+            LabSceneTests.DeleteRunDirectory(Object.FindFirstObjectByType<Eden.Presentation.LabRunner>());
         }
     }
 }

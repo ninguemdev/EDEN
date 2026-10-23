@@ -1,0 +1,17 @@
+{
+  "name": "Eden.Persistence",
+  "rootNamespace": "Eden.Persistence",
+  "references": [
+    "Eden.Domain",
+    "Eden.Application"
+  ],
+  "includePlatforms": [],
+  "excludePlatforms": [],
+  "allowUnsafeCode": false,
+  "overrideReferences": false,
+  "precompiledReferences": [],
+  "autoReferenced": false,
+  "defineConstraints": [],
+  "versionDefines": [],
+  "noEngineReferences": true
+}

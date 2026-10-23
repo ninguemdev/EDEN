@@ -2,6 +2,9 @@
   "name": "Eden.Tests.PlayMode",
   "rootNamespace": "Eden.Tests.PlayMode",
   "references": [
+    "Eden.Domain",
+    "Eden.Simulation",
+    "Eden.Presentation",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],
