@@ -124,28 +124,20 @@ namespace Eden.Tests.EditMode
         private static ulong RunWorld(Func<int, double> frameSeconds)
         {
             const int targetTicks = 600;
-            var world = WorldFactory.CreateInitial(SimulationConfig.CreateDefault(77));
-            var clock = new FixedStepClock(world.Config.TicksPerSecond);
+            var simulation = new WorldSimulation(WorldFactory.CreateInitial(SimulationConfig.CreateDefault(77)));
+            var controller = new SeekFoodController();
+            var clock = new FixedStepClock(simulation.World.Config.TicksPerSecond);
             clock.SetSpeed(2f);
 
-            for (var frame = 0; world.Tick < targetTicks; frame++)
+            for (var frame = 0; simulation.World.Tick < targetTicks; frame++)
             {
                 var ticks = clock.Advance(frameSeconds(frame));
-                for (var i = 0; i < ticks && world.Tick < targetTicks; i++)
-                    TestTick(world);
+                for (var i = 0; i < ticks && simulation.World.Tick < targetTicks; i++)
+                    simulation.Step(controller);
             }
 
-            return WorldFingerprint.Compute(world);
-        }
-
-        // Stand-in for the T12 rules: uses world randomness and the fixed tick duration, never frame time.
-        private static void TestTick(WorldState world)
-        {
-            var index = (int)world.WorldRandom.NextUInt((uint)world.Creatures.Count);
-            var creature = world.Creatures[index];
-            creature.Energy -= world.Config.TickDuration;
-            creature.AgeTicks++;
-            world.AdvanceTick();
+            Assert.That(simulation.World.Creatures, Is.Not.Empty, "the scenario should still have activity");
+            return simulation.ComputeFingerprint();
         }
     }
 }
