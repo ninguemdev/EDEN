@@ -18,6 +18,9 @@ namespace Eden.Application
         private readonly Func<CreatureId, IBrain> brainFor;
         private readonly ulong runSeed;
         private readonly int decisionInterval;
+        private CreatureId? watched;
+        private Observation watchedObservation;
+        private bool hasWatchedDecision;
 
         public BrainController(SimulationConfig config, Func<CreatureId, IBrain> brainFor)
         {
@@ -53,6 +56,11 @@ namespace Eden.Application
             {
                 slot.Action = slot.Brain.Evaluate(observation, slot.State);
                 slot.TicksUntilDecision = decisionInterval;
+                if (watched.HasValue && watched.Value == creature)
+                {
+                    watchedObservation = observation;
+                    hasWatchedDecision = true;
+                }
             }
 
             slot.TicksUntilDecision--;
@@ -64,6 +72,23 @@ namespace Eden.Application
             var found = slots.TryGetValue(creature, out var slot);
             brain = found ? slot.Brain : null;
             return found;
+        }
+
+        /// <summary>
+        /// Keeps the observation of the next decisions of one creature (e.g. the selected one) for inspection.
+        /// Only that creature is recorded, so watching costs nothing for the rest of the population; null stops.
+        /// </summary>
+        public void Watch(CreatureId? creature)
+        {
+            watched = creature;
+            hasWatchedDecision = false;
+        }
+
+        /// <summary>Observation the watched creature's brain used for its current held action, if it decided since.</summary>
+        public bool TryGetWatchedDecision(out Observation observation)
+        {
+            observation = watchedObservation;
+            return hasWatchedDecision;
         }
 
         /// <summary>Action currently held for the creature (the result of its last decision).</summary>

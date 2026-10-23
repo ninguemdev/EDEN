@@ -1,3 +1,4 @@
+using Eden.Application;
 using Eden.Brains;
 using Eden.Domain;
 using NUnit.Framework;
@@ -44,6 +45,22 @@ namespace Eden.Tests.EditMode
             {
                 for (var i = 0; i < 1000; i++)
                     brain.ComputeActivations(observation, hidden, outputs);
+            }, Is.Not.AllocatingGCMemory());
+        }
+
+        [Test]
+        public void Capture_DoesNotAllocateAfterWarmup()
+        {
+            var brain = new MlpBrain(MlpBrainTests.ReferenceParameters());
+            var snapshot = new NeuralSnapshot();
+            var observation = MlpBrainTests.Reference;
+            var creature = new CreatureId(1);
+            snapshot.Capture(creature, brain, observation);
+
+            Assert.That(() =>
+            {
+                for (var i = 0; i < 1000; i++)
+                    snapshot.Capture(creature, brain, observation);
             }, Is.Not.AllocatingGCMemory());
         }
     }
