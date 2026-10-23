@@ -32,9 +32,18 @@ namespace Eden.Simulation
 
         public int LastFoodEaten { get; private set; }
 
+        /// <summary>Observation values corrected by <see cref="ObservationLimits.Sanitize"/> in the last tick.</summary>
+        public int LastCorrectedInputValues { get; private set; }
+
+        /// <summary>Observation values corrected since the run started; stays 0 while sensors honor the contract.</summary>
+        public long CorrectedInputValues { get; private set; }
+
         public ScheduledEvent<SimulationEvent>[] SnapshotAgenda() => agenda.SnapshotPending();
 
-        /// <summary>Runs one tick: agenda, observe all, decide in id order, move, eat, energy/age/death, cleanup.</summary>
+        /// <summary>
+        /// Runs one tick: agenda, observe all (checked against <see cref="ObservationLimits"/>), decide in id order,
+        /// move, eat, energy/age/death, cleanup.
+        /// </summary>
         public void Step(ICreatureController controller)
         {
             if (controller == null)
@@ -45,13 +54,19 @@ namespace Eden.Simulation
             var creatures = World.Creatures;
             deaths.Clear();
             LastFoodEaten = 0;
+            LastCorrectedInputValues = 0;
 
             RunDueEvents(tick);
 
             var count = creatures.Count;
             EnsureCapacity(count);
             for (var i = 0; i < count; i++)
-                observations[i] = Sensors.Observe(World, creatures[i]);
+            {
+                observations[i] = ObservationLimits.Sanitize(Sensors.Observe(World, creatures[i]), out var corrected);
+                LastCorrectedInputValues += corrected;
+            }
+
+            CorrectedInputValues += LastCorrectedInputValues;
             for (var i = 0; i < count; i++)
                 actions[i] = controller.Decide(creatures[i].Id, observations[i]);
             for (var i = 0; i < count; i++)
