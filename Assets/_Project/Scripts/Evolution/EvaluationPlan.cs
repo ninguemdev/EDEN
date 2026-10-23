@@ -21,6 +21,21 @@ namespace Eden.Evolution
         /// foraging alone in the 50 × 50 arena is not trivial. Values are starting points to be measured.
         /// </summary>
         public SimulationSettings World = new SimulationSettings { InitialPopulation = 1, InitialFood = 32 };
+
+        /// <summary>Genomes per generation (proposed 64).</summary>
+        public int PopulationSize = 64;
+
+        /// <summary>Best genomes copied unchanged into the next generation and evaluated again (proposed 4).</summary>
+        public int EliteCount = 4;
+
+        /// <summary>Candidates drawn, with replacement, for each parent tournament (proposed 3).</summary>
+        public int TournamentSize = 3;
+
+        /// <summary>Chance that each weight of a child is mutated (proposed 0.05).</summary>
+        public float MutationProbability = 0.05f;
+
+        /// <summary>Standard deviation of the Gaussian noise added to a mutated weight (proposed 0.10).</summary>
+        public float MutationSigma = 0.10f;
     }
 
     /// <summary>Kind of evaluation a result belongs to. Persisted in reports: never renumber.</summary>
