@@ -66,6 +66,14 @@ namespace Eden.Application
             return found;
         }
 
+        /// <summary>Action currently held for the creature (the result of its last decision).</summary>
+        public bool TryGetLastAction(CreatureId creature, out CreatureAction action)
+        {
+            var found = slots.TryGetValue(creature, out var slot);
+            action = found ? slot.Action : CreatureAction.Idle;
+            return found;
+        }
+
         /// <summary>Drops brains of creatures that died, e.g. with <see cref="WorldSimulation.LastDeaths"/>.</summary>
         public void Forget(IReadOnlyList<CreatureDeath> deaths)
         {
