@@ -1,0 +1,30 @@
+* text=auto eol=lf
+*.cs text eol=lf
+*.asmdef text eol=lf
+*.asmref text eol=lf
+*.json text eol=lf
+*.meta text eol=lf
+*.unity text eol=lf
+*.prefab text eol=lf
+*.asset text eol=lf
+*.mat text eol=lf
+*.shader text eol=lf
+*.hlsl text eol=lf
+*.uss text eol=lf
+*.uxml text eol=lf
+*.md text eol=lf
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.wav binary
+*.ogg binary
+*.mp3 binary
+*.fbx binary
+*.blend binary
+*.ttf binary
+*.otf binary
+# LFS intentionally not enabled: the bootstrap uses tiny primitives only.
+# Add targeted LFS rules before introducing large binary assets.
