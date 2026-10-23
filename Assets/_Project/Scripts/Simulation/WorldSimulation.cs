@@ -1,0 +1,173 @@
+using System;
+using System.Collections.Generic;
+using Eden.Domain;
+
+namespace Eden.Simulation
+{
+    /// <summary>
+    /// Applies the world rules one fixed tick at a time. A tick never depends on frame time, wall-clock time or
+    /// global random sources, so the same config, seed, controller and tick count always give the same state.
+    /// </summary>
+    public sealed class WorldSimulation
+    {
+        private static readonly SimulationEvent FoodRespawn = new SimulationEvent(SimulationEventKind.FoodRespawn);
+
+        private readonly TickScheduler<SimulationEvent> agenda = new TickScheduler<SimulationEvent>();
+        private readonly List<ScheduledEvent<SimulationEvent>> dueEvents = new List<ScheduledEvent<SimulationEvent>>();
+        private readonly List<CreatureDeath> deaths = new List<CreatureDeath>();
+        private Observation[] observations = Array.Empty<Observation>();
+        private CreatureAction[] actions = Array.Empty<CreatureAction>();
+        private float[] foodGains = Array.Empty<float>();
+
+        public WorldSimulation(WorldState world)
+        {
+            World = world ?? throw new ArgumentNullException(nameof(world));
+        }
+
+        public WorldState World { get; }
+        public bool IsExtinct => World.Creatures.Count == 0;
+
+        /// <summary>Creatures that died during the last tick, in id order.</summary>
+        public IReadOnlyList<CreatureDeath> LastDeaths => deaths;
+
+        public int LastFoodEaten { get; private set; }
+
+        public ScheduledEvent<SimulationEvent>[] SnapshotAgenda() => agenda.SnapshotPending();
+
+        /// <summary>Runs one tick: agenda, observe all, decide in id order, move, eat, energy/age/death, cleanup.</summary>
+        public void Step(ICreatureController controller)
+        {
+            if (controller == null)
+                throw new ArgumentNullException(nameof(controller));
+
+            var config = World.Config;
+            var tick = World.Tick;
+            var creatures = World.Creatures;
+            deaths.Clear();
+            LastFoodEaten = 0;
+
+            RunDueEvents(tick);
+
+            var count = creatures.Count;
+            EnsureCapacity(count);
+            for (var i = 0; i < count; i++)
+                observations[i] = Sensors.Observe(World, creatures[i]);
+            for (var i = 0; i < count; i++)
+                actions[i] = controller.Decide(creatures[i].Id, observations[i]);
+            for (var i = 0; i < count; i++)
+                Movement.Apply(creatures[i], actions[i], config);
+
+            ResolveFeeding(tick, count);
+            ApplyEnergyAndAging(tick, count);
+
+            World.RemoveEatenFood();
+            World.RemoveDeadCreatures();
+            World.AdvanceTick();
+        }
+
+        /// <summary>World fingerprint extended with the pending agenda.</summary>
+        public ulong ComputeFingerprint()
+        {
+            var hash = StateHasher.Create();
+            hash.Add(WorldFingerprint.Compute(World));
+            hash.Add(agenda.NextSequence);
+            hash.Add(agenda.LastDrainedTick);
+            foreach (var pending in agenda.SnapshotPending())
+            {
+                hash.Add(pending.DueTick);
+                hash.Add(pending.Sequence);
+                hash.Add((ulong)pending.Payload.Kind);
+            }
+
+            return hash.Value;
+        }
+
+        private void RunDueEvents(long tick)
+        {
+            dueEvents.Clear();
+            agenda.DrainDue(tick, dueEvents);
+            foreach (var due in dueEvents)
+            {
+                switch (due.Payload.Kind)
+                {
+                    case SimulationEventKind.FoodRespawn:
+                        World.AddFood(WorldFactory.RandomArenaPosition(World.SpawnRandom, World.Config), World.Config.FoodEnergy);
+                        break;
+                    default:
+                        throw new InvalidOperationException($"Unknown event kind {due.Payload.Kind}.");
+                }
+            }
+        }
+
+        // Each food goes to the closest creature within eat radius; equal distance goes to the lower id.
+        private void ResolveFeeding(long tick, int count)
+        {
+            Array.Clear(foodGains, 0, count);
+            var creatures = World.Creatures;
+            var food = World.Food;
+            var eatRadiusSquared = World.Config.EatRadius * World.Config.EatRadius;
+
+            for (var f = 0; f < food.Count; f++)
+            {
+                var item = food[f];
+                var winner = -1;
+                var best = float.MaxValue;
+                for (var c = 0; c < count; c++)
+                {
+                    var dx = creatures[c].Position.X - item.Position.X;
+                    var dy = creatures[c].Position.Y - item.Position.Y;
+                    var distanceSquared = dx * dx + dy * dy;
+                    if (distanceSquared <= eatRadiusSquared && distanceSquared < best)
+                    {
+                        winner = c;
+                        best = distanceSquared;
+                    }
+                }
+
+                if (winner < 0)
+                    continue;
+
+                item.MarkEaten();
+                foodGains[winner] += item.Energy;
+                creatures[winner].FoodEnergyEaten += item.Energy;
+                LastFoodEaten++;
+                agenda.Schedule(tick + World.Config.FoodRespawnTicks, FoodRespawn);
+            }
+        }
+
+        private void ApplyEnergyAndAging(long tick, int count)
+        {
+            var config = World.Config;
+            var creatures = World.Creatures;
+            for (var i = 0; i < count; i++)
+            {
+                var creature = creatures[i];
+                var action = actions[i];
+                var effort = action.Thrust * action.Thrust + action.Strafe * action.Strafe;
+                var cost = config.TickDuration *
+                           (config.MetabolismPerSecond + config.MovementCostPerSecond * effort + config.SensorCostPerSecond);
+                var energy = creature.Energy + foodGains[i] - cost;
+                creature.Energy = energy < 0f ? 0f : energy > config.MaxEnergy ? config.MaxEnergy : energy;
+                creature.AgeTicks++;
+
+                var cause = creature.Energy <= 0f ? DeathCause.Starvation
+                    : creature.AgeTicks >= config.MaxAgeTicks ? DeathCause.OldAge
+                    : DeathCause.None;
+                if (cause == DeathCause.None)
+                    continue;
+                creature.DeathCause = cause;
+                deaths.Add(new CreatureDeath(creature.Id, tick, cause));
+            }
+        }
+
+        private void EnsureCapacity(int count)
+        {
+            if (observations.Length >= count)
+                return;
+            var size = Math.Max(count, observations.Length * 2);
+            observations = new Observation[size];
+            actions = new CreatureAction[size];
+            foodGains = new float[size];
+        }
+    }
+}
