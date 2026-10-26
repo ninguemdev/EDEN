@@ -121,6 +121,13 @@ namespace Eden.Persistence
             }
         }
 
+        /// <summary>Optional member of an object, or null when it is absent.</summary>
+        public JsonValue TryGet(string name)
+        {
+            RequireKind(JsonKind.Object);
+            return Find(name);
+        }
+
         public bool IsNull => Kind == JsonKind.Null;
 
         /// <summary>Array of at most <paramref name="max"/> items, checked before the caller allocates anything for them.</summary>

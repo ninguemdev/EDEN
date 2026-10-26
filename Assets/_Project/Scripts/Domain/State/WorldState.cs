@@ -18,6 +18,7 @@ namespace Eden.Domain
         public WorldState(SimulationConfig config)
         {
             Config = config;
+            ReferenceBody = CreatureBody.Reference(config);
             spareFood = new Stack<FoodState>(config.InitialFood);
             WorldRandom = SeedDerivation.CreateStream(config.Seed, RandomStream.World);
             SpawnRandom = SeedDerivation.CreateStream(config.Seed, RandomStream.Spawn);
@@ -29,6 +30,7 @@ namespace Eden.Domain
             Pcg32State worldRandom, Pcg32State spawnRandom)
         {
             Config = config;
+            ReferenceBody = CreatureBody.Reference(config);
             spareFood = new Stack<FoodState>(config.InitialFood);
             Tick = tick;
             NextCreatureId = nextCreatureId;
@@ -40,7 +42,8 @@ namespace Eden.Domain
         /// <summary>
         /// Rebuilds a world saved between ticks: living creatures and uneaten food in ascending id order, below the
         /// id counters, inside the arena and within the config's limits. Everything is checked before the world is
-        /// built and all problems are reported together; the given objects are copied, never shared.
+        /// built and all problems are reported together (bodies included: within the limits of <see cref="BodyGenes"/>);
+        /// the given objects are copied, never shared.
         /// </summary>
         public static WorldState Restore(SimulationConfig config, long tick, int nextCreatureId, int nextFoodId,
             Pcg32State worldRandom, Pcg32State spawnRandom, IReadOnlyList<CreatureState> creatures,
@@ -76,7 +79,7 @@ namespace Eden.Domain
             var world = new WorldState(config, tick, nextCreatureId, nextFoodId, worldRandom, spawnRandom);
             foreach (var saved in creatures)
             {
-                world.creatures.Add(new CreatureState(saved.Id, saved.Position, saved.Heading, saved.Energy)
+                world.creatures.Add(new CreatureState(saved.Id, saved.Position, saved.Heading, saved.Energy, saved.Body)
                 {
                     Velocity = saved.Velocity, AgeTicks = saved.AgeTicks, FoodEnergyEaten = saved.FoodEnergyEaten
                 });
@@ -88,6 +91,10 @@ namespace Eden.Domain
         }
 
         public SimulationConfig Config { get; }
+
+        /// <summary>Body made of the config's own values, which every creature has unless it was given another.</summary>
+        public CreatureBody ReferenceBody { get; }
+
         public long Tick { get; private set; }
 
         /// <summary>Stream for rule-level randomness during ticks.</summary>
@@ -103,9 +110,16 @@ namespace Eden.Domain
 
         public void AdvanceTick() => Tick++;
 
-        public CreatureState AddCreature(Float2 position, float heading, float energy)
+        /// <summary>Adds a creature with the <see cref="ReferenceBody"/>.</summary>
+        public CreatureState AddCreature(Float2 position, float heading, float energy) =>
+            AddCreature(position, heading, energy, ReferenceBody);
+
+        /// <summary>Adds a creature with <paramref name="body"/>, which must be within the limits of this config.</summary>
+        public CreatureState AddCreature(Float2 position, float heading, float energy, CreatureBody body)
         {
-            var creature = new CreatureState(new CreatureId(NextCreatureId++), position, heading, energy);
+            if (!body.IsWithinLimits(Config))
+                throw new ArgumentException($"Body {body} is outside the limits of this config.", nameof(body));
+            var creature = new CreatureState(new CreatureId(NextCreatureId++), position, heading, energy, body);
             creatures.Add(creature);
             return creature;
         }
@@ -192,6 +206,8 @@ namespace Eden.Domain
                     errors.Add($"{name} age {creature.AgeTicks} is outside [0, {config.MaxAgeTicks})");
                 if (!(creature.FoodEnergyEaten >= 0f) || !IsFinite(creature.FoodEnergyEaten))
                     errors.Add($"{name} eaten food energy {creature.FoodEnergyEaten} must be finite and not negative");
+                if (!creature.Body.IsWithinLimits(config))
+                    errors.Add($"{name} body {creature.Body} is outside the limits of the config");
             }
         }
 

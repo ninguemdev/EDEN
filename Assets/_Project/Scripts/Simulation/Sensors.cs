@@ -6,7 +6,8 @@ namespace Eden.Simulation
     /// <summary>
     /// Builds a creature's local <see cref="Observation"/> from the current world state. Readings are clamped to
     /// their ranges, but non-finite state would pass through; <see cref="WorldSimulation"/> therefore checks every
-    /// observation with <see cref="ObservationLimits.Sanitize"/> before a brain sees it.
+    /// observation with <see cref="ObservationLimits.Sanitize"/> before a brain sees it. Range and speed readings are
+    /// relative to the creature's own body: its sensor range and its speed cap.
     /// </summary>
     public static class Sensors
     {
@@ -17,12 +18,13 @@ namespace Eden.Simulation
             var forwardY = MathF.Sin(creature.Heading);
             var position = creature.Position;
             var velocity = creature.Velocity;
-            var range = config.SensorRange;
+            var range = creature.Body.SensorRange;
+            var maxSpeed = creature.Body.MaxSpeed;
 
             var energy = Clamp(creature.Energy / config.MaxEnergy, 0f, 1f);
             var age = Clamp((float)creature.AgeTicks / config.MaxAgeTicks, 0f, 1f);
-            var velocityForward = Clamp((velocity.X * forwardX + velocity.Y * forwardY) / config.MaxSpeed, -1f, 1f);
-            var velocityLeft = Clamp((velocity.Y * forwardX - velocity.X * forwardY) / config.MaxSpeed, -1f, 1f);
+            var velocityForward = Clamp((velocity.X * forwardX + velocity.Y * forwardY) / maxSpeed, -1f, 1f);
+            var velocityLeft = Clamp((velocity.Y * forwardX - velocity.X * forwardY) / maxSpeed, -1f, 1f);
 
             float foodSin = 0f, foodCos = 0f, foodProximity = 0f, foodVisible = 0f;
             var nearest = FindNearestVisibleFood(world, position, range * range, out var distanceSquared);
@@ -46,10 +48,10 @@ namespace Eden.Simulation
 
             return new Observation(energy, age, velocityForward, velocityLeft,
                 foodSin, foodCos, foodProximity, foodVisible,
-                WallReading(world, position, forwardX, forwardY),
-                WallReading(world, position, forwardY, -forwardX),
-                WallReading(world, position, -forwardX, -forwardY),
-                WallReading(world, position, -forwardY, forwardX));
+                WallReading(config, position, range, forwardX, forwardY),
+                WallReading(config, position, range, forwardY, -forwardX),
+                WallReading(config, position, range, -forwardX, -forwardY),
+                WallReading(config, position, range, -forwardY, forwardX));
         }
 
         // Nearest food within range; on equal distance the lower id wins because food is in ascending id order.
@@ -80,9 +82,9 @@ namespace Eden.Simulation
         private const float ParallelEpsilon = 1e-6f;
 
         // Distance along a unit direction to the arena border, divided by the sensor range and capped at 1.
-        private static float WallReading(WorldState world, Float2 position, float directionX, float directionY)
+        private static float WallReading(SimulationConfig config, Float2 position, float range, float directionX,
+            float directionY)
         {
-            var config = world.Config;
             var distance = float.MaxValue;
             if (directionX > ParallelEpsilon)
                 distance = MathF.Min(distance, (config.ArenaWidth - position.X) / directionX);
@@ -92,7 +94,7 @@ namespace Eden.Simulation
                 distance = MathF.Min(distance, (config.ArenaHeight - position.Y) / directionY);
             else if (directionY < -ParallelEpsilon)
                 distance = MathF.Min(distance, -position.Y / directionY);
-            return Clamp(distance / config.SensorRange, 0f, 1f);
+            return Clamp(distance / range, 0f, 1f);
         }
 
         private static float Clamp(float value, float min, float max) => value < min ? min : value > max ? max : value;

@@ -33,6 +33,10 @@ namespace Eden.Domain
                 hash.Add(creature.AgeTicks);
                 hash.Add(creature.FoodEnergyEaten);
                 hash.Add((ulong)creature.DeathCause);
+                hash.Add(creature.Body.EatRadius);
+                hash.Add(creature.Body.MaxSpeed);
+                hash.Add(creature.Body.SensorRange);
+                hash.Add(creature.Body.MetabolismPerSecond);
             }
 
             hash.Add((ulong)world.Food.Count);

@@ -9,7 +9,8 @@ namespace Eden.Application
     /// <summary>
     /// Runs candidates in isolated episodes: each candidate is the only creature of a world built from the episode
     /// seed, so every candidate meets the same arena, food, start position, heading and brain stream, and nobody can
-    /// take food from anybody else. Episodes run sequentially, either all at once or as an <see cref="EvaluationJob"/>
+    /// take food from anybody else. A genome's body genes shape its creature as the plan expresses them; reference
+    /// brains always have the reference body. Episodes run sequentially, either all at once or as an <see cref="EvaluationJob"/>
     /// advanced a few ticks at a time; both give the same results.
     /// </summary>
     public sealed class IsolatedEvaluator
@@ -29,29 +30,32 @@ namespace Eden.Application
         public GenerationEvaluation EvaluateValidation(IReadOnlyList<Genome> genomes, int generation) =>
             ValidationJob(genomes, generation).RunToEnd();
 
-        /// <summary>Evaluates any brains (genomes or reference brains) on explicit seeds.</summary>
+        /// <summary>
+        /// Evaluates any brains (genomes or reference brains) on explicit seeds; <paramref name="bodies"/> gives each
+        /// candidate's body genes, and null means neutral genes for all.
+        /// </summary>
         public GenerationEvaluation Evaluate(IReadOnlyList<Func<IBrain>> candidates, IReadOnlyList<ulong> seeds,
-            int generation, EvaluationMode mode) =>
-            Job(candidates, seeds, generation, mode).RunToEnd();
+            int generation, EvaluationMode mode, IReadOnlyList<BodyGenes> bodies = null) =>
+            Job(candidates, seeds, generation, mode, bodies).RunToEnd();
 
         public EvaluationJob TrainingJob(IReadOnlyList<Genome> genomes, int generation) =>
-            Job(BrainsOf(genomes), plan.TrainingSeeds(generation), generation, EvaluationMode.Training);
+            Job(BrainsOf(genomes), plan.TrainingSeeds(generation), generation, EvaluationMode.Training, BodiesOf(genomes));
 
         public EvaluationJob ValidationJob(IReadOnlyList<Genome> genomes, int generation) =>
-            Job(BrainsOf(genomes), plan.ValidationSeeds(), generation, EvaluationMode.Validation);
+            Job(BrainsOf(genomes), plan.ValidationSeeds(), generation, EvaluationMode.Validation, BodiesOf(genomes));
 
         public EvaluationJob Job(IReadOnlyList<Func<IBrain>> candidates, IReadOnlyList<ulong> seeds, int generation,
-            EvaluationMode mode)
+            EvaluationMode mode, IReadOnlyList<BodyGenes> bodies = null)
         {
             if (candidates == null)
                 throw new ArgumentNullException(nameof(candidates));
-            return new EvaluationJob(plan, candidates, seeds, generation, mode);
+            return new EvaluationJob(plan, candidates, seeds, generation, mode, bodies);
         }
 
         public EpisodeResult RunEpisode(Func<IBrain> createBrain, ulong episodeSeed, int candidate, int seedIndex,
-            int generation, EvaluationMode mode)
+            int generation, EvaluationMode mode, BodyGenes body = default)
         {
-            var episode = new IsolatedEpisode(plan, createBrain, episodeSeed, candidate, seedIndex, generation, mode);
+            var episode = new IsolatedEpisode(plan, createBrain, episodeSeed, candidate, seedIndex, generation, mode, body);
             episode.Advance(long.MaxValue);
             return episode.Result();
         }
@@ -68,6 +72,15 @@ namespace Eden.Application
             }
 
             return candidates;
+        }
+
+        // Called after BrainsOf, which has already checked the list.
+        private static BodyGenes[] BodiesOf(IReadOnlyList<Genome> genomes)
+        {
+            var bodies = new BodyGenes[genomes.Count];
+            for (var i = 0; i < genomes.Count; i++)
+                bodies[i] = genomes[i].Body;
+            return bodies;
         }
     }
 }

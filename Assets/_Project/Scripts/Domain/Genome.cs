@@ -33,21 +33,29 @@ namespace Eden.Domain
     }
 
     /// <summary>
-    /// Heritable description of a creature: network topology and base weights (biological genes and plasticity
+    /// Heritable description of a creature: network topology, base weights and <see cref="BodyGenes"/> (plasticity
     /// coefficients come later). It never holds energy, age, position or any brain state. Immutable: weights are
     /// copied in on construction and copied out by <see cref="CopyWeights"/>, so variants (e.g. mutations) are
-    /// built as new genomes and no two owners can share mutable weight storage.
+    /// built as new genomes and no two owners can share mutable weight storage. Schema 2 added the body genes; a
+    /// schema 1 genome is the same genome with neutral body genes.
     /// </summary>
     public sealed class Genome
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 2;
 
         /// <summary>Weights are kept within [-MaxAbsWeight, MaxAbsWeight].</summary>
         public const float MaxAbsWeight = 3f;
 
         private readonly float[] weights;
 
+        /// <summary>Genome with neutral body genes (the reference body).</summary>
         public Genome(NetworkTopology topology, float[] weights)
+            : this(topology, weights, BodyGenes.Neutral)
+        {
+        }
+
+        /// <remarks><see cref="BodyGenes"/> can only hold values within their limits, so every genome is valid.</remarks>
+        public Genome(NetworkTopology topology, float[] weights, BodyGenes body)
         {
             if (weights == null)
                 throw new ArgumentNullException(nameof(weights));
@@ -64,11 +72,13 @@ namespace Eden.Domain
 
             Topology = topology;
             this.weights = (float[])weights.Clone();
+            Body = body;
         }
 
         public int SchemaVersion => CurrentSchemaVersion;
         public NetworkTopology Topology { get; }
         public int WeightCount => weights.Length;
+        public BodyGenes Body { get; }
 
         public float GetWeight(int index) => weights[index];
 
@@ -84,9 +94,12 @@ namespace Eden.Domain
             Array.Copy(weights, destination, weights.Length);
         }
 
+        /// <summary>Same weights with other body genes.</summary>
+        public Genome WithBody(BodyGenes body) => new Genome(Topology, weights, body);
+
         public bool HasSameContent(Genome other)
         {
-            if (other == null || !Topology.Equals(other.Topology))
+            if (other == null || !Topology.Equals(other.Topology) || !Body.Equals(other.Body))
                 return false;
             for (var i = 0; i < weights.Length; i++)
             {
@@ -97,7 +110,10 @@ namespace Eden.Domain
             return true;
         }
 
-        /// <summary>Weights drawn uniformly in [-limit, limit] from <paramref name="random"/>, in parameter order.</summary>
+        /// <summary>
+        /// Weights drawn uniformly in [-limit, limit] from <paramref name="random"/>, in parameter order; body genes
+        /// are neutral.
+        /// </summary>
         public static Genome CreateRandom(NetworkTopology topology, IRandomSource random, float limit)
         {
             if (random == null)

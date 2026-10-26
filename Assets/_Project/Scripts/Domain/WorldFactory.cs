@@ -7,7 +7,16 @@ namespace Eden.Domain
     {
         private const float FullTurn = 2f * MathF.PI;
 
+        /// <summary>Initial world where every creature has the reference body.</summary>
         public static WorldState CreateInitial(SimulationConfig config)
+        {
+            if (config == null)
+                throw new ArgumentNullException(nameof(config));
+            return CreateInitial(config, CreatureBody.Reference(config));
+        }
+
+        /// <summary>Initial world where every creature has <paramref name="body"/>; placement does not depend on it.</summary>
+        public static WorldState CreateInitial(SimulationConfig config, CreatureBody body)
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
@@ -18,7 +27,7 @@ namespace Eden.Domain
             {
                 var position = RandomArenaPosition(random, config);
                 var heading = random.NextFloat() * FullTurn;
-                world.AddCreature(position, heading, config.InitialEnergy);
+                world.AddCreature(position, heading, config.InitialEnergy, body);
             }
 
             for (var i = 0; i < config.InitialFood; i++)

@@ -7,12 +7,16 @@ namespace Eden.Domain
         OldAge = 2
     }
 
-    /// <summary>Living state of one creature. Not inherited: offspring start from their own initial state.</summary>
+    /// <summary>
+    /// Living state of one creature and the body it lives with. Not inherited: offspring start from their own initial
+    /// state, and their body is expressed from their own genes.
+    /// </summary>
     public sealed class CreatureState
     {
-        public CreatureState(CreatureId id, Float2 position, float heading, float energy)
+        public CreatureState(CreatureId id, Float2 position, float heading, float energy, CreatureBody body)
         {
             Id = id;
+            Body = body;
             Position = position;
             Velocity = Float2.Zero;
             Heading = heading;
@@ -20,6 +24,10 @@ namespace Eden.Domain
         }
 
         public CreatureId Id { get; }
+
+        /// <summary>Traits expressed when the creature was created; fixed for its whole life.</summary>
+        public CreatureBody Body { get; }
+
         public Float2 Position { get; set; }
         public Float2 Velocity { get; set; }
 

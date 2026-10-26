@@ -31,6 +31,12 @@ namespace Eden.Evolution
         /// </summary>
         public SimulationSettings World = new SimulationSettings { InitialPopulation = 1, InitialFood = 32 };
 
+        /// <summary>
+        /// Body genes expressed in the episodes. <see cref="BodyGeneSet.None"/> (the default) gives every creature the
+        /// reference body of <see cref="World"/>: the fixed-body control. Genes outside the set start neutral.
+        /// </summary>
+        public BodyGeneSet ExpressedBodyGenes = BodyGeneSet.None;
+
         /// <summary>Genomes per generation (proposed 64).</summary>
         public int PopulationSize = 64;
 
@@ -105,6 +111,8 @@ namespace Eden.Evolution
             if (settings.ValidationSeedCount < 1 || settings.ValidationSeedCount > MaxTrainingSeeds)
                 errors.Add($"{nameof(settings.ValidationSeedCount)} must be in [1, {MaxTrainingSeeds}] " +
                            $"(was {settings.ValidationSeedCount})");
+            if (!BodyGenes.IsValidSet(settings.ExpressedBodyGenes))
+                errors.Add($"{nameof(settings.ExpressedBodyGenes)} has unknown genes ({(int)settings.ExpressedBodyGenes})");
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid evolution settings: " + string.Join("; ", errors));
 
@@ -113,6 +121,7 @@ namespace Eden.Evolution
             var validated = new SimulationConfig(world);
 
             ExperimentSeed = settings.ExperimentSeed;
+            ExpressedBodyGenes = settings.ExpressedBodyGenes;
             EpisodeSeconds = settings.EpisodeSeconds;
             TrainingSeedsPerGeneration = settings.TrainingSeedsPerGeneration;
             EpisodeTicks = Math.Max(1L, (long)Math.Round((double)EpisodeSeconds * validated.TicksPerSecond));
@@ -125,6 +134,10 @@ namespace Eden.Evolution
         }
 
         public ulong ExperimentSeed { get; }
+
+        /// <summary>Body genes that shape the episode creature; <see cref="BodyGeneSet.None"/> is the fixed body.</summary>
+        public BodyGeneSet ExpressedBodyGenes { get; }
+
         public float EpisodeSeconds { get; }
         public int TrainingSeedsPerGeneration { get; }
         public ulong ValidationSeed { get; }
@@ -153,6 +166,10 @@ namespace Eden.Evolution
 
         /// <summary>Held-out seeds, identical for every generation of the experiment (a fresh copy).</summary>
         public ulong[] ValidationSeeds() => (ulong[])validationSeeds.Clone();
+
+        /// <summary>Body of the episode creature with <paramref name="genes"/>: only the expressed genes count.</summary>
+        public CreatureBody BodyFor(SimulationConfig episode, BodyGenes genes) =>
+            CreatureBody.Express(episode, genes, ExpressedBodyGenes);
 
         /// <summary>World configuration of one isolated episode (single creature) for a seed.</summary>
         public SimulationConfig EpisodeConfig(ulong episodeSeed)

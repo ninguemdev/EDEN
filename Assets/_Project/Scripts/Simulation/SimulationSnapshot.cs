@@ -65,7 +65,7 @@ namespace Eden.Simulation
         private static CreatureState Clone(CreatureState creature) =>
             creature == null
                 ? null
-                : new CreatureState(creature.Id, creature.Position, creature.Heading, creature.Energy)
+                : new CreatureState(creature.Id, creature.Position, creature.Heading, creature.Energy, creature.Body)
                 {
                     Velocity = creature.Velocity,
                     AgeTicks = creature.AgeTicks,
