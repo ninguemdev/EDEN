@@ -6,6 +6,7 @@
     "Eden.Simulation",
     "Eden.Brains",
     "Eden.Application",
+    "Eden.Evolution",
     "Eden.Presentation",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"

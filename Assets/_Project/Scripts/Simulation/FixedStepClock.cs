@@ -6,7 +6,8 @@ namespace Eden.Simulation
     /// Turns real frame time into a number of whole simulation ticks. The simulation itself never sees frame
     /// time: running faster means more complete ticks per frame, never a larger tick duration. When the machine
     /// cannot keep up, work beyond the per-frame and backlog limits is dropped and reported, so the requested
-    /// speed is not reached but no rule is skipped.
+    /// speed is not reached but no rule is skipped. Unpaced, the caller runs as many whole ticks as fit in its own
+    /// per-frame work budget and reports them, so that the effective speed is still measured.
     /// </summary>
     public sealed class FixedStepClock
     {
@@ -43,6 +44,9 @@ namespace Eden.Simulation
         public int MaxBacklogTicks { get; }
         public bool IsPaused { get; private set; }
 
+        /// <summary>True when ticks are not paced by <see cref="RequestedSpeed"/> but by the caller's work budget.</summary>
+        public bool IsUnpaced { get; private set; }
+
         /// <summary>Simulated seconds per real second the user asked for.</summary>
         public float RequestedSpeed { get; private set; }
 
@@ -77,6 +81,28 @@ namespace Eden.Simulation
             pendingSteps++;
         }
 
+        /// <summary>Switches between paced and unpaced running; nothing pending is carried over.</summary>
+        public void SetUnpaced(bool unpaced)
+        {
+            if (unpaced == IsUnpaced)
+                return;
+            IsUnpaced = unpaced;
+            pendingTicks = 0;
+            ResetMeasurement();
+        }
+
+        /// <summary>Records the ticks the caller ran unpaced in a frame that took <paramref name="realDeltaSeconds"/>.</summary>
+        public void RecordUnpaced(double realDeltaSeconds, int ticks)
+        {
+            if (!IsUnpaced || IsPaused)
+                throw new InvalidOperationException("Only an unpaced, running clock records unpaced ticks.");
+            if (double.IsNaN(realDeltaSeconds) || double.IsInfinity(realDeltaSeconds) || realDeltaSeconds < 0)
+                throw new ArgumentOutOfRangeException(nameof(realDeltaSeconds), "Frame time must be finite and non-negative.");
+            if (ticks < 0)
+                throw new ArgumentOutOfRangeException(nameof(ticks), "Must not be negative.");
+            Measure(realDeltaSeconds, ticks);
+        }
+
         public void SetSpeed(float speed)
         {
             if (float.IsNaN(speed) || speed < MinSpeed || speed > MaxSpeed)
@@ -84,7 +110,10 @@ namespace Eden.Simulation
             RequestedSpeed = speed;
         }
 
-        /// <summary>Returns how many ticks to run for a frame that took <paramref name="realDeltaSeconds"/>.</summary>
+        /// <summary>
+        /// Returns how many ticks to run for a frame that took <paramref name="realDeltaSeconds"/>: requested steps
+        /// while paused, nothing while running unpaced (see <see cref="RecordUnpaced"/>), paced ticks otherwise.
+        /// </summary>
         public int Advance(double realDeltaSeconds)
         {
             if (double.IsNaN(realDeltaSeconds) || double.IsInfinity(realDeltaSeconds) || realDeltaSeconds < 0)
@@ -95,6 +124,10 @@ namespace Eden.Simulation
             {
                 ticks = Math.Min(pendingSteps, MaxTicksPerFrame);
                 pendingSteps -= ticks;
+            }
+            else if (IsUnpaced)
+            {
+                return 0;
             }
             else
             {

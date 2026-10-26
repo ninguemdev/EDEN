@@ -3,15 +3,14 @@ using System.Collections.Generic;
 using Eden.Brains;
 using Eden.Domain;
 using Eden.Evolution;
-using Eden.Simulation;
 
 namespace Eden.Application
 {
     /// <summary>
     /// Runs candidates in isolated episodes: each candidate is the only creature of a world built from the episode
     /// seed, so every candidate meets the same arena, food, start position, heading and brain stream, and nobody can
-    /// take food from anybody else. Episodes run sequentially. After the creature dies the remaining ticks cannot
-    /// change any result, so they are not simulated, but the episode still counts as its configured duration.
+    /// take food from anybody else. Episodes run sequentially, either all at once or as an <see cref="EvaluationJob"/>
+    /// advanced a few ticks at a time; both give the same results.
     /// </summary>
     public sealed class IsolatedEvaluator
     {
@@ -24,52 +23,37 @@ namespace Eden.Application
 
         /// <summary>Training evaluation of a generation of genomes on its training seeds.</summary>
         public GenerationEvaluation EvaluateTraining(IReadOnlyList<Genome> genomes, int generation) =>
-            Evaluate(BrainsOf(genomes), plan.TrainingSeeds(generation), generation, EvaluationMode.Training);
+            TrainingJob(genomes, generation).RunToEnd();
 
         /// <summary>Evaluation of a generation of genomes on the held-out validation seeds.</summary>
         public GenerationEvaluation EvaluateValidation(IReadOnlyList<Genome> genomes, int generation) =>
-            Evaluate(BrainsOf(genomes), plan.ValidationSeeds(), generation, EvaluationMode.Validation);
+            ValidationJob(genomes, generation).RunToEnd();
 
         /// <summary>Evaluates any brains (genomes or reference brains) on explicit seeds.</summary>
         public GenerationEvaluation Evaluate(IReadOnlyList<Func<IBrain>> candidates, IReadOnlyList<ulong> seeds,
-            int generation, EvaluationMode mode)
+            int generation, EvaluationMode mode) =>
+            Job(candidates, seeds, generation, mode).RunToEnd();
+
+        public EvaluationJob TrainingJob(IReadOnlyList<Genome> genomes, int generation) =>
+            Job(BrainsOf(genomes), plan.TrainingSeeds(generation), generation, EvaluationMode.Training);
+
+        public EvaluationJob ValidationJob(IReadOnlyList<Genome> genomes, int generation) =>
+            Job(BrainsOf(genomes), plan.ValidationSeeds(), generation, EvaluationMode.Validation);
+
+        public EvaluationJob Job(IReadOnlyList<Func<IBrain>> candidates, IReadOnlyList<ulong> seeds, int generation,
+            EvaluationMode mode)
         {
             if (candidates == null)
                 throw new ArgumentNullException(nameof(candidates));
-            if (seeds == null || seeds.Count == 0)
-                throw new ArgumentException("At least one seed is required.", nameof(seeds));
-
-            var episodes = new List<EpisodeResult>(candidates.Count * seeds.Count);
-            var aggregates = new CandidateEvaluation[candidates.Count];
-            var ticksPerSecond = plan.EpisodeConfig(seeds[0]).TicksPerSecond;
-            for (var c = 0; c < candidates.Count; c++)
-            {
-                var perSeed = new EpisodeResult[seeds.Count];
-                for (var s = 0; s < seeds.Count; s++)
-                    perSeed[s] = RunEpisode(candidates[c], seeds[s], c, s, generation, mode);
-                episodes.AddRange(perSeed);
-                aggregates[c] = new CandidateEvaluation(c, perSeed, ticksPerSecond);
-            }
-
-            return new GenerationEvaluation(generation, mode, seeds, episodes, aggregates);
+            return new EvaluationJob(plan, candidates, seeds, generation, mode);
         }
 
         public EpisodeResult RunEpisode(Func<IBrain> createBrain, ulong episodeSeed, int candidate, int seedIndex,
             int generation, EvaluationMode mode)
         {
-            if (createBrain == null)
-                throw new ArgumentNullException(nameof(createBrain));
-
-            var config = plan.EpisodeConfig(episodeSeed);
-            var simulation = new WorldSimulation(WorldFactory.CreateInitial(config));
-            var creature = simulation.World.Creatures[0];
-            var controller = new BrainController(config, _ => createBrain());
-
-            for (var tick = 0L; tick < plan.EpisodeTicks && !simulation.IsExtinct; tick++)
-                simulation.Step(controller);
-
-            return new EpisodeResult(mode, generation, candidate, seedIndex, episodeSeed, plan.EpisodeTicks,
-                plan.EpisodeSeconds, creature.FoodEnergyEaten, creature.AgeTicks, creature.IsAlive, creature.Energy);
+            var episode = new IsolatedEpisode(plan, createBrain, episodeSeed, candidate, seedIndex, generation, mode);
+            episode.Advance(long.MaxValue);
+            return episode.Result();
         }
 
         private static Func<IBrain>[] BrainsOf(IReadOnlyList<Genome> genomes)

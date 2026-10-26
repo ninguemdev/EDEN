@@ -48,9 +48,23 @@ namespace Eden.Application
         public IReadOnlyList<Offspring> Origins => origins ?? Array.Empty<Offspring>();
 
         /// <summary>Evaluates the current generation, replaces it with its offspring and returns the report.</summary>
-        public GenerationReport Advance()
+        public GenerationReport Advance() => Advance(BeginTraining().RunToEnd());
+
+        /// <summary>Training evaluation of the current generation, to be advanced a few ticks at a time.</summary>
+        public EvaluationJob BeginTraining() => evaluator.TrainingJob(population, Generation);
+
+        /// <summary>
+        /// Replaces the current generation with its offspring, bred from <paramref name="evaluation"/>: the completed
+        /// result of <see cref="BeginTraining"/> for this generation. Anything else is rejected.
+        /// </summary>
+        public GenerationReport Advance(GenerationEvaluation evaluation)
         {
-            var evaluation = evaluator.EvaluateTraining(population, Generation);
+            if (evaluation == null)
+                throw new ArgumentNullException(nameof(evaluation));
+            if (evaluation.Mode != EvaluationMode.Training || evaluation.Generation != Generation ||
+                evaluation.Candidates.Count != population.Length || !SameSeeds(evaluation.Seeds, Plan.TrainingSeeds(Generation)))
+                throw new ArgumentException($"Expected the training evaluation of generation {Generation}.", nameof(evaluation));
+
             var report = new GenerationReport(evaluation, individuals);
             var fitness = new float[evaluation.Candidates.Count];
             for (var i = 0; i < fitness.Length; i++)
@@ -67,16 +81,47 @@ namespace Eden.Application
         /// Evaluates the individuals of a training report on the validation seeds. Read-only: the result never reaches
         /// selection, ids or the next generation, which depend on training results alone.
         /// </summary>
-        public GenerationReport Validate(GenerationReport training)
+        public GenerationReport Validate(GenerationReport training) =>
+            Validate(training, BeginValidation(training).RunToEnd());
+
+        /// <summary>Validation of the individuals of a training report, to be advanced a few ticks at a time.</summary>
+        public EvaluationJob BeginValidation(GenerationReport training)
+        {
+            RequireTraining(training);
+            return evaluator.ValidationJob(GenomesOf(training.Individuals), training.Evaluation.Generation);
+        }
+
+        /// <summary>Validation report from the completed result of <see cref="BeginValidation"/> for the same report.</summary>
+        public GenerationReport Validate(GenerationReport training, GenerationEvaluation validation)
+        {
+            RequireTraining(training);
+            if (validation == null)
+                throw new ArgumentNullException(nameof(validation));
+            if (validation.Mode != EvaluationMode.Validation || validation.Generation != training.Evaluation.Generation ||
+                validation.Candidates.Count != training.Individuals.Count || !SameSeeds(validation.Seeds, Plan.ValidationSeeds()))
+                throw new ArgumentException("Expected the validation of the same generation.", nameof(validation));
+            return new GenerationReport(validation, training.Individuals);
+        }
+
+        private static void RequireTraining(GenerationReport training)
         {
             if (training == null)
                 throw new ArgumentNullException(nameof(training));
             if (training.Evaluation.Mode != EvaluationMode.Training)
                 throw new ArgumentException("Validation starts from a training report.", nameof(training));
+        }
 
-            return new GenerationReport(
-                evaluator.EvaluateValidation(GenomesOf(training.Individuals), training.Evaluation.Generation),
-                training.Individuals);
+        private static bool SameSeeds(IReadOnlyList<ulong> actual, ulong[] expected)
+        {
+            if (actual.Count != expected.Length)
+                return false;
+            for (var i = 0; i < expected.Length; i++)
+            {
+                if (actual[i] != expected[i])
+                    return false;
+            }
+
+            return true;
         }
 
         private static Genome[] GenomesOf(IReadOnlyList<Individual> members)

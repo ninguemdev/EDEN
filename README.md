@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa) e **M3** (evolução por gerações) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O próximo marco é o **M4** (laboratório completo e checkpoints). Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa) e **M3** (evolução por gerações) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O **M4** (laboratório completo e checkpoints) está em andamento: o laboratório já inicia, mostra e inspeciona uma evolução pela interface. Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -42,7 +42,7 @@ Sem comida ao alcance, as entradas 5–8 valem zero. Um cérebro nunca recebe po
 
 - **aleatório:** ignora os sensores e sorteia ações;
 - **heurístico:** regras fixas, sem memória nem aprendizado; vai até a comida visível (reduz a velocidade para girar quando ela está de lado, senão ficaria orbitando a comida sem alcançá-la) e desvia das paredes;
-- **rede neural:** perceptron 12 → 16 → 3 com `tanh` (259 parâmetros). Cada criatura tem o seu **genoma** (topologia e pesos-base, imutável e separado de energia, idade e posição) e a sua própria rede. No laboratório os genomas ainda são aleatórios; a evolução roda à parte, nos [experimentos por gerações](#evolução-por-gerações). A rede é feed-forward: não guarda memória entre decisões nem aprende durante a vida.
+- **rede neural:** perceptron 12 → 16 → 3 com `tanh` (259 parâmetros). Cada criatura tem o seu **genoma** (topologia e pesos-base, imutável e separado de energia, idade e posição) e a sua própria rede. No mundo compartilhado os genomas são aleatórios ou vêm da população evoluída no próprio laboratório (veja [experimentos por gerações](#evolução-por-gerações)). A rede é feed-forward: não guarda memória entre decisões nem aprende durante a vida.
 
 Os dois primeiros servem de linha de base para comparar as redes evoluídas. Baseline preliminar com a configuração padrão (64 criaturas, 5 seeds, 60 s simulados):
 
@@ -74,17 +74,27 @@ Os dois primeiros servem de linha de base para comparar as redes evoluídas. Bas
 
 ## Usar o laboratório
 
-A cena Bootstrap mostra a arena ao vivo. À esquerda ficam o estado do experimento (tick, tempo simulado, velocidade pedida e efetiva, população, comida, cérebro e métricas do último segundo); à direita, o inspetor da criatura selecionada (energia, idade, comida ingerida, os 12 sensores e a ação atual).
+A cena Bootstrap mostra a arena ao vivo. À esquerda ficam os controles do experimento e o seu estado (tick, tempo simulado, velocidade pedida e efetiva, população, comida, cérebro e métricas); à direita, o inspetor da criatura selecionada (energia, idade, comida ingerida, os 12 sensores, a ação atual e, quando houver, a linhagem).
+
+Tudo se escolhe pela interface, sem editar código:
+
+- **Modo:** *Mundo compartilhado* (todas as criaturas na mesma arena, disputando a comida; só observação, sem regra de seleção) ou *Evolução (avaliação isolada)* (veja [abaixo](#no-laboratório)).
+- **Preset:** Mínimo (32 criaturas, 64 comidas), Padrão (64, 128) ou Estresse (128, 256). Na evolução o preset define quantos genomas há por geração; o mundo de cada episódio isolado não muda.
+- **Cérebro** (mundo compartilhado): heurístico, aleatório, rede aleatória ou *população evoluída* (a última geração avaliada da evolução do laboratório, um indivíduo por criatura).
+- **Seed** e o botão **Iniciar**. Os botões de baixo pausam, avançam um tick, mudam a velocidade e ligam a velocidade **Máx.**, que roda quantos ticks inteiros couberem em 10 ms por quadro e mostra a velocidade efetiva alcançada.
 
 | Tecla | Ação |
 | --- | --- |
 | Espaço | pausar / continuar |
 | `.` | avançar um tick (pausa se estiver rodando) |
 | `-` / `=` | metade / dobro da velocidade (0,125× a 64×) |
+| M | velocidade máxima liga/desliga |
 | clique, `[` / `]` | selecionar criatura (mais próxima do clique, ou anterior/próxima por id) |
 | Esc | limpar seleção |
 | R | reiniciar com a mesma seed |
-| B | alternar entre cérebro heurístico, aleatório e rede neural (reinicia com a mesma seed) |
+| B | alternar entre cérebro heurístico, aleatório e rede neural (mundo compartilhado; reinicia com a mesma seed) |
+
+As teclas são ignoradas enquanto o campo de seed está sendo editado.
 
 ### Ver a rede neural de uma criatura
 
@@ -92,13 +102,13 @@ Com o cérebro **rede neural** ativo, selecionar uma criatura mostra, abaixo do 
 
 O diagrama só existe enquanto há uma criatura neural selecionada: sem seleção (ou com Esc), nada da rede é calculado nem desenhado, para não pesar na simulação.
 
-Todos os parâmetros do run (seed, tamanho da arena, população, energia, custos, alcance do sensor, velocidade etc.) ficam editáveis no componente **LabRunner** do objeto `Lab`. Os valores padrão são pontos de partida para medição, não valores ajustados.
+Os demais parâmetros do mundo (tamanho da arena, energia, custos, alcance do sensor, velocidade etc.) ficam editáveis no componente **LabRunner** do objeto `Lab`. Os valores padrão são pontos de partida para medição, não valores ajustados.
 
 Se o computador não acompanhar a velocidade pedida, o excesso de trabalho é descartado e o HUD mostra a velocidade efetiva e os ticks descartados; as regras nunca são puladas.
 
 ### Métricas
 
-Cada execução grava um diretório em `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\SimulationRuns\<data>-seed<n>-<cérebro>\` (fora do repositório), com:
+Cada execução do mundo compartilhado grava um diretório em `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\SimulationRuns\<data>-seed<n>-<cérebro>\` (fora do repositório), com:
 
 - `run-info.txt`: seed, cérebro, versão e parâmetros principais;
 - `metrics.csv`: uma linha por segundo simulado, com números em formato invariável (ponto decimal):
@@ -106,7 +116,7 @@ Cada execução grava um diretório em `%USERPROFILE%\AppData\LocalLow\NinguemDe
 
 ## Evolução por gerações
 
-Um experimento evolui uma população de genomas (padrão 64) sem a cena e sem competição entre eles:
+Um experimento evolui uma população de genomas (padrão 64) sem competição entre eles, no laboratório ou sem a cena:
 
 1. **Avaliação isolada.** Cada genoma vive sozinho num episódio de 120 s simulados, uma vez para cada uma das 3 seeds de treino da geração. Todos os genomas da geração enfrentam exatamente as mesmas condições iniciais (comida, posição, direção).
 2. **Fitness** = energia de comida consumida ÷ duração configurada do episódio (o denominador não diminui se a criatura morrer antes), em média nas 3 seeds. Sobrevivência, tempo vivo e energia final são medidos à parte, sem somar tudo numa nota só.
@@ -114,6 +124,16 @@ Um experimento evolui uma população de genomas (padrão 64) sem a cena e sem c
 4. **Linhagem.** Cada indivíduo novo recebe um id único, o id do pai e a geração em que nasceu; elites mantêm os seus. A partir de qualquer id dá para seguir a ascendência até a primeira geração.
 
 Esses valores são propostas iniciais a medir, não garantias de melhoria. Com a mesma seed o experimento repete as mesmas gerações, ids e resultados.
+
+### No laboratório
+
+Com o modo **Evolução (avaliação isolada)**, o laboratório roda o experimento episódio por episódio sem travar a tela, e a arena mostra o episódio que está sendo avaliado (uma criatura sozinha). O painel indica a geração, a fase (treino, referências na validação ou validação), o indivíduo e a seed do episódio, e deixa explícito que a seleção é artificial (torneio pela fitness de treino), não seleção natural. A cada 5 gerações, a começar pela 0, a geração treinada é validada nas 5 seeds separadas; antes da primeira validação o aleatório e o heurístico são avaliados nessas mesmas seeds.
+
+O gráfico abaixo do painel mostra, por geração, a mediana do treino com a faixa entre quartis, o melhor do treino, a mediana da validação e o campeão (o melhor do treino) na validação, com linhas tracejadas para o aleatório e o heurístico; o painel diz em texto se o campeão supera ou fica abaixo de cada referência. Selecionar a criatura mostra a linhagem do indivíduo: id, geração de nascimento, pai e pesos mutados, se é elite e os ancestrais até o fundador.
+
+Para ver a população no mundo compartilhado, escolha *Mundo compartilhado* com o cérebro *População evoluída*: a evolução fica parada, cada criatura é um indivíduo da última geração avaliada (com a sua linhagem no inspetor) e o botão **Voltar à evolução** continua de onde parou. O experimento do laboratório é exportado em `EvolutionRuns\<data>-lab-seed<n>-<preset>\`, no mesmo formato descrito abaixo. Com a mesma seed e o mesmo preset, as gerações e os números são os mesmos de uma execução sem a cena, em qualquer velocidade.
+
+### Sem a cena
 
 Para rodar: menu **EDEN → Evolution → Run 20 generations (seed 1)** no Editor (o Editor fica ocupado durante a execução, cerca de 20 s) ou, com o Editor fechado:
 
@@ -195,11 +215,14 @@ O executável sai em `Builds/Windows/EDEN.exe` e roda offline, sem o Editor. Op�
 
 | Opção | Efeito |
 | --- | --- |
-| `-eden-brain heuristic\|random\|neural` | cérebro inicial |
-| `-eden-seed N` | seed do run |
+| `-eden-mode shared\|evolution` | modo inicial (mundo compartilhado ou evolução) |
+| `-eden-preset minimal\|standard\|stress` | preset inicial |
+| `-eden-brain heuristic\|random\|neural` | cérebro inicial do mundo compartilhado |
+| `-eden-seed N` | seed do run (ou do experimento de evolução) |
 | `-eden-select ID` | já começa com a criatura `ID` selecionada |
+| `-eden-max` | já começa na velocidade máxima |
 
-Exemplo: `EDEN.exe -eden-brain neural -eden-select 5`.
+Exemplos: `EDEN.exe -eden-brain neural -eden-select 5` e `EDEN.exe -eden-mode evolution -eden-preset minimal -eden-max -eden-select 1`.
 
 ## Estrutura
 
@@ -211,9 +234,9 @@ O código fica em `Assets/_Project` e é dividido em assemblies com responsabili
 | `Eden.Simulation` | tick fixo, relógio, agenda de eventos, sensores, movimento, alimentação, energia e morte (sem Unity) |
 | `Eden.Brains` | contrato de cérebro e cérebros de referência (sem Unity) |
 | `Eden.Evolution` | plano de avaliação, fitness, seleção, mutação, linhagem e resumo por geração (sem Unity) |
-| `Eden.Application` | liga criaturas a cérebros, avaliação isolada, laço de gerações e métricas (sem Unity) |
+| `Eden.Application` | liga criaturas a cérebros, avaliação isolada (inteira ou em partes), laço de gerações, sessão de evolução, presets e métricas (sem Unity) |
 | `Eden.Persistence` | gravação de métricas e experimentos em CSV e descrição do run (sem Unity) |
-| `Eden.Presentation` | cena do laboratório: execução em tempo real, visualização, HUD e controles |
+| `Eden.Presentation` | cena do laboratório: execução em tempo real, visualização, HUD, controles e gráfico por geração |
 | `Eden.Editor` | build, experimentos de evolução e calibração do episódio |
 | `Eden.Tests.EditMode`, `Eden.Tests.PlayMode` | testes |
 
@@ -227,7 +250,7 @@ Outras pastas: `Scenes`, `UI` (UXML e tema do UI Toolkit), `Art` e `Settings` (a
 | M1 | simulação determinística, regras do mundo, cérebros de referência e laboratório visual | concluído |
 | M2 | rede neural fixa 12 → 16 → 3 na CPU, genoma por criatura e visualização da rede | concluído |
 | M3 | evolução por gerações: avaliação isolada, elites, torneio, mutação, seeds de validação | concluído |
-| M4 | laboratório completo e checkpoints (MVP) | planejado |
+| M4 | laboratório completo e checkpoints (MVP) | em andamento |
 | M5 | biologia parametrizada: genes de corpo com custos e trade-offs | planejado |
 | M6 | ecossistema contínuo com reprodução local | planejado |
 | M7 | adaptação individual (plasticidade) como experimento | planejado |

@@ -31,7 +31,7 @@ namespace Eden.Tests.PlayMode
         {
             if (lab == null || lab.RunDirectory == null)
                 return;
-            lab.CloseMetricsLog();
+            lab.CloseLogs();
             if (Directory.Exists(lab.RunDirectory))
                 Directory.Delete(lab.RunDirectory, true);
         }
@@ -199,7 +199,7 @@ namespace Eden.Tests.PlayMode
             var directory = runner.RunDirectory;
             Assert.That(directory, Is.Not.Null);
             StringAssert.StartsWith(Path.GetFullPath(UnityEngine.Application.persistentDataPath), Path.GetFullPath(directory));
-            runner.CloseMetricsLog();
+            runner.CloseLogs();
 
             var lines = File.ReadAllLines(Path.Combine(directory, "metrics.csv"));
             Assert.That(lines[0], Does.StartWith("tick,simulated_seconds,population"));
