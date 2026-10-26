@@ -22,6 +22,8 @@ namespace Eden.Editor
     ///   [-eden-output DIR] -logFile -
     /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.ComparePresetsFromCommandLine
     ///   [-eden-presets minimal,standard,stress] and the battery options -logFile -
+    /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.AblateBodyFromCommandLine
+    ///   [-eden-variants ablation|extended|fixed,all,no-size,only-sensor,…] and the battery options -logFile -
     /// -eden-body takes the expressed body genes: none (the fixed body, default), all, or a comma list of
     /// size, speed, sensor, efficiency; the battery commands accept it too.
     /// Settings not given keep the proposed defaults of <see cref="EvolutionSettings"/> and <see cref="BatterySettings"/>.
@@ -66,6 +68,17 @@ namespace Eden.Editor
                 var battery = new BatterySettings();
                 var output = ReadArguments(settings, battery);
                 ComparePresets(settings, battery, ReadPresets(), output);
+            });
+        }
+
+        public static void AblateBodyFromCommandLine()
+        {
+            RunAndExit(() =>
+            {
+                var settings = new EvolutionSettings { ExperimentSeed = 1 };
+                var battery = new BatterySettings();
+                var output = ReadArguments(settings, battery);
+                AblateBody(settings, battery, ReadVariants(), output);
             });
         }
 
@@ -151,6 +164,56 @@ namespace Eden.Editor
                 foreach (var log in logs.Values)
                     log.Dispose();
             }
+        }
+
+        private static void AblateBody(EvolutionSettings settings, BatterySettings battery,
+            IReadOnlyList<BodyVariant> variants, string output)
+        {
+            var ablation = new BodyAblation(settings, battery, variants);
+            var directory = output ?? DefaultDirectory($"body-ablation-seed{settings.ExperimentSeed}x{battery.Runs}");
+            var logs = new Dictionary<(string, int), EvolutionCsvLog>();
+            try
+            {
+                var result = ablation.Run((variant, run, report) =>
+                {
+                    if (!logs.TryGetValue((variant.Name, run), out var log))
+                    {
+                        var runSettings = ablation.Settings(variant).WithExperimentSeed(settings.ExperimentSeed + (ulong)run);
+                        log = RunLog(Path.Combine(directory, variant.Name), run, runSettings, battery, null);
+                        logs.Add((variant.Name, run), log);
+                    }
+
+                    log.Append(report);
+                    LogSummary(run, report.Summary);
+                });
+
+                BodyAblationReport.Write(directory, ablation, result, UnityEngine.Application.version, DateTime.UtcNow);
+                foreach (var line in BodyAblationReport.Describe(result))
+                    Debug.Log("EDEN body ablation | " + line);
+                Debug.Log("EDEN body ablation finished: output=" + directory);
+            }
+            finally
+            {
+                foreach (var log in logs.Values)
+                    log.Dispose();
+            }
+        }
+
+        private static IReadOnlyList<BodyVariant> ReadVariants()
+        {
+            var args = Environment.GetCommandLineArgs();
+            for (var i = 0; i + 1 < args.Length; i++)
+            {
+                if (args[i] != "-eden-variants")
+                    continue;
+                if (args[i + 1] == "ablation")
+                    return BodyVariant.Ablation;
+                if (args[i + 1] == "extended")
+                    return BodyVariant.Extended;
+                return args[i + 1].Split(',').Select(name => BodyVariant.Parse(name.Trim())).ToList();
+            }
+
+            return BodyVariant.Ablation;
         }
 
         private static EvolutionCsvLog RunLog(string directory, int run, EvolutionSettings runSettings,
