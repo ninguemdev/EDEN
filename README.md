@@ -4,11 +4,11 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa) e **M3** (evolução por gerações) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O **M4** (laboratório completo e checkpoints) está em andamento: o laboratório já inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa), **M3** (evolução por gerações) e **M4** (laboratório completo e checkpoints, o MVP) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O laboratório inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. O próximo marco é o **M5** (biologia parametrizada). Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
-**Mundo.** Arena retangular fechada (padrão 50 × 50 unidades) com criaturas e pontos de comida. A simulação avança em ticks fixos (padrão 20 por segundo simulado). Acelerar a execução significa rodar mais ticks completos por frame, nunca aumentar o passo de tempo; o FPS da tela não altera o resultado.
+**Mundo.** Arena retangular fechada (padrão 50 × 50 unidades) com criaturas e pontos de comida. A simulação avança em ticks fixos (padrão 20 por segundo simulado). Acelerar a execução significa rodar mais ticks completos por frame, nunca aumentar o passo de tempo; o FPS da tela não altera o resultado. Na tela, cada criatura é desenhada entre a posição do tick anterior e a do atual, conforme o tempo real já passado do próximo tick, para que o movimento seja contínuo a 60 ou 144 FPS. O desenho só lê o estado: a simulação é a mesma com ou sem tela. Pausado, avançando um tick ou na velocidade máxima, aparece o último estado exato.
 
 **Um tick**, sempre na mesma ordem:
 
@@ -333,7 +333,7 @@ Outras pastas: `Scenes`, `UI` (UXML e tema do UI Toolkit), `Art` e `Settings` (a
 | M1 | simulação determinística, regras do mundo, cérebros de referência e laboratório visual | concluído |
 | M2 | rede neural fixa 12 → 16 → 3 na CPU, genoma por criatura e visualização da rede | concluído |
 | M3 | evolução por gerações: avaliação isolada, elites, torneio, mutação, seeds de validação | concluído |
-| M4 | laboratório completo e checkpoints (MVP) | em andamento |
+| M4 | laboratório completo e checkpoints (MVP) | concluído |
 | M5 | biologia parametrizada: genes de corpo com custos e trade-offs | planejado |
 | M6 | ecossistema contínuo com reprodução local | planejado |
 | M7 | adaptação individual (plasticidade) como experimento | planejado |

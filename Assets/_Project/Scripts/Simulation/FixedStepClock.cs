@@ -56,6 +56,13 @@ namespace Eden.Simulation
         /// <summary>Total ticks that were due but dropped because the limits were exceeded.</summary>
         public long DroppedTicks { get; private set; }
 
+        /// <summary>
+        /// How far real time has gone into the next tick, in [0, 1], for drawing between the last two ticks: the view
+        /// shows previous + (current − previous) × fraction. It is 1 while paused or unpaced, where the latest state is
+        /// shown as is. Presentation only; it never decides how many ticks run.
+        /// </summary>
+        public float TickFraction => IsPaused || IsUnpaced ? 1f : (float)Math.Min(1.0, pendingTicks);
+
         public void Pause()
         {
             IsPaused = true;

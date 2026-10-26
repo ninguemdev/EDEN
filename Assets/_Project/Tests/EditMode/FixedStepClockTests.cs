@@ -35,6 +35,32 @@ namespace Eden.Tests.EditMode
             Assert.That(irregular, Is.EqualTo(at30));
         }
 
+        [Test]
+        public void TickFraction_IsThePartOfTheNextTickAlreadyElapsed()
+        {
+            var clock = new FixedStepClock(20);
+            Assert.That(clock.Advance(0.075), Is.EqualTo(1), "1.5 ticks due");
+            Assert.That(clock.TickFraction, Is.EqualTo(0.5f).Within(1e-5f));
+            Assert.That(clock.Advance(0.0125), Is.Zero);
+            Assert.That(clock.TickFraction, Is.EqualTo(0.75f).Within(1e-5f));
+
+            clock.Pause();
+            Assert.That(clock.TickFraction, Is.EqualTo(1f), "paused: the latest state is shown as is");
+            clock.RequestStep();
+            Assert.That(clock.Advance(0.1), Is.EqualTo(1));
+            Assert.That(clock.TickFraction, Is.EqualTo(1f));
+
+            clock.Resume();
+            clock.Advance(0.01);
+            Assert.That(clock.TickFraction, Is.EqualTo(0.2f).Within(1e-5f));
+            clock.SetUnpaced(true);
+            Assert.That(clock.TickFraction, Is.EqualTo(1f), "unpaced: nothing to draw between");
+
+            var behind = new FixedStepClock(20);
+            behind.Advance(100.0);
+            Assert.That(behind.TickFraction, Is.InRange(0f, 1f), "a backlog never draws past the current tick");
+        }
+
         [TestCase(4f, 800)]
         [TestCase(0.5f, 100)]
         public void Speed_RunsMoreOrFewerWholeTicks(float speed, int expectedTicks)

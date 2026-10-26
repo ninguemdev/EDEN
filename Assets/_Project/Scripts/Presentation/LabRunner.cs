@@ -458,7 +458,7 @@ namespace Eden.Presentation
             var realDelta = Time.unscaledDeltaTime;
             benchmark?.BeginSimulation();
             var ticks = Clock.Advance(realDelta);
-            RunTicks(ticks);
+            RunTicks(ticks, rememberLast: true);
             if (Clock.IsUnpaced && !Clock.IsPaused)
             {
                 var ran = RunWithinBudget();
@@ -470,7 +470,7 @@ namespace Eden.Presentation
             if (mode == LabMode.IsolatedEvolution)
                 ShowEpisode();
 
-            worldView.Render(Simulation.World, Selected);
+            worldView.Render(Simulation.World, Selected, Clock.TickFraction);
             if (Selected.HasValue)
             {
                 networkTimer += Time.unscaledDeltaTime;
@@ -491,18 +491,34 @@ namespace Eden.Presentation
             }
         }
 
-        private void RunTicks(int ticks)
+        // With rememberLast, the view keeps the poses from before the last tick so that it can draw between them and
+        // the result; the ticks run are the same either way.
+        private void RunTicks(int ticks, bool rememberLast = false)
         {
             if (ticks <= 0)
                 return;
             if (mode == LabMode.IsolatedEvolution)
             {
-                Evolution.Advance(ticks);
+                if (rememberLast)
+                {
+                    Evolution.Advance(ticks - 1);
+                    worldView.RememberPreviousTick(Evolution.Job.Current.Simulation.World);
+                    Evolution.Advance(1);
+                }
+                else
+                {
+                    Evolution.Advance(ticks);
+                }
+
                 return;
             }
 
             for (var i = 0; i < ticks; i++)
+            {
+                if (rememberLast && i == ticks - 1)
+                    worldView.RememberPreviousTick(Simulation.World);
                 StepOnce();
+            }
         }
 
         // Whole ticks in chunks until the frame budget is used; checking the watch per chunk keeps its cost low.
