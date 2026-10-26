@@ -141,6 +141,68 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Controls_SaveAndLoadAnEvolutionInTheMiddleOfAnEpisode()
+        {
+            UseTemporaryCheckpoint();
+            yield return StartFromControls(LabMode.IsolatedEvolution, preset: 0, seed: 11);
+            yield return Press("max-button");
+            yield return WaitUntil(() => runner.Evolution.Training.Count > 0, EvolutionTimeoutSeconds);
+            yield return Press("max-button");
+            yield return Press("pause-button");
+            yield return Step(3);
+            var saved = runner.Evolution;
+            var trainedAtSave = saved.Training.Count;
+            var atSave = Position();
+
+            yield return Press("save-button");
+            Assert.That(File.Exists(runner.CheckpointPath), Is.True);
+            StringAssert.Contains("Checkpoint salvo", runner.Hud.CheckpointText);
+            yield return Step(12);
+            var later = Position();
+
+            yield return StartFromControls(LabMode.SharedWorld, preset: 0, seed: 2);
+            Assert.That(runner.Clock.IsPaused, Is.True, "a new run keeps the pause");
+            yield return Press("load-button");
+            StringAssert.Contains("Checkpoint carregado", runner.Hud.CheckpointText);
+            Assert.That(runner.Mode, Is.EqualTo(LabMode.IsolatedEvolution));
+            Assert.That(runner.Evolution, Is.Not.SameAs(saved), "a restored session");
+            Assert.That(runner.Simulation, Is.SameAs(runner.Evolution.Job.Current.Simulation));
+            Assert.That(Position(), Is.EqualTo(atSave));
+            Assert.That(runner.Evolution.Training.Count, Is.EqualTo(trainedAtSave), "history restored");
+            Assert.That(runner.Hud.Chart.PlottedGenerations, Is.EqualTo(trainedAtSave));
+            yield return Step(12);
+            Assert.That(Position(), Is.EqualTo(later), "continues exactly like the saved run");
+        }
+
+        [UnityTest]
+        public IEnumerator Controls_SaveAndLoadASharedWorld_AndRefuseABrokenFile()
+        {
+            UseTemporaryCheckpoint();
+            yield return StartFromControls(LabMode.SharedWorld, preset: 0, seed: 4, brain: LabBrainKind.Neural);
+            yield return Press("pause-button");
+            yield return Step(5);
+            var atSave = Position();
+            yield return Press("save-button");
+            yield return Step(20);
+            var later = Position();
+
+            yield return Press("load-button");
+            Assert.That(runner.BrainKind, Is.EqualTo(LabBrainKind.Neural));
+            Assert.That(Position(), Is.EqualTo(atSave));
+            yield return Step(20);
+            Assert.That(Position(), Is.EqualTo(later));
+
+            File.WriteAllText(runner.CheckpointPath, "{\"format\": \"eden-checkpoint\", \"schemaVersion\": 7}");
+            File.Delete(runner.CheckpointPath + ".bak");
+            var simulation = runner.Simulation;
+            yield return Press("load-button");
+            StringAssert.Contains("recusado (a execução atual continua)", runner.Hud.CheckpointText);
+            StringAssert.Contains("newer", runner.Hud.CheckpointText);
+            Assert.That(runner.Simulation, Is.SameAs(simulation), "the run is untouched");
+            Assert.That(Position(), Is.EqualTo(later));
+        }
+
+        [UnityTest]
         public IEnumerator Controls_KeepTheChoiceTheUserIsEditing()
         {
             var modeField = runner.Hud.Root.Q<DropdownField>("mode-field");
@@ -154,6 +216,27 @@ namespace Eden.Tests.PlayMode
             Assert.That(seedField.value, Is.EqualTo(123));
             seedField.value = -4;
             Assert.That(seedField.value, Is.Zero, "seeds are not negative");
+        }
+
+        // Checkpoints of a test go to a temporary directory, never to the user's lab checkpoint.
+        private void UseTemporaryCheckpoint()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "eden-lab-checkpoint-" + Guid.NewGuid().ToString("N"));
+            runDirectories.Add(directory);
+            runner.CheckpointPath = Path.Combine(directory, "lab.json");
+        }
+
+        // Exact state of what is shown: world fingerprint (agenda included) and, in evolution mode, the ticks run so far.
+        private (ulong, long) Position() =>
+            (runner.Simulation.ComputeFingerprint(), runner.Evolution != null && runner.Mode == LabMode.IsolatedEvolution
+                ? runner.Evolution.TotalTicks
+                : runner.Simulation.World.Tick);
+
+        private IEnumerator Step(int ticks)
+        {
+            Assert.That(runner.Clock.IsPaused, Is.True, "steps are counted while paused");
+            for (var i = 0; i < ticks; i++)
+                yield return Press("step-button");
         }
 
         private IEnumerator StartFromControls(LabMode mode, int preset, int seed, LabBrainKind brain = LabBrainKind.Heuristic)

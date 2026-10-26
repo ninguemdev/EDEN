@@ -200,6 +200,20 @@ namespace Eden.Presentation
             return session.CurrentReference == RandomBrain.BrainName ? "cérebro aleatório" : "cérebro heurístico";
         }
 
+        public static string CheckpointSaved(string path, long tick, EvolutionSession evolution) =>
+            $"Checkpoint salvo ({Position(tick, evolution)}): {path}";
+
+        /// <summary><paramref name="problem"/> says why the backup was used instead of the checkpoint (null if it was not).</summary>
+        public static string CheckpointLoaded(string path, long tick, EvolutionSession evolution, string problem) =>
+            problem == null
+                ? $"Checkpoint carregado ({Position(tick, evolution)}): {path}"
+                : $"Checkpoint principal recusado ({problem}); carregado o backup ({Position(tick, evolution)})";
+
+        public static string CheckpointFailed(string outcome, string reason) => $"Checkpoint {outcome}: {reason}";
+
+        private static string Position(long tick, EvolutionSession evolution) =>
+            evolution == null ? $"tick {tick}" : $"geração {evolution.Job.Generation}, tick {tick} do episódio";
+
         private static string PresetLabel(ExperimentPreset preset)
         {
             var index = 0;

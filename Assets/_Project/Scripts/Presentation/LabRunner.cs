@@ -42,7 +42,8 @@ namespace Eden.Presentation
     /// Composition root of the lab scene: builds a run from the chosen mode, preset and seed, converts frame time into
     /// fixed ticks with <see cref="FixedStepClock"/> (or, at maximum speed, runs whole ticks within a per-frame work
     /// budget), handles lab controls and selection, and writes logs under persistentDataPath. Frame rate never
-    /// reaches the simulation. In evolution mode the world shown is the isolated episode being evaluated.
+    /// reaches the simulation. In evolution mode the world shown is the isolated episode being evaluated. The run can
+    /// be saved to and loaded from a checkpoint between ticks.
     /// Command line (builds): -eden-mode shared|evolution, -eden-preset minimal|standard|stress,
     /// -eden-brain heuristic|random|neural, -eden-seed N, -eden-select ID, -eden-max.
     /// </summary>
@@ -70,6 +71,7 @@ namespace Eden.Presentation
         private MetricsRecorder metrics;
         private MetricsCsvLog metricsLog;
         private EvolutionCsvLog evolutionLog;
+        private SimulationSettings sharedSettings;
         private IReadOnlyList<Individual> sharedIndividuals;
         private int sharedGeneration;
         private CreatureDeath? selectedDeath;
@@ -99,6 +101,12 @@ namespace Eden.Presentation
         public string EvolutionDirectory { get; private set; }
         public WorldView View => worldView;
         public LabHud Hud => hud;
+
+        /// <summary>File of Salvar/Carregar (persistentDataPath/Checkpoints/lab.json by default); its backup sits next to it.</summary>
+        public string CheckpointPath { get; set; }
+
+        /// <summary>Outcome of the last save or load, as shown in the HUD; null before the first one.</summary>
+        public string CheckpointStatus { get; private set; }
 
         /// <summary>Last captured network state of the selected neural creature (diagram data).</summary>
         public NeuralSnapshot Network => networkSnapshot;
@@ -145,6 +153,123 @@ namespace Eden.Presentation
             ShowEpisode();
             hud?.ShowChoice(new LabChoice(mode, preset, seed, brain), true);
             RefreshHud();
+        }
+
+        /// <summary>
+        /// Saves the run to <see cref="CheckpointPath"/> (what Salvar does): the evolution, if any, including the episode
+        /// being evaluated, and the shared world while it is shown. Called between ticks; the previous checkpoint
+        /// becomes the backup. A failure leaves the files as they were and the run going.
+        /// </summary>
+        public bool SaveCheckpoint()
+        {
+            try
+            {
+                var shared = mode == LabMode.SharedWorld
+                    ? new SharedWorldSnapshot(sharedSettings, Simulation.Capture(), controller.Capture())
+                    : null;
+                var checkpoint = new Checkpoint(ModeName(mode), Preset.Name, (ulong)seed, KindName(brain),
+                    Evolution?.Capture(), shared);
+                CheckpointFile.Save(CheckpointPath, checkpoint, UnityEngine.Application.version, Runtime(), DateTime.UtcNow);
+                ShowCheckpointStatus(LabText.CheckpointSaved(CheckpointPath, Simulation.World.Tick, EvolutionShown));
+                return true;
+            }
+            catch (CheckpointException error)
+            {
+                Debug.LogWarning($"EDEN: checkpoint not saved ({error.Message})");
+                ShowCheckpointStatus(LabText.CheckpointFailed("não salvo", error.Message));
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Replaces the run with the one saved at <see cref="CheckpointPath"/> (what Carregar does), or with its backup if
+        /// the checkpoint itself is unusable. Everything is restored and checked before the current run is touched, so a
+        /// refused file leaves it exactly as it was. The resumed run continues tick for tick as the saved one would have;
+        /// its logs go to new directories.
+        /// </summary>
+        public bool LoadCheckpoint()
+        {
+            Checkpoint saved;
+            string problem;
+            LabMode loadedMode;
+            int loadedPreset;
+            LabBrainKind loadedBrain;
+            EvolutionSession session;
+            WorldSimulation world;
+            BrainController brains;
+            IReadOnlyList<Individual> individuals = null;
+            var name = MlpBrain.BrainName;
+            try
+            {
+                saved = CheckpointFile.LoadOrBackup(CheckpointPath, out _, out problem);
+                loadedMode = ParseMode(saved.Mode);
+                loadedPreset = PresetIndex(saved.Preset);
+                loadedBrain = ParseKind(saved.Brain);
+                if (saved.Seed > int.MaxValue)
+                    throw new CheckpointException($"Seed {saved.Seed} is outside the lab's range.");
+                session = saved.Evolution == null ? null : EvolutionSession.Restore(saved.Evolution);
+                if (loadedMode == LabMode.IsolatedEvolution)
+                {
+                    if (session == null || saved.SharedWorld != null)
+                        throw new CheckpointException("An evolution checkpoint holds the evolution only.");
+                    world = session.Job.Current.Simulation;
+                    brains = session.Job.Current.Controller;
+                }
+                else
+                {
+                    if (saved.SharedWorld == null)
+                        throw new CheckpointException("A shared world checkpoint holds the shared world.");
+                    var config = new SimulationConfig(saved.SharedWorld.Settings);
+                    if (loadedBrain == LabBrainKind.Evolved)
+                    {
+                        individuals = session?.LastTraining?.Individuals ?? session?.Evolution.Individuals ??
+                            throw new CheckpointException("The evolved population needs its evolution.");
+                        if (individuals.Count != config.InitialPopulation)
+                            throw new CheckpointException("The shared world does not match the evolved population.");
+                    }
+
+                    world = WorldSimulation.Restore(config, saved.SharedWorld.World);
+                    brains = CreateController(config, loadedBrain, individuals, out name);
+                    brains.Restore(saved.SharedWorld.Brains);
+                }
+            }
+            catch (Exception error) when (error is CheckpointException || error is ArgumentException ||
+                                          error is InvalidOperationException)
+            {
+                Debug.LogWarning($"EDEN: checkpoint not loaded ({error.Message})");
+                ShowCheckpointStatus(LabText.CheckpointFailed("recusado (a execução atual continua)", error.Message));
+                return false;
+            }
+
+            CloseLogs();
+            mode = loadedMode;
+            preset = loadedPreset;
+            seed = (int)saved.Seed;
+            brain = loadedBrain;
+            Evolution = session;
+            EvolutionDirectory = null;
+            MetricsDirectory = null;
+            Simulation = world;
+            controller = brains;
+            BrainName = name;
+            sharedSettings = saved.SharedWorld?.Settings;
+            sharedIndividuals = individuals;
+            sharedGeneration = session?.LastTraining?.Summary.Generation ?? 0;
+            metrics = new MetricsRecorder(world.World.Config, world.World.Config.TicksPerSecond);
+            if (writeMetrics && session != null)
+                OpenEvolutionLog(CheckpointPath);
+            if (writeMetrics && mode == LabMode.SharedWorld)
+                OpenMetricsLog(world.World.Config);
+
+            Selected = null;
+            selectedDeath = null;
+            networkSnapshot.Clear();
+            hud?.ShowNetwork(null);
+            ResetClock(world.World.Config.TicksPerSecond);
+            worldView.Bind(world.World);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain), Evolution != null);
+            ShowCheckpointStatus(LabText.CheckpointLoaded(CheckpointPath, world.World.Tick, EvolutionShown, problem));
+            return true;
         }
 
         /// <summary>Switches the brain kind of the shared world and restarts it with the same seed.</summary>
@@ -269,11 +394,14 @@ namespace Eden.Presentation
 
         private void Awake()
         {
+            CheckpointPath ??= Path.Combine(UnityEngine.Application.persistentDataPath, "Checkpoints", "lab.json");
             var selectAtStart = ApplyCommandLine(Environment.GetCommandLineArgs(), out var maxSpeed);
             if (hud != null)
             {
                 hud.StartClicked += () => StartExperiment(hud.ReadChoice());
                 hud.ResumeEvolutionClicked += ResumeEvolution;
+                hud.SaveClicked += () => SaveCheckpoint();
+                hud.LoadClicked += () => LoadCheckpoint();
                 hud.PauseClicked += TogglePause;
                 hud.StepClicked += RequestStep;
                 hud.SlowerClicked += () => ScaleSpeed(0.5f);
@@ -368,8 +496,10 @@ namespace Eden.Presentation
             }
 
             var config = new SimulationConfig(runSettings);
+            sharedSettings = runSettings;
             Simulation = new WorldSimulation(WorldFactory.CreateInitial(config));
-            controller = CreateController(config);
+            controller = CreateController(config, brain, sharedIndividuals, out var name);
+            BrainName = name;
             metrics = new MetricsRecorder(config, config.TicksPerSecond);
             if (writeMetrics)
                 OpenMetricsLog(config);
@@ -432,6 +562,8 @@ namespace Eden.Presentation
                 if (keyboard.leftBracketKey.wasPressedThisFrame) SelectNeighbor(-1);
                 if (keyboard.escapeKey.wasPressedThisFrame) ClearSelection();
                 if (keyboard.rKey.wasPressedThisFrame) StartRun();
+                if (keyboard.f5Key.wasPressedThisFrame) SaveCheckpoint();
+                if (keyboard.f9Key.wasPressedThisFrame) LoadCheckpoint();
                 if (keyboard.bKey.wasPressedThisFrame && mode == LabMode.SharedWorld)
                     UseBrain(brain == LabBrainKind.Heuristic ? LabBrainKind.Random
                         : brain == LabBrainKind.Random ? LabBrainKind.Neural
@@ -568,25 +700,71 @@ namespace Eden.Presentation
             return select;
         }
 
-        private BrainController CreateController(SimulationConfig config)
+        // Evolved brains take creature id i from individuals[i - 1], so a shared world restarted or restored from the
+        // same individuals gets the same brains.
+        private static BrainController CreateController(SimulationConfig config, LabBrainKind kind,
+            IReadOnlyList<Individual> individuals, out string brainName)
         {
-            switch (brain)
+            switch (kind)
             {
                 case LabBrainKind.Evolved:
-                    BrainName = MlpBrain.BrainName;
-                    var individuals = sharedIndividuals;
+                    brainName = MlpBrain.BrainName;
                     return new BrainController(config, id => new MlpBrain(individuals[id.Value - 1].Genome));
                 case LabBrainKind.Neural:
-                    BrainName = MlpBrain.BrainName;
+                    brainName = MlpBrain.BrainName;
                     return new BrainController(config, id => new MlpBrain(InitialGenomes.RandomFor(config, id)));
                 case LabBrainKind.Random:
-                    BrainName = RandomBrain.BrainName;
+                    brainName = RandomBrain.BrainName;
                     return BrainController.Shared(config, new RandomBrain());
                 default:
-                    BrainName = HeuristicBrain.BrainName;
+                    brainName = HeuristicBrain.BrainName;
                     return BrainController.Shared(config, new HeuristicBrain());
             }
         }
+
+        private void ShowCheckpointStatus(string text)
+        {
+            CheckpointStatus = text;
+            hud?.ShowCheckpointStatus(text);
+            RefreshHud();
+        }
+
+        // Names written in checkpoints; the same words as the command line.
+        private static string ModeName(LabMode labMode) => labMode == LabMode.IsolatedEvolution ? "evolution" : "shared";
+
+        private static LabMode ParseMode(string name) =>
+            name == "evolution" ? LabMode.IsolatedEvolution
+            : name == "shared" ? LabMode.SharedWorld
+            : throw new CheckpointException($"Unknown lab mode \"{name}\".");
+
+        private static string KindName(LabBrainKind kind) => kind.ToString().ToLowerInvariant();
+
+        private static LabBrainKind ParseKind(string name)
+        {
+            foreach (LabBrainKind kind in Enum.GetValues(typeof(LabBrainKind)))
+            {
+                if (KindName(kind) == name)
+                    return kind;
+            }
+
+            throw new CheckpointException($"Unknown brain \"{name}\".");
+        }
+
+        private static int PresetIndex(string name)
+        {
+            for (var p = 0; p < ExperimentPreset.All.Count; p++)
+            {
+                if (ExperimentPreset.All[p].Name == name)
+                    return p;
+            }
+
+            throw new CheckpointException($"Unknown preset \"{name}\".");
+        }
+
+        private EvolutionSession EvolutionShown => mode == LabMode.IsolatedEvolution ? Evolution : null;
+
+        private static string Runtime() =>
+            UnityEngine.Application.unityVersion + " " + UnityEngine.Application.platform;
 
         private void OpenMetricsLog(SimulationConfig config)
         {
@@ -606,14 +784,23 @@ namespace Eden.Presentation
             }
         }
 
-        private void OpenEvolutionLog()
+        // A resumed evolution logs only what happens after the checkpoint, and says where it came from.
+        private void OpenEvolutionLog(string resumedFrom = null)
         {
             try
             {
                 var directory = CreateRunDirectory("EvolutionRuns", $"lab-seed{seed}-{Preset.Name}");
                 var evolution = Evolution.Evolution;
-                var log = new EvolutionCsvLog(directory, EvolutionCsvLog.Describe(evolution.Plan, evolution.Rules,
+                var info = new List<string>(EvolutionCsvLog.Describe(evolution.Plan, evolution.Rules,
                     UnityEngine.Application.version, DateTime.UtcNow));
+                if (resumedFrom != null)
+                {
+                    info.Add("resumed_from=" + resumedFrom);
+                    info.Add("resumed_at_generation=" + evolution.Generation.ToString(CultureInfo.InvariantCulture));
+                    info.Add("resumed_at_total_ticks=" + Evolution.TotalTicks.ToString(CultureInfo.InvariantCulture));
+                }
+
+                var log = new EvolutionCsvLog(directory, info);
                 evolutionLog = log;
                 EvolutionDirectory = directory;
                 Evolution.ReportCompleted += report => AppendEvolution(log, report);
