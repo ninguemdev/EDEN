@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
+using Eden.Domain;
 using Eden.Presentation;
 using Eden.Simulation;
 using NUnit.Framework;
@@ -142,6 +143,47 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Controls_EvolveTheBody_AndDrawEachCreatureWithItsOwnBody()
+        {
+            var bodyField = runner.Hud.Root.Q<DropdownField>("body-field");
+            Assert.That(bodyField.value, Is.EqualTo(LabHud.BodyChoices[0]), "the fixed body is the default");
+            yield return StartFromControls(LabMode.IsolatedEvolution, preset: 0, seed: 3, evolvingBody: true);
+            Assert.That(bodyField.enabledSelf, Is.True, "the body applies to a new evolution");
+            Assert.That(runner.EvolvingBody, Is.True);
+            Assert.That(runner.Evolution.Plan.ExpressedBodyGenes, Is.EqualTo(BodyGeneSet.All));
+            StringAssert.Contains("Corpo evolutivo", runner.Hud.RunText);
+            var session = runner.Evolution;
+            yield return Press("max-button");
+            yield return WaitUntil(() => session.Training.Count > 0, EvolutionTimeoutSeconds);
+            var evaluated = session.LastTraining.Individuals;
+
+            yield return StartFromControls(LabMode.SharedWorld, preset: 0, seed: 9, brain: LabBrainKind.Evolved,
+                evolvingBody: true);
+            Assert.That(bodyField.enabledSelf, Is.False, "the shared world takes the bodies of the evolution");
+            yield return Press("pause-button");
+            var world = runner.Simulation.World;
+            var sizes = new HashSet<float>();
+            for (var i = 0; i < world.Creatures.Count; i++)
+            {
+                var creature = world.Creatures[i];
+                Assert.That(creature.Genes, Is.EqualTo(evaluated[creature.Id.Value - 1].Genome.Body), "its own genes");
+                Assert.That(runner.View.TryGetDrawnBody(creature.Id, out var scale, out var sensor), Is.True);
+                Assert.That(scale, Is.EqualTo(creature.Body.EatRadius / world.Config.EatRadius).Within(1e-5f));
+                Assert.That(sensor, Is.Zero, "only the selected creature shows its range");
+                sizes.Add(scale);
+            }
+
+            Assert.That(sizes.Count, Is.GreaterThan(1), "bodies differ");
+            var selected = world.Creatures[2];
+            runner.Select(selected.Id);
+            yield return null;
+            Assert.That(runner.View.TryGetDrawnBody(selected.Id, out _, out var diameter), Is.True);
+            Assert.That(diameter, Is.EqualTo(2f * selected.Body.SensorRange).Within(1e-3f));
+            StringAssert.Contains("Corpo (genes", runner.Hud.InspectorText);
+            StringAssert.Contains("Gasto/s", runner.Hud.InspectorText);
+        }
+
+        [UnityTest]
         public IEnumerator Controls_SaveAndLoadAnEvolutionInTheMiddleOfAnEpisode()
         {
             UseTemporaryCheckpoint();
@@ -273,7 +315,8 @@ namespace Eden.Tests.PlayMode
                 yield return Press("step-button");
         }
 
-        private IEnumerator StartFromControls(LabMode mode, int preset, int seed, LabBrainKind brain = LabBrainKind.Heuristic)
+        private IEnumerator StartFromControls(LabMode mode, int preset, int seed, LabBrainKind brain = LabBrainKind.Heuristic,
+            bool evolvingBody = false)
         {
             var root = runner.Hud.Root;
             Assert.That(root, Is.Not.Null, "the HUD is bound");
@@ -283,6 +326,7 @@ namespace Eden.Tests.PlayMode
             Assert.That(brainField.choices.Count, Is.GreaterThan((int)brain), "the brain is offered");
             brainField.index = (int)brain;
             root.Q<IntegerField>("seed-field").value = seed;
+            root.Q<DropdownField>("body-field").index = evolvingBody ? 1 : 0;
             yield return Press("start-button");
         }
 

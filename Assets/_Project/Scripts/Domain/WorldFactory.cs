@@ -7,19 +7,19 @@ namespace Eden.Domain
     {
         private const float FullTurn = 2f * MathF.PI;
 
-        /// <summary>Initial world where every creature has the reference body.</summary>
-        public static WorldState CreateInitial(SimulationConfig config)
-        {
-            if (config == null)
-                throw new ArgumentNullException(nameof(config));
-            return CreateInitial(config, CreatureBody.Reference(config));
-        }
+        /// <summary>Initial world where every creature has neutral genes (the reference body).</summary>
+        public static WorldState CreateInitial(SimulationConfig config) => CreateInitial(config, _ => BodyGenes.Neutral);
 
-        /// <summary>Initial world where every creature has <paramref name="body"/>; placement does not depend on it.</summary>
-        public static WorldState CreateInitial(SimulationConfig config, CreatureBody body)
+        /// <summary>
+        /// Initial world where creature i (0-based, so id i + 1) has the body genes <paramref name="genesOf"/> gives.
+        /// Placement does not depend on the genes; a creature starts with the initial energy or its capacity if smaller.
+        /// </summary>
+        public static WorldState CreateInitial(SimulationConfig config, Func<int, BodyGenes> genesOf)
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
+            if (genesOf == null)
+                throw new ArgumentNullException(nameof(genesOf));
 
             var world = new WorldState(config);
             var random = world.SpawnRandom;
@@ -27,7 +27,9 @@ namespace Eden.Domain
             {
                 var position = RandomArenaPosition(random, config);
                 var heading = random.NextFloat() * FullTurn;
-                world.AddCreature(position, heading, config.InitialEnergy, body);
+                var genes = genesOf(i);
+                var capacity = genes.IsNeutral ? config.MaxEnergy : CreatureBody.Express(config, genes).MaxEnergy;
+                world.AddCreature(position, heading, Math.Min(config.InitialEnergy, capacity), genes);
             }
 
             for (var i = 0; i < config.InitialFood; i++)

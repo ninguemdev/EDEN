@@ -34,7 +34,7 @@ namespace Eden.Domain
     /// Heritable body genes, each within ±<see cref="MaxAbsValue"/>; 0 is the reference body of the run config. A gene
     /// g scales its trait by 1 + g·<see cref="TraitSpan"/> (efficiency scales the metabolism by 1 − g·TraitSpan), so
     /// every trait stays between half and one and a half times its reference value. Genes say nothing about costs:
-    /// what a trait costs is a rule of the world.
+    /// what a trait costs is a rule of the world (<see cref="CreatureBody"/>).
     /// </summary>
     public readonly struct BodyGenes : IEquatable<BodyGenes>
     {
@@ -132,77 +132,5 @@ namespace Eden.Domain
                 throw new ArgumentOutOfRangeException(gene.ToString(),
                     $"Body gene {gene} = {value} must be finite and within ±{MaxAbsValue}.");
         }
-    }
-
-    /// <summary>
-    /// Traits a creature lives with, expressed from its genes when it is created and never changed during its life.
-    /// The reference body is the run config's own values; an expressed body keeps every trait within the
-    /// <see cref="BodyGenes.TraitSpan"/> around them (<see cref="IsWithinLimits"/>).
-    /// </summary>
-    public readonly struct CreatureBody : IEquatable<CreatureBody>
-    {
-        public CreatureBody(float eatRadius, float maxSpeed, float sensorRange, float metabolismPerSecond)
-        {
-            EatRadius = eatRadius;
-            MaxSpeed = maxSpeed;
-            SensorRange = sensorRange;
-            MetabolismPerSecond = metabolismPerSecond;
-        }
-
-        /// <summary>Body radius: food within this distance of the creature is eaten.</summary>
-        public float EatRadius { get; }
-
-        public float MaxSpeed { get; }
-
-        /// <summary>Range of the food sensor and of the wall readings.</summary>
-        public float SensorRange { get; }
-
-        /// <summary>Resting energy use per second.</summary>
-        public float MetabolismPerSecond { get; }
-
-        public static CreatureBody Reference(SimulationConfig config)
-        {
-            if (config == null)
-                throw new ArgumentNullException(nameof(config));
-            return new CreatureBody(config.EatRadius, config.MaxSpeed, config.SensorRange, config.MetabolismPerSecond);
-        }
-
-        /// <summary>Body of <paramref name="genes"/> where only the <paramref name="expressed"/> genes count.</summary>
-        public static CreatureBody Express(SimulationConfig config, BodyGenes genes, BodyGeneSet expressed)
-        {
-            if (config == null)
-                throw new ArgumentNullException(nameof(config));
-            var active = genes.Masked(expressed);
-            return new CreatureBody(Scale(config.EatRadius, active.Size), Scale(config.MaxSpeed, active.Speed),
-                Scale(config.SensorRange, active.Sensor), Scale(config.MetabolismPerSecond, -active.Efficiency));
-        }
-
-        /// <summary>Every trait lies between what the genes at −1 and +1 express for <paramref name="config"/>.</summary>
-        public bool IsWithinLimits(SimulationConfig config)
-        {
-            if (config == null)
-                throw new ArgumentNullException(nameof(config));
-            return InSpan(EatRadius, config.EatRadius) && InSpan(MaxSpeed, config.MaxSpeed) &&
-                   InSpan(SensorRange, config.SensorRange) && InSpan(MetabolismPerSecond, config.MetabolismPerSecond);
-        }
-
-        public bool Equals(CreatureBody other) =>
-            EatRadius == other.EatRadius && MaxSpeed == other.MaxSpeed && SensorRange == other.SensorRange &&
-            MetabolismPerSecond == other.MetabolismPerSecond;
-
-        public override bool Equals(object obj) => obj is CreatureBody other && Equals(other);
-
-        public override int GetHashCode() =>
-            ((EatRadius.GetHashCode() * 397 ^ MaxSpeed.GetHashCode()) * 397 ^ SensorRange.GetHashCode()) * 397 ^
-            MetabolismPerSecond.GetHashCode();
-
-        public override string ToString() =>
-            $"(eat radius {EatRadius}, max speed {MaxSpeed}, sensor range {SensorRange}, metabolism {MetabolismPerSecond})";
-
-        private static float Scale(float reference, float gene) => reference * (1f + gene * BodyGenes.TraitSpan);
-
-        // Expression rounds monotonically, so a gene within ±1 never lands outside these bounds.
-        private static bool InSpan(float value, float reference) =>
-            value >= reference * (1f - BodyGenes.TraitSpan) && value <= reference * (1f + BodyGenes.TraitSpan);
     }
 }

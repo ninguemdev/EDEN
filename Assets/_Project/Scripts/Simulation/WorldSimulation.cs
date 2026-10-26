@@ -211,11 +211,11 @@ namespace Eden.Simulation
                 var creature = creatures[i];
                 var action = actions[i];
                 var effort = action.Thrust * action.Thrust + action.Strafe * action.Strafe;
+                var body = creature.Body;
                 var cost = config.TickDuration *
-                           (creature.Body.MetabolismPerSecond + config.MovementCostPerSecond * effort +
-                            config.SensorCostPerSecond);
+                           (body.MetabolismPerSecond + body.MovementCostPerSecond * effort + body.SensorCostPerSecond);
                 var energy = creature.Energy + foodGains[i] - cost;
-                creature.Energy = energy < 0f ? 0f : energy > config.MaxEnergy ? config.MaxEnergy : energy;
+                creature.Energy = energy < 0f ? 0f : energy > body.MaxEnergy ? body.MaxEnergy : energy;
                 creature.AgeTicks++;
 
                 var cause = creature.Energy <= 0f ? DeathCause.Starvation

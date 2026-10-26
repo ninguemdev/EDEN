@@ -28,6 +28,8 @@ namespace Eden.Evolution
                 errors.Add($"{nameof(settings.MutationProbability)} must be in [0, 1] (was {settings.MutationProbability})");
             if (!(settings.MutationSigma >= 0f) || float.IsInfinity(settings.MutationSigma))
                 errors.Add($"{nameof(settings.MutationSigma)} must be finite and >= 0 (was {settings.MutationSigma})");
+            if (!BodyGenes.IsValidSet(settings.ExpressedBodyGenes))
+                errors.Add($"{nameof(settings.ExpressedBodyGenes)} has unknown genes ({(int)settings.ExpressedBodyGenes})");
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid reproduction settings: " + string.Join("; ", errors));
 
@@ -37,6 +39,7 @@ namespace Eden.Evolution
             TournamentSize = settings.TournamentSize;
             MutationProbability = settings.MutationProbability;
             MutationSigma = settings.MutationSigma;
+            MutableBodyGenes = settings.ExpressedBodyGenes;
         }
 
         public ulong ExperimentSeed { get; }
@@ -45,6 +48,9 @@ namespace Eden.Evolution
         public int TournamentSize { get; }
         public float MutationProbability { get; }
         public float MutationSigma { get; }
+
+        /// <summary>Body genes that mutate: the expressed ones. The others stay neutral and draw nothing.</summary>
+        public BodyGeneSet MutableBodyGenes { get; }
 
         /// <summary>
         /// Random stream used to create generation <paramref name="generation"/> (tournaments and mutations):
@@ -119,20 +125,28 @@ namespace Eden.Evolution
             for (var c = rules.EliteCount; c < children.Length; c++)
             {
                 var parent = Tournament(fitness, rules.TournamentSize, random.Source);
-                var child = Mutate(parents[parent], rules.MutationProbability, rules.MutationSigma, random, out var mutated);
+                var child = Mutate(parents[parent], rules.MutationProbability, rules.MutationSigma, rules.MutableBodyGenes,
+                    random, out var mutated);
                 children[c] = new Offspring(child, parent, false, mutated);
             }
 
             return children;
         }
 
+        /// <summary>Weights-only mutation: body genes are copied unchanged.</summary>
+        public static Genome Mutate(Genome parent, float probability, float sigma, GaussianSampler random, out int mutated) =>
+            Mutate(parent, probability, sigma, BodyGeneSet.None, random, out mutated);
+
         /// <summary>
         /// Copy of <paramref name="parent"/> where each weight, with chance <paramref name="probability"/>, gets
-        /// Gaussian noise of standard deviation <paramref name="sigma"/> and is then limited to ±<see cref="Genome.MaxAbsWeight"/>.
-        /// Draws per weight: one uniform coin, plus one Gaussian sample when the weight mutates. Body genes are copied
-        /// unchanged.
+        /// Gaussian noise of standard deviation <paramref name="sigma"/> and is then limited to ±<see cref="Genome.MaxAbsWeight"/>;
+        /// then each body gene of <paramref name="bodyGenes"/>, in <see cref="BodyGene"/> order, the same way within
+        /// ±<see cref="BodyGenes.MaxAbsValue"/>. Draws per weight or gene: one uniform coin, plus one Gaussian sample
+        /// when it mutates. Body genes outside the set are copied and draw nothing, so a fixed-body run draws exactly
+        /// what it drew before body genes existed. <paramref name="mutated"/> counts weights only.
         /// </summary>
-        public static Genome Mutate(Genome parent, float probability, float sigma, GaussianSampler random, out int mutated)
+        public static Genome Mutate(Genome parent, float probability, float sigma, BodyGeneSet bodyGenes,
+            GaussianSampler random, out int mutated)
         {
             if (parent == null)
                 throw new ArgumentNullException(nameof(parent));
@@ -150,7 +164,24 @@ namespace Eden.Evolution
                 mutated++;
             }
 
-            return new Genome(parent.Topology, weights, parent.Body);
+            BodyGenes.RequireSet(bodyGenes);
+            var body = parent.Body;
+            if (bodyGenes != BodyGeneSet.None)
+            {
+                var genes = new float[BodyGenes.Count];
+                for (var g = 0; g < genes.Length; g++)
+                {
+                    genes[g] = body[(BodyGene)g];
+                    if (((int)bodyGenes & (1 << g)) == 0 || random.Source.NextFloat() >= probability)
+                        continue;
+                    var value = genes[g] + (float)(sigma * random.NextStandard());
+                    genes[g] = Math.Min(BodyGenes.MaxAbsValue, Math.Max(-BodyGenes.MaxAbsValue, value));
+                }
+
+                body = new BodyGenes(genes[0], genes[1], genes[2], genes[3]);
+            }
+
+            return new Genome(parent.Topology, weights, body);
         }
 
         /// <summary>Parent indices from best to worst.</summary>

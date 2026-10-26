@@ -167,9 +167,8 @@ namespace Eden.Evolution
         /// <summary>Held-out seeds, identical for every generation of the experiment (a fresh copy).</summary>
         public ulong[] ValidationSeeds() => (ulong[])validationSeeds.Clone();
 
-        /// <summary>Body of the episode creature with <paramref name="genes"/>: only the expressed genes count.</summary>
-        public CreatureBody BodyFor(SimulationConfig episode, BodyGenes genes) =>
-            CreatureBody.Express(episode, genes, ExpressedBodyGenes);
+        /// <summary>The genes of <paramref name="genes"/> that shape the episode creature; the others are neutral.</summary>
+        public BodyGenes ExpressedGenes(BodyGenes genes) => genes.Masked(ExpressedBodyGenes);
 
         /// <summary>World configuration of one isolated episode (single creature) for a seed.</summary>
         public SimulationConfig EpisodeConfig(ulong episodeSeed)

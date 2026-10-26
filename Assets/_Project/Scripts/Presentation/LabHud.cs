@@ -9,18 +9,22 @@ namespace Eden.Presentation
     /// <summary>What the experiment controls ask for: indices into <see cref="LabHud.ModeChoices"/>, the presets and brains.</summary>
     public readonly struct LabChoice
     {
-        public LabChoice(LabMode mode, int preset, int seed, LabBrainKind brain)
+        public LabChoice(LabMode mode, int preset, int seed, LabBrainKind brain, bool evolvingBody = false)
         {
             Mode = mode;
             Preset = preset;
             Seed = seed;
             Brain = brain;
+            EvolvingBody = evolvingBody;
         }
 
         public LabMode Mode { get; }
         public int Preset { get; }
         public int Seed { get; }
         public LabBrainKind Brain { get; }
+
+        /// <summary>The evolution expresses and mutates all body genes; otherwise every body is the fixed control.</summary>
+        public bool EvolvingBody { get; }
     }
 
     /// <summary>
@@ -33,6 +37,7 @@ namespace Eden.Presentation
     {
         public static readonly string[] ModeChoices = { "Mundo compartilhado", "Evolução (avaliação isolada)" };
         public static readonly string[] PresetChoices = { "Mínimo (32)", "Padrão (64)", "Estresse (128)" };
+        public static readonly string[] BodyChoices = { "Fixo (controle)", "Evolutivo (4 genes)" };
 
         private static readonly string[] BrainChoices =
             { "Heurístico", "Aleatório", "Rede aleatória", "População evoluída" };
@@ -47,6 +52,7 @@ namespace Eden.Presentation
         private DropdownField modeField;
         private DropdownField presetField;
         private DropdownField brainField;
+        private DropdownField bodyField;
         private IntegerField seedField;
         private Button resumeButton;
         private Button pauseButton;
@@ -155,6 +161,7 @@ namespace Eden.Presentation
             modeField.SetValueWithoutNotify(ModeChoices[(int)choice.Mode]);
             presetField.SetValueWithoutNotify(PresetChoices[choice.Preset]);
             brainField.SetValueWithoutNotify(BrainChoices[(int)choice.Brain]);
+            bodyField.SetValueWithoutNotify(BodyChoices[choice.EvolvingBody ? 1 : 0]);
             seedField.SetValueWithoutNotify(choice.Seed);
             UpdateBrainField();
             resumeButton.style.display = evolutionAvailable && choice.Mode == LabMode.SharedWorld
@@ -177,7 +184,7 @@ namespace Eden.Presentation
                 return default;
             var brain = Math.Max(0, brainField.index);
             return new LabChoice((LabMode)Math.Max(0, modeField.index), Math.Max(0, presetField.index),
-                Math.Max(0, seedField.value), (LabBrainKind)brain);
+                Math.Max(0, seedField.value), (LabBrainKind)brain, bodyField.index == 1);
         }
 
         /// <summary>True while the user types into a text field, so key shortcuts must be ignored.</summary>
@@ -230,8 +237,12 @@ namespace Eden.Presentation
             brainField.choices = choices;
         }
 
-        private void UpdateBrainField() =>
+        // The brain applies to the shared world; the body choice to a new evolution.
+        private void UpdateBrainField()
+        {
             brainField.SetEnabled(modeField.index == (int)LabMode.SharedWorld);
+            bodyField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+        }
 
         private bool Bind()
         {
@@ -276,6 +287,9 @@ namespace Eden.Presentation
             brainField = root.Q<DropdownField>("brain-field");
             brainField.choices = new List<string>(BrainChoices);
             brainField.index = 0;
+            bodyField = root.Q<DropdownField>("body-field");
+            bodyField.choices = new List<string>(BodyChoices);
+            bodyField.index = 0;
             seedField = root.Q<IntegerField>("seed-field");
             seedField.RegisterValueChangedCallback(change =>
             {

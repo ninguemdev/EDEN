@@ -70,7 +70,8 @@ namespace Eden.Tests.EditMode
                     heading: 1e-7f, energy: 33.3333321f, eaten: 1e-30f)
             };
             var body = CreatureBody.Reference(new SimulationConfig(settings));
-            var creatures = values.Select((v, i) => new CreatureState(new CreatureId(i + 1), v.position, v.heading, v.energy, body)
+            var creatures = values.Select((v, i) => new CreatureState(new CreatureId(i + 1), v.position, v.heading, v.energy,
+                BodyGenes.Neutral, body)
             {
                 Velocity = v.velocity, AgeTicks = i * 7, FoodEnergyEaten = v.eaten
             }).ToArray();
@@ -118,7 +119,7 @@ namespace Eden.Tests.EditMode
             AssertRefused(text.Substring(0, text.Length / 2), "Invalid JSON");
             AssertRefused("not json", "Invalid JSON");
             AssertRefused("{\"format\": \"something-else\"}", "Not an EDEN checkpoint");
-            AssertRefused(text.Replace("\"schemaVersion\": 2,", "\"schemaVersion\": 3,"), "newer");
+            AssertRefused(text.Replace("\"schemaVersion\": 3,", "\"schemaVersion\": 4,"), "newer");
             AssertRefused(text.Replace(Pcg32.AlgorithmName, "xorshift128"), "random");
             AssertRefused(ChangeFirstWeight(text, "0.5"), "State hash mismatch");
             AssertRefused(text.Replace("\"maxSpeed\": 5,", "\"maxSpeed\": 6,"), "Config hash mismatch");
@@ -175,7 +176,7 @@ namespace Eden.Tests.EditMode
                 Assert.That(problem, Does.Contain("Invalid JSON"));
                 Assert.That(fallback.Evolution.TotalTicks, Is.EqualTo(first.Evolution.TotalTicks), "the backup");
 
-                File.WriteAllText(path, secondText.Replace("\"schemaVersion\": 2,", "\"schemaVersion\": 99,"));
+                File.WriteAllText(path, secondText.Replace("\"schemaVersion\": 3,", "\"schemaVersion\": 99,"));
                 Assert.That(() => CheckpointFile.Load(path, out _),
                     Throws.TypeOf<CheckpointException>().With.Message.Contains("newer"));
                 Assert.That(() => CheckpointFile.Load(Path.Combine(directory, "missing.json"), out _),

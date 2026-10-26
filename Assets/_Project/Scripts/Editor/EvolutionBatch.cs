@@ -4,6 +4,7 @@ using System.Linq;
 using System.Globalization;
 using System.IO;
 using Eden.Application;
+using Eden.Domain;
 using Eden.Evolution;
 using Eden.Persistence;
 using UnityEditor;
@@ -15,12 +16,14 @@ namespace Eden.Editor
     /// Runs generational experiments in isolated episodes without a scene and exports them to
     /// persistentDataPath/EvolutionRuns/&lt;UTC&gt;-… (or -eden-output DIR). From the command line:
     /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.RunFromCommandLine
-    ///   [-eden-seed N] [-eden-generations N] [-eden-food N] [-eden-output DIR] -logFile -
+    ///   [-eden-seed N] [-eden-generations N] [-eden-food N] [-eden-body GENES] [-eden-output DIR] -logFile -
     /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.RunBatteryFromCommandLine
     ///   [-eden-seed N] [-eden-runs N] [-eden-generations N] [-eden-validation-interval N] [-eden-food N]
     ///   [-eden-output DIR] -logFile -
     /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.ComparePresetsFromCommandLine
     ///   [-eden-presets minimal,standard,stress] and the battery options -logFile -
+    /// -eden-body takes the expressed body genes: none (the fixed body, default), all, or a comma list of
+    /// size, speed, sensor, efficiency; the battery commands accept it too.
     /// Settings not given keep the proposed defaults of <see cref="EvolutionSettings"/> and <see cref="BatterySettings"/>.
     /// </summary>
     public static class EvolutionBatch
@@ -201,6 +204,9 @@ namespace Eden.Editor
                     case "-eden-food":
                         settings.World.InitialFood = Integer(value);
                         break;
+                    case "-eden-body":
+                        settings.ExpressedBodyGenes = BodyGeneSetOf(value);
+                        break;
                     case "-eden-output":
                         output = value;
                         break;
@@ -234,6 +240,23 @@ namespace Eden.Editor
         }
 
         private static int Integer(string value) => int.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
+
+        private static BodyGeneSet BodyGeneSetOf(string value)
+        {
+            if (value == "none")
+                return BodyGeneSet.None;
+            if (value == "all")
+                return BodyGeneSet.All;
+            var set = BodyGeneSet.None;
+            foreach (var name in value.Split(','))
+            {
+                if (!Enum.TryParse(name.Trim(), true, out BodyGene gene) || !Enum.IsDefined(typeof(BodyGene), gene))
+                    throw new ArgumentException($"Unknown body gene \"{name}\" (size, speed, sensor, efficiency).");
+                set |= (BodyGeneSet)(1 << (int)gene);
+            }
+
+            return set;
+        }
 
         private static string DefaultDirectory(string name) =>
             Path.Combine(UnityEngine.Application.persistentDataPath, "EvolutionRuns", $"{DateTime.UtcNow:yyyyMMdd-HHmmss}-{name}");

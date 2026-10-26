@@ -16,14 +16,15 @@ namespace Eden.Persistence
     /// ones are refused with an explicit message), algorithms, both hashes, every value's type, range and array size
     /// (before anything is allocated for it), that encoding the result again gives the very same text (so nothing was
     /// lost, added or rounded), and finally that the evolution and shared world restore. Floats are written with the
-    /// invariant culture and the shortest text that reads back to the same bits. Schema 2 added body genes: expressed
-    /// genes, a genome's body genes and a creature's body are written only when they differ from the fixed body, so a
-    /// schema 1 checkpoint (genome schema 1, always the fixed body) reads as the same run.
+    /// invariant culture and the shortest text that reads back to the same bits. Body genes came later: expressed genes,
+    /// a genome's and a creature's body genes and the world's body cost exponents are written only when they differ
+    /// from the fixed body and the default costs, so older checkpoints (genome schema 1, config schema 3, always the
+    /// fixed body, where costs change nothing) read as the same run.
     /// </summary>
     public static class CheckpointCodec
     {
         public const string Format = "eden-checkpoint";
-        public const int SchemaVersion = 2;
+        public const int SchemaVersion = 3;
 
         /// <summary>Limits checked before allocating; generous for the lab, small enough to refuse absurd files.</summary>
         public const int MaxLineageEntries = 8000000;
@@ -116,8 +117,10 @@ namespace Eden.Persistence
             foreach (var expected in EncodeAlgorithms().Members)
             {
                 var actual = saved[expected.Key];
-                // A schema 1 genome is a schema 2 genome with neutral body genes, which is all such files contain.
-                if (expected.Key == "genomeSchema" && actual.Kind == JsonKind.Number && actual.Text == "1")
+                // A schema 1 genome is today's genome with neutral body genes, and a schema 3 config is today's config
+                // with the default body costs, which do nothing for the fixed body those files always have.
+                if (actual.Kind == JsonKind.Number && (expected.Key == "genomeSchema" && actual.Text == "1" ||
+                                                       expected.Key == "configSchema" && actual.Text == "3"))
                     continue;
                 if (actual.Kind != expected.Value.Kind || actual.Text != expected.Value.Text)
                     throw new CheckpointException($"Saved with {expected.Key} {actual.Text}; this build uses " +
@@ -223,8 +226,12 @@ namespace Eden.Persistence
             return settings;
         }
 
-        private static JsonValue EncodeSettings(SimulationSettings s) =>
-            JsonValue.NewObject()
+        private static readonly SimulationSettings Defaults = new SimulationSettings();
+
+        // Body cost exponents are written only when they differ from the defaults (see the class summary).
+        private static JsonValue EncodeSettings(SimulationSettings s)
+        {
+            var settings = JsonValue.NewObject()
                 .Add("seed", JsonValue.Of(s.Seed))
                 .Add("arenaWidth", JsonValue.Of(s.ArenaWidth))
                 .Add("arenaHeight", JsonValue.Of(s.ArenaHeight))
@@ -246,6 +253,21 @@ namespace Eden.Persistence
                 .Add("maxAcceleration", JsonValue.Of(s.MaxAcceleration))
                 .Add("maxTurnRate", JsonValue.Of(s.MaxTurnRate))
                 .Add("damping", JsonValue.Of(s.Damping));
+            AddIfNotDefault(settings, "sizeCostExponent", s.SizeCostExponent, Defaults.SizeCostExponent);
+            AddIfNotDefault(settings, "speedCostExponent", s.SpeedCostExponent, Defaults.SpeedCostExponent);
+            AddIfNotDefault(settings, "sensorCostExponent", s.SensorCostExponent, Defaults.SensorCostExponent);
+            AddIfNotDefault(settings, "efficiencyPowerExponent", s.EfficiencyPowerExponent, Defaults.EfficiencyPowerExponent);
+            return settings;
+        }
+
+        private static void AddIfNotDefault(JsonValue settings, string name, float value, float defaultValue)
+        {
+            if (value != defaultValue)
+                settings.Add(name, JsonValue.Of(value));
+        }
+
+        private static float FloatOr(JsonValue settings, string name, float defaultValue) =>
+            settings.TryGet(name)?.Float() ?? defaultValue;
 
         private static SimulationSettings DecodeSettings(JsonValue saved)
         {
@@ -271,7 +293,11 @@ namespace Eden.Persistence
                 MaxSpeed = saved["maxSpeed"].Float(),
                 MaxAcceleration = saved["maxAcceleration"].Float(),
                 MaxTurnRate = saved["maxTurnRate"].Float(),
-                Damping = saved["damping"].Float()
+                Damping = saved["damping"].Float(),
+                SizeCostExponent = FloatOr(saved, "sizeCostExponent", Defaults.SizeCostExponent),
+                SpeedCostExponent = FloatOr(saved, "speedCostExponent", Defaults.SpeedCostExponent),
+                SensorCostExponent = FloatOr(saved, "sensorCostExponent", Defaults.SensorCostExponent),
+                EfficiencyPowerExponent = FloatOr(saved, "efficiencyPowerExponent", Defaults.EfficiencyPowerExponent)
             };
             new SimulationConfig(settings);
             return settings;
@@ -287,7 +313,7 @@ namespace Eden.Persistence
                 .Add("sharedWorld", shared == null
                     ? JsonValue.Null()
                     : JsonValue.NewObject()
-                        .Add("world", EncodeWorld(shared.World, CreatureBody.Reference(new SimulationConfig(shared.Settings))))
+                        .Add("world", EncodeWorld(shared.World))
                         .Add("brains", EncodeBrains(shared.Brains)));
         }
 
@@ -312,7 +338,7 @@ namespace Eden.Persistence
                 var saved = state["sharedWorld"];
                 shared = new SharedWorldSnapshot(settings,
                     DecodeWorld(saved["world"], settings.InitialPopulation, settings.InitialFood,
-                        CreatureBody.Reference(new SimulationConfig(settings))),
+                        new SimulationConfig(settings)),
                     DecodeBrains(saved["brains"]));
             }
             else if (!state["sharedWorld"].IsNull)
@@ -389,8 +415,7 @@ namespace Eden.Persistence
                 .Add("validation", validation)
                 .Add("job", JsonValue.NewObject()
                     .Add("completed", EncodeEpisodes(evolution.Job.Completed))
-                    .Add("world", EncodeWorld(evolution.Job.CurrentWorld,
-                        CreatureBody.Reference(new EvaluationPlan(evolution.Settings).EpisodeConfig(0))))
+                    .Add("world", EncodeWorld(evolution.Job.CurrentWorld))
                     .Add("brains", EncodeBrains(evolution.Job.CurrentBrains)));
         }
 
@@ -448,9 +473,9 @@ namespace Eden.Persistence
 
             var baselines = saved["baselines"];
             var job = saved["job"];
-            // The reference body does not depend on the episode seed.
+            // Bodies do not depend on the episode seed.
             var progress = new EvaluationProgress(DecodeEpisodes(job["completed"], plan),
-                DecodeWorld(job["world"], 1, settings.World.InitialFood, CreatureBody.Reference(plan.EpisodeConfig(0))),
+                DecodeWorld(job["world"], 1, settings.World.InitialFood, plan.EpisodeConfig(0)),
                 DecodeBrains(job["brains"]));
             return new EvolutionSnapshot(settings, interval, saved["generation"].Int(0), Members(saved["population"], individuals),
                 lineage, lastIndividuals, lastEpisodes, baselines.IsNull ? null : DecodeEpisodes(baselines, plan),
@@ -613,8 +638,8 @@ namespace Eden.Persistence
                 s["newIndividuals"].Int(0), s["elites"].Int(0), s["distinctParents"].Int(0),
                 s["meanMutatedWeights"].AnyFloat());
 
-        // A creature's body is written only when it is not the reference body of the world's config.
-        private static JsonValue EncodeWorld(SimulationSnapshot world, CreatureBody reference)
+        // A creature's body genes are written only when they are not neutral; its body follows from them and the config.
+        private static JsonValue EncodeWorld(SimulationSnapshot world)
         {
             var creatures = JsonValue.NewArray();
             foreach (var creature in world.Creatures)
@@ -629,13 +654,8 @@ namespace Eden.Persistence
                     .Add("energy", JsonValue.Of(creature.Energy))
                     .Add("ageTicks", JsonValue.Of(creature.AgeTicks))
                     .Add("foodEnergyEaten", JsonValue.Of(creature.FoodEnergyEaten));
-                var body = creature.Body;
-                if (!body.Equals(reference))
-                    saved.Add("body", JsonValue.NewArray()
-                        .Add(JsonValue.Of(body.EatRadius))
-                        .Add(JsonValue.Of(body.MaxSpeed))
-                        .Add(JsonValue.Of(body.SensorRange))
-                        .Add(JsonValue.Of(body.MetabolismPerSecond)));
+                if (!creature.Genes.IsNeutral)
+                    saved.Add("bodyGenes", EncodeBodyGenes(creature.Genes));
                 creatures.Add(saved);
             }
 
@@ -675,15 +695,16 @@ namespace Eden.Persistence
         // Creatures never outnumber the initial population yet (no births), and food never exceeds the initial count
         // plus its pending respawns, which are themselves bounded by the food eaten.
         private static SimulationSnapshot DecodeWorld(JsonValue saved, int maxCreatures, int maxFood,
-            CreatureBody reference)
+            SimulationConfig config)
         {
             var creatureValues = saved["creatures"].ArrayOf(Math.Min(maxCreatures, SimulationConfig.MaxPopulation));
             var creatures = new CreatureState[creatureValues.Count];
             for (var i = 0; i < creatures.Length; i++)
             {
                 var value = creatureValues[i];
+                var genes = DecodeBodyGenes(value.TryGet("bodyGenes"));
                 creatures[i] = new CreatureState(new CreatureId(value["id"].Int(1)), ReadPair(value["position"]),
-                    value["heading"].Float(), value["energy"].Float(), ReadBody(value.TryGet("body"), reference))
+                    value["heading"].Float(), value["energy"].Float(), genes, CreatureBody.Express(config, genes))
                 {
                     Velocity = ReadPair(value["velocity"]),
                     AgeTicks = value["ageTicks"].Long(0),
@@ -711,17 +732,6 @@ namespace Eden.Persistence
             return new SimulationSnapshot(saved["tick"].Long(0), saved["nextCreatureId"].Int(1), saved["nextFoodId"].Int(1),
                 DecodeRandom(saved["worldRandom"]), DecodeRandom(saved["spawnRandom"]), creatures, food, agenda,
                 saved["nextEventSequence"].Long(0), saved["correctedInputValues"].Long(0));
-        }
-
-        // Limits are checked when the world is restored.
-        private static CreatureBody ReadBody(JsonValue saved, CreatureBody reference)
-        {
-            if (saved == null)
-                return reference;
-            var values = saved.ArrayOf(4);
-            if (values.Count != 4)
-                throw new CheckpointException($"{values.Path}: expected [eat radius, max speed, sensor range, metabolism].");
-            return new CreatureBody(values[0].Float(), values[1].Float(), values[2].Float(), values[3].Float());
         }
 
         private static JsonValue EncodeBrains(IReadOnlyList<BrainSlotState> brains)

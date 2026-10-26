@@ -42,8 +42,8 @@ namespace Eden.Domain
         /// <summary>
         /// Rebuilds a world saved between ticks: living creatures and uneaten food in ascending id order, below the
         /// id counters, inside the arena and within the config's limits. Everything is checked before the world is
-        /// built and all problems are reported together (bodies included: within the limits of <see cref="BodyGenes"/>);
-        /// the given objects are copied, never shared.
+        /// built and all problems are reported together (each body must be its genes expressed in this config, and the
+        /// energy within that body's capacity); the given objects are copied, never shared.
         /// </summary>
         public static WorldState Restore(SimulationConfig config, long tick, int nextCreatureId, int nextFoodId,
             Pcg32State worldRandom, Pcg32State spawnRandom, IReadOnlyList<CreatureState> creatures,
@@ -79,7 +79,8 @@ namespace Eden.Domain
             var world = new WorldState(config, tick, nextCreatureId, nextFoodId, worldRandom, spawnRandom);
             foreach (var saved in creatures)
             {
-                world.creatures.Add(new CreatureState(saved.Id, saved.Position, saved.Heading, saved.Energy, saved.Body)
+                world.creatures.Add(new CreatureState(saved.Id, saved.Position, saved.Heading, saved.Energy, saved.Genes,
+                    saved.Body)
                 {
                     Velocity = saved.Velocity, AgeTicks = saved.AgeTicks, FoodEnergyEaten = saved.FoodEnergyEaten
                 });
@@ -92,7 +93,7 @@ namespace Eden.Domain
 
         public SimulationConfig Config { get; }
 
-        /// <summary>Body made of the config's own values, which every creature has unless it was given another.</summary>
+        /// <summary>Body of neutral genes: the config's own values.</summary>
         public CreatureBody ReferenceBody { get; }
 
         public long Tick { get; private set; }
@@ -110,16 +111,15 @@ namespace Eden.Domain
 
         public void AdvanceTick() => Tick++;
 
-        /// <summary>Adds a creature with the <see cref="ReferenceBody"/>.</summary>
+        /// <summary>Adds a creature with neutral genes, so the <see cref="ReferenceBody"/>.</summary>
         public CreatureState AddCreature(Float2 position, float heading, float energy) =>
-            AddCreature(position, heading, energy, ReferenceBody);
+            AddCreature(position, heading, energy, BodyGenes.Neutral);
 
-        /// <summary>Adds a creature with <paramref name="body"/>, which must be within the limits of this config.</summary>
-        public CreatureState AddCreature(Float2 position, float heading, float energy, CreatureBody body)
+        /// <summary>Adds a creature whose body is <paramref name="genes"/> expressed in this config.</summary>
+        public CreatureState AddCreature(Float2 position, float heading, float energy, BodyGenes genes)
         {
-            if (!body.IsWithinLimits(Config))
-                throw new ArgumentException($"Body {body} is outside the limits of this config.", nameof(body));
-            var creature = new CreatureState(new CreatureId(NextCreatureId++), position, heading, energy, body);
+            var body = genes.IsNeutral ? ReferenceBody : CreatureBody.Express(Config, genes);
+            var creature = new CreatureState(new CreatureId(NextCreatureId++), position, heading, energy, genes, body);
             creatures.Add(creature);
             return creature;
         }
@@ -200,14 +200,14 @@ namespace Eden.Domain
                     errors.Add($"{name} has a non-finite velocity");
                 if (!(creature.Heading >= 0f && creature.Heading < 2f * MathF.PI))
                     errors.Add($"{name} heading {creature.Heading} is outside [0, 2π)");
-                if (!(creature.Energy > 0f && creature.Energy <= config.MaxEnergy))
-                    errors.Add($"{name} energy {creature.Energy} is outside (0, {config.MaxEnergy}]");
+                if (!creature.Body.Equals(CreatureBody.Express(config, creature.Genes)))
+                    errors.Add($"{name} body {creature.Body} is not its genes {creature.Genes} expressed in the config");
+                else if (!(creature.Energy > 0f && creature.Energy <= creature.Body.MaxEnergy))
+                    errors.Add($"{name} energy {creature.Energy} is outside (0, {creature.Body.MaxEnergy}]");
                 if (creature.AgeTicks < 0 || creature.AgeTicks >= config.MaxAgeTicks)
                     errors.Add($"{name} age {creature.AgeTicks} is outside [0, {config.MaxAgeTicks})");
                 if (!(creature.FoodEnergyEaten >= 0f) || !IsFinite(creature.FoodEnergyEaten))
                     errors.Add($"{name} eaten food energy {creature.FoodEnergyEaten} must be finite and not negative");
-                if (!creature.Body.IsWithinLimits(config))
-                    errors.Add($"{name} body {creature.Body} is outside the limits of the config");
             }
         }
 
