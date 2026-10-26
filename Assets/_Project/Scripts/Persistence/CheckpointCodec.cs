@@ -20,8 +20,8 @@ namespace Eden.Persistence
     /// a genome's and a creature's body genes and the world's body cost exponents are written only when they differ
     /// from the fixed body and the default costs, so older checkpoints (genome schema 1, config schema 3, always the
     /// fixed body, where costs change nothing) read as the same run. Reproduction came after that: the reproduction
-    /// settings, a creature's parent, generation and cooldown and the genomes of creatures born in a shared world are
-    /// written only when reproduction is on or they are set, so config schema 4 files read the same way.
+    /// settings, a creature's parent, generation and cooldown, the genomes of creatures born in a shared world and its
+    /// genealogy are written only when reproduction is on or they are set, so config schema 4 files read the same way.
     /// </summary>
     public static class CheckpointCodec
     {
@@ -353,6 +353,24 @@ namespace Eden.Persistence
                         genomes.Add(EncodeGenome(entry.Genome, JsonValue.NewObject().Add("creature", JsonValue.Of(entry.Creature.Value))));
                     sharedWorld.Add("bornGenomes", genomes);
                 }
+
+                if (shared.Genealogy.Count > 0)
+                {
+                    // [id, parent (0: founder), generation, birth tick, death tick (-1: alive), death cause]
+                    var entries = JsonValue.NewArray();
+                    foreach (var entry in shared.Genealogy)
+                    {
+                        entries.Add(JsonValue.NewArray()
+                            .Add(JsonValue.Of(entry.Creature.Value))
+                            .Add(JsonValue.Of(entry.Parent?.Value ?? 0))
+                            .Add(JsonValue.Of(entry.Generation))
+                            .Add(JsonValue.Of(entry.BirthTick))
+                            .Add(JsonValue.Of(entry.DeathTick))
+                            .Add(JsonValue.Of((int)entry.DeathCause)));
+                    }
+
+                    sharedWorld.Add("genealogy", entries);
+                }
             }
 
             return JsonValue.NewObject()
@@ -413,9 +431,26 @@ namespace Eden.Persistence
                         genomes.Add(new BornGenome(new CreatureId(values[i]["creature"].Int(1)), DecodeGenome(values[i])));
                 }
 
+                var genealogy = new List<GenealogyEntry>();
+                var lineage = saved.TryGet("genealogy");
+                if (lineage != null)
+                {
+                    var values = lineage.ArrayOf(MaxLineageEntries);
+                    for (var i = 0; i < values.Count; i++)
+                    {
+                        var item = values[i].ArrayOf(6);
+                        if (item.Count != 6)
+                            throw new CheckpointException($"{item.Path}: expected [id, parent, generation, birth, death, cause].");
+                        var parent = item[1].Int(0);
+                        genealogy.Add(new GenealogyEntry(new CreatureId(item[0].Int(1)),
+                            parent == 0 ? (CreatureId?)null : new CreatureId(parent), item[2].Int(0), item[3].Long(0),
+                            item[4].Long(-1), (DeathCause)item[5].Int(0, (int)DeathCause.OldAge)));
+                    }
+                }
+
                 shared = new SharedWorldSnapshot(settings,
                     DecodeWorld(saved["world"], most, settings.InitialFood, new SimulationConfig(settings)),
-                    DecodeBrains(saved["brains"]), genomes);
+                    DecodeBrains(saved["brains"]), genomes, genealogy);
             }
             else if (!state["sharedWorld"].IsNull)
             {
@@ -431,7 +466,12 @@ namespace Eden.Persistence
             if (checkpoint.Evolution != null)
                 EvolutionSession.Restore(checkpoint.Evolution);
             if (checkpoint.SharedWorld != null)
-                WorldSimulation.Restore(new SimulationConfig(checkpoint.SharedWorld.Settings), checkpoint.SharedWorld.World);
+            {
+                var shared = checkpoint.SharedWorld;
+                var world = WorldSimulation.Restore(new SimulationConfig(shared.Settings), shared.World);
+                if (shared.Genealogy.Count > 0)
+                    Genealogy.Restore(shared.Genealogy, world.World);
+            }
         }
 
         private static JsonValue EncodeEvolution(EvolutionSnapshot evolution)
