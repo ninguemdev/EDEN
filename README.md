@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa), **M3** (evolução por gerações) e **M4** (laboratório completo e checkpoints, o MVP) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O laboratório inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. O **M5** (biologia parametrizada) está em andamento: o genoma já carrega genes de corpo limitados, ainda desligados por padrão. Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa), **M3** (evolução por gerações) e **M4** (laboratório completo e checkpoints, o MVP) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O laboratório inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. O **M5** (biologia parametrizada) está em andamento: o genoma carrega genes de corpo limitados, cada característica com custo explícito, e o laboratório pode evoluir o corpo junto com o cérebro (o corpo fixo continua o padrão e o controle). Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -80,7 +80,8 @@ Tudo se escolhe pela interface, sem editar código:
 
 - **Modo:** *Mundo compartilhado* (todas as criaturas na mesma arena, disputando a comida; só observação, sem regra de seleção) ou *Evolução (avaliação isolada)* (veja [abaixo](#no-laboratório)).
 - **Preset:** Mínimo (32 criaturas, 64 comidas), Padrão (64, 128) ou Estresse (128, 256). Na evolução o preset define quantos genomas há por geração; o mundo de cada episódio isolado não muda.
-- **Cérebro** (mundo compartilhado): heurístico, aleatório, rede aleatória ou *população evoluída* (a última geração avaliada da evolução do laboratório, um indivíduo por criatura).
+- **Cérebro** (mundo compartilhado): heurístico, aleatório, rede aleatória ou *população evoluída* (a última geração avaliada da evolução do laboratório, um indivíduo por criatura, cada um com o seu corpo).
+- **Corpo** (evolução): *Fixo (controle)*, todos com o corpo de referência, ou *Evolutivo*, em que os quatro [genes de corpo](#genes-de-corpo) são herdados e mutados. O tamanho de cada criatura na tela segue o seu raio; a selecionada mostra o alcance do sensor, e o inspetor mostra os genes, cada característica em relação à referência e o gasto por segundo.
 - **Seed** e o botão **Iniciar**. Os botões de baixo pausam, avançam um tick, mudam a velocidade e ligam a velocidade **Máx.**, que roda quantos ticks inteiros couberem em 10 ms por quadro e mostra a velocidade efetiva alcançada.
 - **Salvar** e **Carregar** gravam e retomam o experimento num [checkpoint](#checkpoints).
 
@@ -135,9 +136,18 @@ Esses valores são propostas iniciais a medir, não garantias de melhoria. Com a
 
 ### Genes de corpo
 
-Além dos pesos, o genoma guarda quatro genes de corpo, cada um em [−1, 1]: **tamanho** (raio do corpo: a comida dentro dele é consumida), **velocidade** (velocidade máxima), **sensor** (alcance da percepção de comida e paredes) e **eficiência** (reduz o metabolismo de repouso). Um gene g multiplica o valor de referência da configuração por 1 + 0,5·g (a eficiência multiplica o metabolismo por 1 − 0,5·g), então cada característica fica entre a metade e 1,5 vez a referência; o corpo é calculado quando a criatura nasce e não muda durante a vida. As leituras dos sensores são relativas ao próprio corpo (proximidade pelo próprio alcance, velocidade pela própria velocidade máxima).
+Além dos pesos, o genoma guarda quatro genes de corpo, cada um em [−1, 1]. Cada gene g dá um fator f = 1 + 0,5·g, entre 0,5 e 1,5, e nenhuma característica vem sem custo:
 
-Um experimento escolhe quais genes são expressos (`ExpressedBodyGenes`). O padrão é **nenhum**: todas as criaturas têm o corpo de referência, exatamente como antes dos genes existirem, e isso continua disponível como controle. Os genes expressos começam sorteados dentro dos limites na geração 0 (sorteados depois dos pesos, que não mudam); os demais ficam neutros. Por enquanto a mutação copia os genes de corpo sem alterá-los, e os cérebros de referência sempre usam o corpo de referência. Como os custos de cada característica ainda não existem (próxima tarefa do M5), um gene expresso hoje só traria vantagem; por isso nenhum preset do laboratório liga genes de corpo. O mundo compartilhado também usa o corpo de referência.
+| Gene | Ganho | Custo |
+| --- | --- | --- |
+| tamanho (f<sub>t</sub>) | raio do corpo (a comida dentro dele é consumida) e capacidade de energia × f<sub>t</sub> | metabolismo e custo de movimento × f<sub>t</sub><sup>1</sup> |
+| velocidade (f<sub>v</sub>) | velocidade máxima × f<sub>v</sub> | custo de movimento × f<sub>v</sub><sup>2</sup> |
+| sensor (f<sub>s</sub>) | alcance da percepção de comida e paredes × f<sub>s</sub> | custo do sensor × f<sub>s</sub><sup>2</sup> (a área percebida) |
+| eficiência (m = 1 − 0,5·g) | metabolismo × m | aceleração × m<sup>1</sup> (metabolismo poupador, menos potência) |
+
+Os expoentes de custo ficam na configuração (`SizeCostExponent`, `SpeedCostExponent`, `SensorCostExponent`, `EfficiencyPowerExponent`, entre 0 e 4; 0 desliga aquele custo, só para experimentos de controle) e são propostas a medir. Um gene negativo inverte a troca: corpo menor gasta menos mas alcança e guarda menos, e assim por diante. Os testes de regra conferem que, com os valores padrão, nenhum corpo é pelo menos tão bom quanto o de referência em tudo, e que cada custo aparece no gasto de energia do mundo. O corpo é calculado quando a criatura nasce e não muda durante a vida; ela começa com a energia inicial ou com a sua capacidade, se for menor. As leituras dos sensores são relativas ao próprio corpo (energia pela própria capacidade, proximidade pelo próprio alcance, velocidade pela própria velocidade máxima).
+
+Um experimento escolhe quais genes são expressos (`ExpressedBodyGenes`; no laboratório, **Corpo**; sem a cena, `-eden-body`). O padrão é **nenhum**: todas as criaturas têm o corpo de referência, exatamente como antes dos genes existirem (os mesmos sorteios e os mesmos resultados), e isso continua disponível como controle. Os genes expressos começam sorteados dentro dos limites na geração 0 (depois dos pesos, que não mudam) e mutam como os pesos (5% de chance por gene, ruído gaussiano σ = 0,10, limitado a [−1, 1]); os demais ficam neutros e não sorteiam nada. Os cérebros de referência sempre usam o corpo de referência.
 
 ### No laboratório
 
@@ -156,7 +166,7 @@ Para rodar: menu **EDEN → Evolution → Run 20 generations (seed 1)** no Edito
   -executeMethod Eden.Editor.EvolutionBatch.RunFromCommandLine -eden-seed 1 -eden-generations 20 -logFile evolution.log
 ```
 
-Opções: `-eden-seed N`, `-eden-generations N`, `-eden-food N` (comida do episódio, padrão 32) e `-eden-output DIR`. Sem `-eden-output`, o resultado vai para `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\EvolutionRuns\<data>-seed<n>\`:
+Opções: `-eden-seed N`, `-eden-generations N`, `-eden-food N` (comida do episódio, padrão 32), `-eden-body none|all|size,speed,sensor,efficiency` (genes de corpo expressos, padrão `none`) e `-eden-output DIR`. Sem `-eden-output`, o resultado vai para `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\EvolutionRuns\<data>-seed<n>\`:
 
 - `experiment.txt` e `experiment.json`: todos os parâmetros do experimento, o hash da configuração (o mesmo texto canônico que os checkpoints usam: hash igual, experimento igual), o modo de avaliação e a unidade de cada coluna dos CSVs; numa execução retomada, também a origem descrita em [checkpoints](#checkpoints);
 - `summary.json`: reescrito a cada geração com os totais de treino e validação, os últimos resumos, o melhor resultado de treino e o campeão na validação;
@@ -226,8 +236,8 @@ O estresse teve a maior média, com 4× os episódios de treino do mínimo, mas 
 
 Pelo Editor: **Window → General → Test Runner**, abas EditMode e PlayMode.
 
-- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, genes de corpo (limites, herança, expressão no mundo e corpo fixo idêntico ao anterior), avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados, arquivos de antes dos genes de corpo ainda lidos), ticks sem alocação de memória após o aquecimento (gravador de alocações da Unity), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, além de execuções longas com verificação de invariantes e independência de FPS.
-- **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id, gravação do CSV e os controles do laboratório, inclusive salvar, carregar e a medição de desempenho.
+- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, genes de corpo (limites, herança e mutação, expressão no mundo, corpo fixo idêntico ao anterior e regras de custo: nenhum corpo melhor que a referência em tudo), avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados, arquivos de antes dos genes de corpo ainda lidos), ticks sem alocação de memória após o aquecimento (gravador de alocações da Unity), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, além de execuções longas com verificação de invariantes e independência de FPS.
+- **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id, gravação do CSV e os controles do laboratório, inclusive salvar, carregar, a medição de desempenho e o corpo evolutivo (tamanho desenhado, alcance do sensor e inspetor).
 
 Pela linha de comando, com o Editor **fechado** para este projeto:
 
@@ -254,6 +264,7 @@ O executável sai em `Builds/Windows/EDEN.exe` e roda sem o Editor. Para um buil
 | `-eden-mode shared\|evolution` | modo inicial (mundo compartilhado ou evolução) |
 | `-eden-preset minimal\|standard\|stress` | preset inicial |
 | `-eden-brain heuristic\|random\|neural` | cérebro inicial do mundo compartilhado |
+| `-eden-body fixed\|evolving` | corpo da evolução (padrão `fixed`) |
 | `-eden-seed N` | seed do run (ou do experimento de evolução) |
 | `-eden-select ID` | já começa com a criatura `ID` selecionada |
 | `-eden-max` | já começa na velocidade máxima |
