@@ -780,6 +780,12 @@ namespace Eden.Presentation
                 controller.TryGetBrain(id, out var creatureBrain);
                 var text = LabText.Creature(creature, Sensors.Observe(Simulation.World, creature), action,
                     creatureBrain?.Name ?? BrainName, Simulation.World.Config);
+                if (creatureBrain is MlpBrain mlp)
+                {
+                    controller.TryGetState(id, out var state);
+                    text += "\n" + LabText.Plasticity(mlp.Plasticity, state?.Plastic);
+                }
+
                 return text + LineageOf(creature);
             }
 

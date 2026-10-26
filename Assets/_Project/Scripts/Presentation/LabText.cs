@@ -242,6 +242,15 @@ namespace Eden.Presentation
             return text.ToString();
         }
 
+        /// <summary>Whether a network changes during its life and how much it has changed so far.</summary>
+        public static string Plasticity(PlasticityGenes genes, PlasticMemory memory)
+        {
+            if (!genes.IsPlastic)
+                return "Rede fixa durante a vida (sem plasticidade)";
+            return $"Plasticidade hebbiana (camada de saída): taxa {genes.LearningRate:0.###}, decaimento {genes.Decay:0.###}; " +
+                   $"maior |ΔW| nesta vida {memory?.MaxAbsDelta ?? 0f:0.###} — começa em zero e não é herdado";
+        }
+
         public static string DeadCreature(CreatureId id, CreatureDeath? death)
         {
             if (!death.HasValue)
