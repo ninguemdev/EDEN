@@ -113,6 +113,34 @@ namespace Eden.Tests.EditMode
             Assert.Throws<ArgumentOutOfRangeException>(() => new FixedStepClock(20, maxTicksPerFrame: 0));
         }
 
+        [Test]
+        public void Unpaced_LeavesTicksToTheCallerAndStillMeasuresSpeed()
+        {
+            var clock = new FixedStepClock(20);
+            Assert.Throws<InvalidOperationException>(() => clock.RecordUnpaced(0.1, 10), "paced clocks pace");
+            clock.SetUnpaced(true);
+
+            Assert.That(clock.IsUnpaced, Is.True);
+            Assert.That(RunFrames(clock, 10, 0.1), Is.Zero, "nothing is owed while unpaced");
+            for (var frame = 0; frame < 10; frame++)
+                clock.RecordUnpaced(0.1, 400);
+            Assert.That(clock.EffectiveSpeed, Is.EqualTo(200f).Within(0.01f), "4000 ticks of 1/20 s in 1 s");
+            Assert.That(clock.DroppedTicks, Is.Zero);
+
+            clock.RequestStep();
+            Assert.That(clock.IsPaused, Is.True);
+            Assert.That(clock.Advance(0.1), Is.EqualTo(1), "steps still work");
+            Assert.Throws<InvalidOperationException>(() => clock.RecordUnpaced(0.1, 1), "paused clocks run nothing");
+            Assert.Throws<ArgumentOutOfRangeException>(() =>
+            {
+                clock.Resume();
+                clock.RecordUnpaced(0.1, -1);
+            });
+
+            clock.SetUnpaced(false);
+            Assert.That(RunFrames(clock, 10, 0.1), Is.EqualTo(20), "paced again at the requested 1×");
+        }
+
         private static long RunFrames(FixedStepClock clock, int frames, double frameSeconds)
         {
             long total = 0;
