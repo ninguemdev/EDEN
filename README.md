@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa) e **M3** (evolução por gerações) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O **M4** (laboratório completo e checkpoints) está em andamento: o laboratório já inicia, mostra e inspeciona uma evolução pela interface. Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa) e **M3** (evolução por gerações) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O **M4** (laboratório completo e checkpoints) está em andamento: o laboratório já inicia, mostra e inspeciona uma evolução pela interface e salva e retoma o experimento em checkpoints. Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -82,6 +82,7 @@ Tudo se escolhe pela interface, sem editar código:
 - **Preset:** Mínimo (32 criaturas, 64 comidas), Padrão (64, 128) ou Estresse (128, 256). Na evolução o preset define quantos genomas há por geração; o mundo de cada episódio isolado não muda.
 - **Cérebro** (mundo compartilhado): heurístico, aleatório, rede aleatória ou *população evoluída* (a última geração avaliada da evolução do laboratório, um indivíduo por criatura).
 - **Seed** e o botão **Iniciar**. Os botões de baixo pausam, avançam um tick, mudam a velocidade e ligam a velocidade **Máx.**, que roda quantos ticks inteiros couberem em 10 ms por quadro e mostra a velocidade efetiva alcançada.
+- **Salvar** e **Carregar** gravam e retomam o experimento num [checkpoint](#checkpoints).
 
 | Tecla | Ação |
 | --- | --- |
@@ -93,6 +94,7 @@ Tudo se escolhe pela interface, sem editar código:
 | Esc | limpar seleção |
 | R | reiniciar com a mesma seed |
 | B | alternar entre cérebro heurístico, aleatório e rede neural (mundo compartilhado; reinicia com a mesma seed) |
+| F5 / F9 | salvar / carregar o checkpoint |
 
 As teclas são ignoradas enquanto o campo de seed está sendo editado.
 
@@ -113,6 +115,12 @@ Cada execução do mundo compartilhado grava um diretório em `%USERPROFILE%\App
 - `run-info.txt`: seed, cérebro, versão e parâmetros principais;
 - `metrics.csv`: uma linha por segundo simulado, com números em formato invariável (ponto decimal):
   `tick, simulated_seconds, population, food_available, food_eaten_window, starvation_deaths_window, old_age_deaths_window, mean_energy, total_food_eaten`.
+
+### Checkpoints
+
+**Salvar** grava o experimento entre dois ticks em `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\Checkpoints\lab.json` (fora do repositório): a evolução inteira (configuração, população com os genomas, linhagem, histórico do gráfico, resultados já obtidos na geração em curso e o episódio em andamento) e, no mundo compartilhado, o mundo com a agenda de reposição, os geradores aleatórios e o estado do cérebro de cada criatura. **Carregar** volta exatamente a esse ponto: a execução retomada continua tick a tick igual à que foi salva (no mesmo computador e na mesma versão). Os logs da execução retomada vão para um diretório novo, que registra de onde ela veio.
+
+O arquivo é JSON legível, com versão do formato, versão do app, configuração e hashes. A gravação escreve primeiro um arquivo temporário na mesma pasta, confere que ele pode ser lido e só então troca o checkpoint; o anterior fica como `lab.json.bak`. Ao carregar, um arquivo corrompido, editado, incoerente ou de uma versão mais nova do formato é recusado com o motivo no painel, e a execução atual continua intacta; se o principal estiver estragado, o backup é usado.
 
 ## Evolução por gerações
 
@@ -190,8 +198,8 @@ Referências nos mesmos cenários: aleatório 0,13 (nunca sobrevive aos 120 s) e
 
 Pelo Editor: **Window → General → Test Runner**, abas EditMode e PlayMode.
 
-- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, além de execuções longas com verificação de invariantes e independência de FPS.
-- **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id e gravação do CSV.
+- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados), além de execuções longas com verificação de invariantes e independência de FPS.
+- **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id, gravação do CSV e os controles do laboratório, inclusive salvar e carregar.
 
 Pela linha de comando, com o Editor **fechado** para este projeto:
 
@@ -235,7 +243,7 @@ O código fica em `Assets/_Project` e é dividido em assemblies com responsabili
 | `Eden.Brains` | contrato de cérebro e cérebros de referência (sem Unity) |
 | `Eden.Evolution` | plano de avaliação, fitness, seleção, mutação, linhagem e resumo por geração (sem Unity) |
 | `Eden.Application` | liga criaturas a cérebros, avaliação isolada (inteira ou em partes), laço de gerações, sessão de evolução, presets e métricas (sem Unity) |
-| `Eden.Persistence` | gravação de métricas e experimentos em CSV e descrição do run (sem Unity) |
+| `Eden.Persistence` | gravação de métricas e experimentos em CSV, descrição do run e checkpoints JSON versionados (sem Unity) |
 | `Eden.Presentation` | cena do laboratório: execução em tempo real, visualização, HUD, controles e gráfico por geração |
 | `Eden.Editor` | build, experimentos de evolução e calibração do episódio |
 | `Eden.Tests.EditMode`, `Eden.Tests.PlayMode` | testes |
