@@ -6,8 +6,8 @@ namespace Eden.Simulation
     /// <summary>
     /// Builds a creature's local <see cref="Observation"/> from the current world state. Readings are clamped to
     /// their ranges, but non-finite state would pass through; <see cref="WorldSimulation"/> therefore checks every
-    /// observation with <see cref="ObservationLimits.Sanitize"/> before a brain sees it. Range and speed readings are
-    /// relative to the creature's own body: its sensor range and its speed cap.
+    /// observation with <see cref="ObservationLimits.Sanitize"/> before a brain sees it. Energy, range and speed readings
+    /// are relative to the creature's own body: its energy capacity, its sensor range and its speed cap.
     /// </summary>
     public static class Sensors
     {
@@ -21,7 +21,7 @@ namespace Eden.Simulation
             var range = creature.Body.SensorRange;
             var maxSpeed = creature.Body.MaxSpeed;
 
-            var energy = Clamp(creature.Energy / config.MaxEnergy, 0f, 1f);
+            var energy = Clamp(creature.Energy / creature.Body.MaxEnergy, 0f, 1f);
             var age = Clamp((float)creature.AgeTicks / config.MaxAgeTicks, 0f, 1f);
             var velocityForward = Clamp((velocity.X * forwardX + velocity.Y * forwardY) / maxSpeed, -1f, 1f);
             var velocityLeft = Clamp((velocity.Y * forwardX - velocity.X * forwardY) / maxSpeed, -1f, 1f);

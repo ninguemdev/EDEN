@@ -34,17 +34,17 @@ namespace Eden.Application
                 throw new ArgumentNullException(nameof(createBrain));
 
             var config = plan.EpisodeConfig(episodeSeed);
-            var expressed = plan.BodyFor(config, body);
+            var expressed = plan.ExpressedGenes(body);
             Simulation = savedWorld == null
-                ? new WorldSimulation(WorldFactory.CreateInitial(config, expressed))
+                ? new WorldSimulation(WorldFactory.CreateInitial(config, _ => expressed))
                 : WorldSimulation.Restore(config, savedWorld);
             if (Simulation.World.Creatures.Count != 1 || Simulation.World.Creatures[0].Id != new CreatureId(1) ||
                 Tick >= plan.EpisodeTicks)
                 throw new ArgumentException("A running episode has its single creature alive and ticks left.",
                     nameof(savedWorld));
-            if (!Simulation.World.Creatures[0].Body.Equals(expressed))
-                throw new ArgumentException($"The saved creature has body {Simulation.World.Creatures[0].Body}; " +
-                                            $"the candidate's genes express {expressed}.", nameof(savedWorld));
+            if (!Simulation.World.Creatures[0].Genes.Equals(expressed))
+                throw new ArgumentException($"The saved creature has body genes {Simulation.World.Creatures[0].Genes}; " +
+                                            $"the candidate expresses {expressed}.", nameof(savedWorld));
             Creature = Simulation.World.Creatures[0];
             Controller = new BrainController(config, _ => createBrain());
             if (savedBrains != null)
@@ -212,7 +212,7 @@ namespace Eden.Application
             if (completed.Count >= TotalEpisodes)
                 throw new ArgumentException($"{completed.Count} finished episodes leave none of {TotalEpisodes} running.",
                     nameof(progress));
-            var maxEnergy = plan.EpisodeConfig(seeds[0]).MaxEnergy;
+            var maxEnergy = CreatureBody.MaxPossibleEnergy(plan.EpisodeConfig(seeds[0]));
             for (var i = 0; i < completed.Count; i++)
                 CheckResult(completed[i], i / seeds.Length, i % seeds.Length, maxEnergy);
 

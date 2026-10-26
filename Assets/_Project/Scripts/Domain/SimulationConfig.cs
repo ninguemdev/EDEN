@@ -9,13 +9,14 @@ namespace Eden.Domain
     /// </summary>
     public sealed class SimulationConfig
     {
-        public const int CurrentSchemaVersion = 3;
+        public const int CurrentSchemaVersion = 4;
         public const int MaxTicksPerSecond = 240;
         public const int MaxDecisionIntervalTicks = 1000;
         public const int MaxPopulation = 4096;
         public const int MaxFood = 65536;
         public const float MaxArenaSize = 10000f;
         public const float MaxDurationSeconds = 1000000f;
+        public const float MaxCostExponent = 4f;
 
         public SimulationConfig(SimulationSettings settings)
         {
@@ -46,6 +47,10 @@ namespace Eden.Domain
             RequirePositive(errors, nameof(s.MaxAcceleration), s.MaxAcceleration);
             RequirePositive(errors, nameof(s.MaxTurnRate), s.MaxTurnRate);
             RequireNonNegative(errors, nameof(s.Damping), s.Damping);
+            RequireRange(errors, nameof(s.SizeCostExponent), s.SizeCostExponent, 0f, MaxCostExponent);
+            RequireRange(errors, nameof(s.SpeedCostExponent), s.SpeedCostExponent, 0f, MaxCostExponent);
+            RequireRange(errors, nameof(s.SensorCostExponent), s.SensorCostExponent, 0f, MaxCostExponent);
+            RequireRange(errors, nameof(s.EfficiencyPowerExponent), s.EfficiencyPowerExponent, 0f, MaxCostExponent);
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid simulation config: " + string.Join("; ", errors));
 
@@ -70,6 +75,10 @@ namespace Eden.Domain
             MaxAcceleration = s.MaxAcceleration;
             MaxTurnRate = s.MaxTurnRate;
             Damping = s.Damping;
+            SizeCostExponent = s.SizeCostExponent;
+            SpeedCostExponent = s.SpeedCostExponent;
+            SensorCostExponent = s.SensorCostExponent;
+            EfficiencyPowerExponent = s.EfficiencyPowerExponent;
 
             TickDuration = 1f / TicksPerSecond;
             MaxAgeTicks = Math.Max(1L, (long)Math.Round((double)MaxAgeSeconds * TicksPerSecond));
@@ -113,6 +122,18 @@ namespace Eden.Domain
 
         /// <summary>Fraction of velocity lost per second.</summary>
         public float Damping { get; }
+
+        /// <summary>Power of the size factor in a body's metabolism and movement cost.</summary>
+        public float SizeCostExponent { get; }
+
+        /// <summary>Power of the speed factor in a body's movement cost.</summary>
+        public float SpeedCostExponent { get; }
+
+        /// <summary>Power of the range factor in a body's sensor cost.</summary>
+        public float SensorCostExponent { get; }
+
+        /// <summary>Power of the metabolism factor in a body's acceleration.</summary>
+        public float EfficiencyPowerExponent { get; }
 
         /// <summary>Fixed simulated time per tick, in seconds. Never scaled to speed a run up.</summary>
         public float TickDuration { get; }

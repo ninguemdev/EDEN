@@ -8,14 +8,19 @@ namespace Eden.Domain
     }
 
     /// <summary>
-    /// Living state of one creature and the body it lives with. Not inherited: offspring start from their own initial
-    /// state, and their body is expressed from their own genes.
+    /// Living state of one creature, with the body genes it was born with and the body they express. Not inherited:
+    /// offspring start from their own initial state, and their body is expressed from their own genes.
     /// </summary>
     public sealed class CreatureState
     {
-        public CreatureState(CreatureId id, Float2 position, float heading, float energy, CreatureBody body)
+        /// <param name="body">
+        /// <paramref name="genes"/> expressed in the world's config; <see cref="WorldState.Restore"/> refuses any other.
+        /// </param>
+        public CreatureState(CreatureId id, Float2 position, float heading, float energy, BodyGenes genes,
+            CreatureBody body)
         {
             Id = id;
+            Genes = genes;
             Body = body;
             Position = position;
             Velocity = Float2.Zero;
@@ -25,7 +30,10 @@ namespace Eden.Domain
 
         public CreatureId Id { get; }
 
-        /// <summary>Traits expressed when the creature was created; fixed for its whole life.</summary>
+        /// <summary>Body genes the creature expresses (genes a run does not express are neutral here).</summary>
+        public BodyGenes Genes { get; }
+
+        /// <summary>Traits and costs expressed from <see cref="Genes"/> when the creature was created; fixed for life.</summary>
         public CreatureBody Body { get; }
 
         public Float2 Position { get; set; }

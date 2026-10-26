@@ -38,6 +38,19 @@ namespace Eden.Domain
         public float MaxTurnRate = MathF.PI;
         public float Damping = 1f;
 
+        // Costs of the body genes, as exponents of each trait's factor (see CreatureBody); 0 turns a cost off.
+        /// <summary>Metabolism and movement cost grow with the size factor to this power (bigger bodies spend more).</summary>
+        public float SizeCostExponent = 1f;
+
+        /// <summary>Movement cost grows with the speed factor to this power (faster muscles spend more per push).</summary>
+        public float SpeedCostExponent = 2f;
+
+        /// <summary>Sensor cost grows with the range factor to this power (the area sensed).</summary>
+        public float SensorCostExponent = 2f;
+
+        /// <summary>Acceleration follows the metabolism factor to this power (a thrifty metabolism gives less power).</summary>
+        public float EfficiencyPowerExponent = 1f;
+
         public SimulationSettings Clone() => (SimulationSettings)MemberwiseClone();
     }
 }

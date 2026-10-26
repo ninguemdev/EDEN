@@ -78,7 +78,11 @@ namespace Eden.Persistence
                 "mutation_probability=" + Rules.MutationProbability.ToString(culture),
                 "mutation_sigma=" + Rules.MutationSigma.ToString(culture),
                 "crossover=off",
-                "body_genes=" + BodyGenesText(Plan.ExpressedBodyGenes)
+                "body_genes=" + BodyGenesText(Plan.ExpressedBodyGenes),
+                "body_cost_exponents=size " + world.SizeCostExponent.ToString(culture) +
+                ";speed " + world.SpeedCostExponent.ToString(culture) +
+                ";sensor " + world.SensorCostExponent.ToString(culture) +
+                ";efficiency_power " + world.EfficiencyPowerExponent.ToString(culture)
             };
             if (Preset != null)
                 lines.Add("preset=" + Preset);
