@@ -413,6 +413,7 @@ namespace Eden.Presentation
             writeMetrics = false;
             CloseMetricsLog();
             MetricsDirectory = null;
+            hud?.Root?.SetEnabled(false);
         }
 
         private void Awake()
@@ -439,6 +440,8 @@ namespace Eden.Presentation
             StartRun();
             if (maxSpeed)
                 ToggleMaxSpeed();
+            if (benchmark != null)
+                hud?.Root?.SetEnabled(false);
             if (selectAtStart > 0)
                 Select(new CreatureId(selectAtStart));
         }
@@ -480,8 +483,12 @@ namespace Eden.Presentation
                 RefreshHud();
 
             // Builds quit when the measurement is written; in the Editor (tests) the run goes on.
-            if (benchmark != null && benchmark.EndFrame(realDelta, this) && !UnityEngine.Application.isEditor)
-                UnityEngine.Application.Quit();
+            if (benchmark != null && benchmark.EndFrame(realDelta, this))
+            {
+                hud?.Root?.SetEnabled(true);
+                if (!UnityEngine.Application.isEditor)
+                    UnityEngine.Application.Quit();
+            }
         }
 
         private void RunTicks(int ticks)
@@ -600,6 +607,9 @@ namespace Eden.Presentation
 
         private void HandleInput()
         {
+            // A measured run keeps the scenario it was started with, whatever is typed or clicked meanwhile.
+            if (benchmark != null && !benchmark.IsFinished)
+                return;
             var keyboard = Keyboard.current;
             if (keyboard != null && (hud == null || !hud.IsTyping))
             {

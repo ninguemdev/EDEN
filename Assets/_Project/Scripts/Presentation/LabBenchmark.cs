@@ -263,7 +263,8 @@ namespace Eden.Presentation
                 Pair("max_speed_budget_ms", (LabRunner.MaxSpeedBudgetSeconds * 1000).ToString("0.#", culture)),
                 Pair("warmup_seconds", warmupSeconds.ToString("0.###", culture)),
                 Pair("selected_creature", runner.Selected.HasValue ? runner.Selected.Value.Value.ToString(culture) : "none"),
-                Pair("metrics_logs", "off")
+                Pair("metrics_logs", "off"),
+                Pair("input", "ignored while measuring")
             };
         }
 
