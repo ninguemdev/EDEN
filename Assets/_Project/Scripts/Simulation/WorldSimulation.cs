@@ -84,6 +84,9 @@ namespace Eden.Simulation
 
         public ScheduledEvent<SimulationEvent>[] SnapshotAgenda() => agenda.SnapshotPending();
 
+        /// <summary>When set, receives the cost of every tick; null (the default) measures nothing.</summary>
+        public TickTimings Timings { get; set; }
+
         /// <summary>
         /// Runs one tick: agenda, observe all (checked against <see cref="ObservationLimits"/>), decide in id order,
         /// move, eat, energy/age/death, cleanup.
@@ -93,6 +96,8 @@ namespace Eden.Simulation
             if (controller == null)
                 throw new ArgumentNullException(nameof(controller));
 
+            var timings = Timings;
+            var start = timings != null ? TickTimings.Now() : 0L;
             var config = World.Config;
             var tick = World.Tick;
             var creatures = World.Creatures;
@@ -111,8 +116,10 @@ namespace Eden.Simulation
             }
 
             CorrectedInputValues += LastCorrectedInputValues;
+            var sensed = timings != null ? TickTimings.Now() : 0L;
             for (var i = 0; i < count; i++)
                 actions[i] = controller.Decide(creatures[i].Id, observations[i]);
+            var decided = timings != null ? TickTimings.Now() : 0L;
             for (var i = 0; i < count; i++)
                 Movement.Apply(creatures[i], actions[i], config);
 
@@ -122,6 +129,7 @@ namespace Eden.Simulation
             World.RemoveEatenFood();
             World.RemoveDeadCreatures();
             World.AdvanceTick();
+            timings?.Set(count, start, sensed, decided, TickTimings.Now());
         }
 
         /// <summary>World fingerprint extended with the pending agenda.</summary>

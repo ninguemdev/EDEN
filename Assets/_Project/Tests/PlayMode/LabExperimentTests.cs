@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.RegularExpressions;
 using Eden.Presentation;
 using Eden.Simulation;
 using NUnit.Framework;
@@ -222,6 +223,33 @@ namespace Eden.Tests.PlayMode
             Assert.That(seedField.value, Is.EqualTo(123));
             seedField.value = -4;
             Assert.That(seedField.value, Is.Zero, "seeds are not negative");
+        }
+
+        [UnityTest]
+        public IEnumerator Benchmark_MeasuresTheRunAndWritesAReport()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "eden-benchmark-" + Guid.NewGuid().ToString("N"));
+            runDirectories.Add(directory);
+            runner.StartBenchmark(0.2, 1.0, directory);
+            Assert.That(runner.MetricsDirectory, Is.Null, "no metrics log while measuring");
+
+            var waited = 0f;
+            while (runner.BenchmarkDirectory == null && waited < 15f)
+            {
+                waited += Time.unscaledDeltaTime;
+                yield return null;
+            }
+
+            Assert.That(runner.BenchmarkDirectory, Is.EqualTo(directory));
+            var json = File.ReadAllText(Path.Combine(directory, "performance.json"));
+            StringAssert.Contains("\"build\": \"editor\"", json);
+            StringAssert.Contains("\"mode\": \"shared\"", json);
+            Assert.That(int.Parse(Regex.Match(json, "\"timedTicks\": ([0-9]+)").Groups[1].Value), Is.GreaterThan(0),
+                "every shared world tick is timed");
+            StringAssert.DoesNotContain("\"simulationAllocations\": null", json, "the Editor has the allocation recorder");
+            Assert.That(File.ReadAllText(Path.Combine(directory, "performance.txt")), Does.Contain("FPS"));
+            yield return null;
+            Assert.That(runner.Simulation, Is.Not.Null, "the Editor keeps the lab running");
         }
 
         // Checkpoints of a test go to a temporary directory, never to the user's lab checkpoint.
