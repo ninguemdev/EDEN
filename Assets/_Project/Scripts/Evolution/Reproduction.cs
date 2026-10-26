@@ -129,7 +129,8 @@ namespace Eden.Evolution
         /// <summary>
         /// Copy of <paramref name="parent"/> where each weight, with chance <paramref name="probability"/>, gets
         /// Gaussian noise of standard deviation <paramref name="sigma"/> and is then limited to ±<see cref="Genome.MaxAbsWeight"/>.
-        /// Draws per weight: one uniform coin, plus one Gaussian sample when the weight mutates.
+        /// Draws per weight: one uniform coin, plus one Gaussian sample when the weight mutates. Body genes are copied
+        /// unchanged.
         /// </summary>
         public static Genome Mutate(Genome parent, float probability, float sigma, GaussianSampler random, out int mutated)
         {
@@ -149,7 +150,7 @@ namespace Eden.Evolution
                 mutated++;
             }
 
-            return new Genome(parent.Topology, weights);
+            return new Genome(parent.Topology, weights, parent.Body);
         }
 
         /// <summary>Parent indices from best to worst.</summary>

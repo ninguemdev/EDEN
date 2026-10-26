@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Eden.Application;
+using Eden.Domain;
 using Eden.Evolution;
 
 namespace Eden.Persistence
@@ -76,13 +77,29 @@ namespace Eden.Persistence
                 "tournament_size=" + Rules.TournamentSize.ToString(culture),
                 "mutation_probability=" + Rules.MutationProbability.ToString(culture),
                 "mutation_sigma=" + Rules.MutationSigma.ToString(culture),
-                "crossover=off"
+                "crossover=off",
+                "body_genes=" + BodyGenesText(Plan.ExpressedBodyGenes)
             };
             if (Preset != null)
                 lines.Add("preset=" + Preset);
             if (ResumedFrom != null)
                 lines.AddRange(ResumedFrom.Describe());
             return lines;
+        }
+
+        // "fixed" for the fixed-body control, otherwise the expressed genes in genome order, e.g. "size;sensor".
+        private static string BodyGenesText(BodyGeneSet expressed)
+        {
+            if (expressed == BodyGeneSet.None)
+                return "fixed";
+            var names = new List<string>();
+            for (var g = 0; g < BodyGenes.Count; g++)
+            {
+                if (((int)expressed & (1 << g)) != 0)
+                    names.Add(((BodyGene)g).ToString().ToLowerInvariant());
+            }
+
+            return string.Join(";", names);
         }
 
         internal JsonValue SettingsJson() => CheckpointCodec.EncodeEvolutionSettings(settings, ValidationInterval);

@@ -166,13 +166,12 @@ namespace Eden.Simulation
             }
         }
 
-        // Each food goes to the closest creature within eat radius; equal distance goes to the lower id.
+        // Each food goes to the closest creature within its own eat radius; equal distance goes to the lower id.
         private void ResolveFeeding(long tick, int count)
         {
             Array.Clear(foodGains, 0, count);
             var creatures = World.Creatures;
             var food = World.Food;
-            var eatRadiusSquared = World.Config.EatRadius * World.Config.EatRadius;
 
             for (var f = 0; f < food.Count; f++)
             {
@@ -184,7 +183,8 @@ namespace Eden.Simulation
                     var dx = creatures[c].Position.X - item.Position.X;
                     var dy = creatures[c].Position.Y - item.Position.Y;
                     var distanceSquared = dx * dx + dy * dy;
-                    if (distanceSquared <= eatRadiusSquared && distanceSquared < best)
+                    var eatRadius = creatures[c].Body.EatRadius;
+                    if (distanceSquared <= eatRadius * eatRadius && distanceSquared < best)
                     {
                         winner = c;
                         best = distanceSquared;
@@ -212,7 +212,8 @@ namespace Eden.Simulation
                 var action = actions[i];
                 var effort = action.Thrust * action.Thrust + action.Strafe * action.Strafe;
                 var cost = config.TickDuration *
-                           (config.MetabolismPerSecond + config.MovementCostPerSecond * effort + config.SensorCostPerSecond);
+                           (creature.Body.MetabolismPerSecond + config.MovementCostPerSecond * effort +
+                            config.SensorCostPerSecond);
                 var energy = creature.Energy + foodGains[i] - cost;
                 creature.Energy = energy < 0f ? 0f : energy > config.MaxEnergy ? config.MaxEnergy : energy;
                 creature.AgeTicks++;

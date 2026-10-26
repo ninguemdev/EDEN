@@ -22,7 +22,8 @@ namespace Eden.Application
         public GenerationalEvolution(EvolutionSettings settings)
             : this(settings ?? throw new ArgumentNullException(nameof(settings)), new Lineage())
         {
-            individuals = Lineage.Founders(InitialGenomes.Population(Rules.ExperimentSeed, Rules.PopulationSize));
+            individuals = Lineage.Founders(InitialGenomes.Population(Rules.ExperimentSeed, Rules.PopulationSize,
+                Plan.ExpressedBodyGenes));
             population = GenomesOf(individuals);
         }
 

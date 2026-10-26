@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa), **M3** (evolução por gerações) e **M4** (laboratório completo e checkpoints, o MVP) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O laboratório inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. O próximo marco é o **M5** (biologia parametrizada). Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa), **M3** (evolução por gerações) e **M4** (laboratório completo e checkpoints, o MVP) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O laboratório inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. O **M5** (biologia parametrizada) está em andamento: o genoma já carrega genes de corpo limitados, ainda desligados por padrão. Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -42,7 +42,7 @@ Sem comida ao alcance, as entradas 5–8 valem zero. Um cérebro nunca recebe po
 
 - **aleatório:** ignora os sensores e sorteia ações;
 - **heurístico:** regras fixas, sem memória nem aprendizado; vai até a comida visível (reduz a velocidade para girar quando ela está de lado, senão ficaria orbitando a comida sem alcançá-la) e desvia das paredes;
-- **rede neural:** perceptron 12 → 16 → 3 com `tanh` (259 parâmetros). Cada criatura tem o seu **genoma** (topologia e pesos-base, imutável e separado de energia, idade e posição) e a sua própria rede. No mundo compartilhado os genomas são aleatórios ou vêm da população evoluída no próprio laboratório (veja [experimentos por gerações](#evolução-por-gerações)). A rede é feed-forward: não guarda memória entre decisões nem aprende durante a vida.
+- **rede neural:** perceptron 12 → 16 → 3 com `tanh` (259 parâmetros). Cada criatura tem o seu **genoma** (topologia, pesos-base e [genes de corpo](#genes-de-corpo); imutável e separado de energia, idade e posição) e a sua própria rede. No mundo compartilhado os genomas são aleatórios ou vêm da população evoluída no próprio laboratório (veja [experimentos por gerações](#evolução-por-gerações)). A rede é feed-forward: não guarda memória entre decisões nem aprende durante a vida.
 
 Os dois primeiros servem de linha de base para comparar as redes evoluídas. Baseline preliminar com a configuração padrão (64 criaturas, 5 seeds, 60 s simulados):
 
@@ -133,6 +133,12 @@ Um experimento evolui uma população de genomas (padrão 64) sem competição e
 
 Esses valores são propostas iniciais a medir, não garantias de melhoria. Com a mesma seed o experimento repete as mesmas gerações, ids e resultados.
 
+### Genes de corpo
+
+Além dos pesos, o genoma guarda quatro genes de corpo, cada um em [−1, 1]: **tamanho** (raio do corpo: a comida dentro dele é consumida), **velocidade** (velocidade máxima), **sensor** (alcance da percepção de comida e paredes) e **eficiência** (reduz o metabolismo de repouso). Um gene g multiplica o valor de referência da configuração por 1 + 0,5·g (a eficiência multiplica o metabolismo por 1 − 0,5·g), então cada característica fica entre a metade e 1,5 vez a referência; o corpo é calculado quando a criatura nasce e não muda durante a vida. As leituras dos sensores são relativas ao próprio corpo (proximidade pelo próprio alcance, velocidade pela própria velocidade máxima).
+
+Um experimento escolhe quais genes são expressos (`ExpressedBodyGenes`). O padrão é **nenhum**: todas as criaturas têm o corpo de referência, exatamente como antes dos genes existirem, e isso continua disponível como controle. Os genes expressos começam sorteados dentro dos limites na geração 0 (sorteados depois dos pesos, que não mudam); os demais ficam neutros. Por enquanto a mutação copia os genes de corpo sem alterá-los, e os cérebros de referência sempre usam o corpo de referência. Como os custos de cada característica ainda não existem (próxima tarefa do M5), um gene expresso hoje só traria vantagem; por isso nenhum preset do laboratório liga genes de corpo. O mundo compartilhado também usa o corpo de referência.
+
 ### No laboratório
 
 Com o modo **Evolução (avaliação isolada)**, o laboratório roda o experimento episódio por episódio sem travar a tela, e a arena mostra o episódio que está sendo avaliado (uma criatura sozinha). O painel indica a geração, a fase (treino, referências na validação ou validação), o indivíduo e a seed do episódio, e deixa explícito que a seleção é artificial (torneio pela fitness de treino), não seleção natural. A cada 5 gerações, a começar pela 0, a geração treinada é validada nas 5 seeds separadas; antes da primeira validação o aleatório e o heurístico são avaliados nessas mesmas seeds.
@@ -220,7 +226,7 @@ O estresse teve a maior média, com 4× os episódios de treino do mínimo, mas 
 
 Pelo Editor: **Window → General → Test Runner**, abas EditMode e PlayMode.
 
-- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados), ticks sem alocação de memória após o aquecimento (gravador de alocações da Unity), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, além de execuções longas com verificação de invariantes e independência de FPS.
+- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, genes de corpo (limites, herança, expressão no mundo e corpo fixo idêntico ao anterior), avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados, arquivos de antes dos genes de corpo ainda lidos), ticks sem alocação de memória após o aquecimento (gravador de alocações da Unity), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, além de execuções longas com verificação de invariantes e independência de FPS.
 - **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id, gravação do CSV e os controles do laboratório, inclusive salvar, carregar e a medição de desempenho.
 
 Pela linha de comando, com o Editor **fechado** para este projeto:
@@ -334,7 +340,7 @@ Outras pastas: `Scenes`, `UI` (UXML e tema do UI Toolkit), `Art` e `Settings` (a
 | M2 | rede neural fixa 12 → 16 → 3 na CPU, genoma por criatura e visualização da rede | concluído |
 | M3 | evolução por gerações: avaliação isolada, elites, torneio, mutação, seeds de validação | concluído |
 | M4 | laboratório completo e checkpoints (MVP) | concluído |
-| M5 | biologia parametrizada: genes de corpo com custos e trade-offs | planejado |
+| M5 | biologia parametrizada: genes de corpo com custos e trade-offs | em andamento |
 | M6 | ecossistema contínuo com reprodução local | planejado |
 | M7 | adaptação individual (plasticidade) como experimento | planejado |
 | M8 | escala orientada por perfilamento | planejado |

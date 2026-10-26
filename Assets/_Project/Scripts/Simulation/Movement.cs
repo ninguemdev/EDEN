@@ -5,7 +5,8 @@ namespace Eden.Simulation
 {
     /// <summary>
     /// Kinematic 2D locomotion without physics bodies: turn, accelerate in the new local frame, damp, cap speed,
-    /// move, then clamp to the arena and stop velocity into the wall. Creatures do not push each other.
+    /// move, then clamp to the arena and stop velocity into the wall. The speed cap is the creature's own body trait.
+    /// Creatures do not push each other.
     /// </summary>
     internal static class Movement
     {
@@ -26,9 +27,10 @@ namespace Eden.Simulation
             var velocityX = (creature.Velocity.X + accelerationX * dt) * damping;
             var velocityY = (creature.Velocity.Y + accelerationY * dt) * damping;
             var speedSquared = velocityX * velocityX + velocityY * velocityY;
-            if (speedSquared > config.MaxSpeed * config.MaxSpeed)
+            var maxSpeed = creature.Body.MaxSpeed;
+            if (speedSquared > maxSpeed * maxSpeed)
             {
-                var scale = config.MaxSpeed / MathF.Sqrt(speedSquared);
+                var scale = maxSpeed / MathF.Sqrt(speedSquared);
                 velocityX *= scale;
                 velocityY *= scale;
             }

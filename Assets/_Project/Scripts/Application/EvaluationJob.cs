@@ -9,8 +9,9 @@ namespace Eden.Application
 {
     /// <summary>
     /// One isolated episode that can be advanced a few ticks at a time: a world built from the episode seed with a
-    /// single creature. It finishes after the configured duration or when the creature dies; the remaining ticks
-    /// cannot change the result, so they are not simulated, but the episode still counts as its configured duration.
+    /// single creature, whose body the plan expresses from the candidate's body genes. It finishes after the configured
+    /// duration or when the creature dies; the remaining ticks cannot change the result, so they are not simulated,
+    /// but the episode still counts as its configured duration.
     /// </summary>
     public sealed class IsolatedEpisode
     {
@@ -19,13 +20,13 @@ namespace Eden.Application
         private readonly int generation;
 
         public IsolatedEpisode(EvaluationPlan plan, Func<IBrain> createBrain, ulong episodeSeed, int candidate,
-            int seedIndex, int generation, EvaluationMode mode)
-            : this(plan, createBrain, episodeSeed, candidate, seedIndex, generation, mode, null, null)
+            int seedIndex, int generation, EvaluationMode mode, BodyGenes body = default)
+            : this(plan, createBrain, episodeSeed, candidate, seedIndex, generation, mode, body, null, null)
         {
         }
 
         internal IsolatedEpisode(EvaluationPlan plan, Func<IBrain> createBrain, ulong episodeSeed, int candidate,
-            int seedIndex, int generation, EvaluationMode mode, SimulationSnapshot savedWorld,
+            int seedIndex, int generation, EvaluationMode mode, BodyGenes body, SimulationSnapshot savedWorld,
             IReadOnlyList<BrainSlotState> savedBrains)
         {
             this.plan = plan ?? throw new ArgumentNullException(nameof(plan));
@@ -33,13 +34,17 @@ namespace Eden.Application
                 throw new ArgumentNullException(nameof(createBrain));
 
             var config = plan.EpisodeConfig(episodeSeed);
+            var expressed = plan.BodyFor(config, body);
             Simulation = savedWorld == null
-                ? new WorldSimulation(WorldFactory.CreateInitial(config))
+                ? new WorldSimulation(WorldFactory.CreateInitial(config, expressed))
                 : WorldSimulation.Restore(config, savedWorld);
             if (Simulation.World.Creatures.Count != 1 || Simulation.World.Creatures[0].Id != new CreatureId(1) ||
                 Tick >= plan.EpisodeTicks)
                 throw new ArgumentException("A running episode has its single creature alive and ticks left.",
                     nameof(savedWorld));
+            if (!Simulation.World.Creatures[0].Body.Equals(expressed))
+                throw new ArgumentException($"The saved creature has body {Simulation.World.Creatures[0].Body}; " +
+                                            $"the candidate's genes express {expressed}.", nameof(savedWorld));
             Creature = Simulation.World.Creatures[0];
             Controller = new BrainController(config, _ => createBrain());
             if (savedBrains != null)
@@ -97,6 +102,7 @@ namespace Eden.Application
     {
         private readonly EvaluationPlan plan;
         private readonly IReadOnlyList<Func<IBrain>> candidates;
+        private readonly BodyGenes[] bodies;
         private readonly ulong[] seeds;
         private readonly List<EpisodeResult> episodes;
         private readonly CandidateEvaluation[] aggregates;
@@ -104,8 +110,9 @@ namespace Eden.Application
         private readonly int ticksPerSecond;
         private GenerationEvaluation result;
 
+        /// <param name="bodies">Body genes of each candidate, in candidate order; null gives every candidate neutral genes.</param>
         public EvaluationJob(EvaluationPlan plan, IReadOnlyList<Func<IBrain>> candidates, IReadOnlyList<ulong> seeds,
-            int generation, EvaluationMode mode)
+            int generation, EvaluationMode mode, IReadOnlyList<BodyGenes> bodies = null)
         {
             this.plan = plan ?? throw new ArgumentNullException(nameof(plan));
             this.candidates = candidates ?? throw new ArgumentNullException(nameof(candidates));
@@ -119,6 +126,13 @@ namespace Eden.Application
                     throw new ArgumentException($"Candidate {c} is null.", nameof(candidates));
             }
 
+            if (bodies != null && bodies.Count != candidates.Count)
+                throw new ArgumentException($"Expected body genes for {candidates.Count} candidates, got {bodies.Count}.",
+                    nameof(bodies));
+
+            this.bodies = new BodyGenes[candidates.Count];
+            for (var c = 0; bodies != null && c < bodies.Count; c++)
+                this.bodies[c] = bodies[c];
             this.seeds = new ulong[seeds.Count];
             for (var s = 0; s < seeds.Count; s++)
                 this.seeds[s] = seeds[s];
@@ -205,7 +219,7 @@ namespace Eden.Application
             var candidate = completed.Count / seeds.Length;
             var seedIndex = completed.Count % seeds.Length;
             var running = new IsolatedEpisode(plan, candidates[candidate], seeds[seedIndex], candidate, seedIndex,
-                Generation, Mode, progress.CurrentWorld, progress.CurrentBrains);
+                Generation, Mode, bodies[candidate], progress.CurrentWorld, progress.CurrentBrains);
 
             for (var i = 0; i < completed.Count; i++)
             {
@@ -269,7 +283,8 @@ namespace Eden.Application
         }
 
         private IsolatedEpisode CreateEpisode(int candidate, int seedIndex) =>
-            new IsolatedEpisode(plan, candidates[candidate], seeds[seedIndex], candidate, seedIndex, Generation, Mode);
+            new IsolatedEpisode(plan, candidates[candidate], seeds[seedIndex], candidate, seedIndex, Generation, Mode,
+                bodies[candidate]);
     }
 
     /// <summary>Progress of an <see cref="EvaluationJob"/> saved between ticks.</summary>

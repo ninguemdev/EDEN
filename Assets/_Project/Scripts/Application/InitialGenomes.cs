@@ -16,15 +16,29 @@ namespace Eden.Application
                 SeedDerivation.CreateCreatureStream(config.Seed, RandomStream.Genome, creature), WeightLimit);
 
         /// <summary>
-        /// First generation of an experiment: genome i (0-based) uses the same stream as creature id i + 1 of a run
-        /// with the experiment seed, so growing the population keeps the existing genomes.
+        /// First generation of an experiment with the fixed body: genome i (0-based) uses the same stream as creature
+        /// id i + 1 of a run with the experiment seed, so growing the population keeps the existing genomes.
         /// </summary>
-        public static Genome[] Population(ulong experimentSeed, int count)
+        public static Genome[] Population(ulong experimentSeed, int count) =>
+            Population(experimentSeed, count, BodyGeneSet.None);
+
+        /// <summary>
+        /// First generation where the <paramref name="expressed"/> body genes start uniform within their limits and the
+        /// others neutral. The body genes are drawn after the weights from the same stream, all four every time, so
+        /// the weights never depend on the body genes and each gene's value never depends on which others are expressed.
+        /// </summary>
+        public static Genome[] Population(ulong experimentSeed, int count, BodyGeneSet expressed)
         {
+            BodyGenes.RequireSet(expressed);
             var genomes = new Genome[count];
             for (var i = 0; i < count; i++)
-                genomes[i] = Genome.CreateRandom(NetworkTopology.Mlp12x16x3,
-                    SeedDerivation.CreateIndexedStream(experimentSeed, RandomStream.Genome, (ulong)i + 1), WeightLimit);
+            {
+                var random = SeedDerivation.CreateIndexedStream(experimentSeed, RandomStream.Genome, (ulong)i + 1);
+                var brain = Genome.CreateRandom(NetworkTopology.Mlp12x16x3, random, WeightLimit);
+                var body = BodyGenes.CreateRandom(random).Masked(expressed);
+                genomes[i] = body.IsNeutral ? brain : brain.WithBody(body);
+            }
+
             return genomes;
         }
     }
