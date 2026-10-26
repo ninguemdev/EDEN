@@ -295,8 +295,8 @@ namespace Eden.Tests.EditMode
             var text = CheckpointCodec.Encode(checkpoint, "0.1.0", "test", savedAt);
 
             Assert.That(text, Does.Not.Contain("body").IgnoreCase, "the fixed body is written as before body genes");
-            var old = text.Replace("\"schemaVersion\": 3,", "\"schemaVersion\": 1,")
-                .Replace("\"configSchema\": 4,", "\"configSchema\": 3,")
+            var old = text.Replace("\"schemaVersion\": 4,", "\"schemaVersion\": 1,")
+                .Replace("\"configSchema\": 5,", "\"configSchema\": 3,")
                 .Replace("\"genomeSchema\": 2", "\"genomeSchema\": 1");
             Assert.That(old, Is.Not.EqualTo(text));
             var decoded = CheckpointCodec.Decode(old, out var info);

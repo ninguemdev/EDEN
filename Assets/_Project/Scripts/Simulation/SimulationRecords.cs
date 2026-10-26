@@ -19,6 +19,20 @@ namespace Eden.Simulation
         public SimulationEventKind Kind { get; }
     }
 
+    public readonly struct CreatureBirth
+    {
+        public CreatureBirth(CreatureId child, CreatureId parent, long tick)
+        {
+            Child = child;
+            Parent = parent;
+            Tick = tick;
+        }
+
+        public CreatureId Child { get; }
+        public CreatureId Parent { get; }
+        public long Tick { get; }
+    }
+
     public readonly struct CreatureDeath
     {
         public CreatureDeath(CreatureId creature, long tick, DeathCause cause)

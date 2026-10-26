@@ -119,7 +119,7 @@ namespace Eden.Tests.EditMode
             AssertRefused(text.Substring(0, text.Length / 2), "Invalid JSON");
             AssertRefused("not json", "Invalid JSON");
             AssertRefused("{\"format\": \"something-else\"}", "Not an EDEN checkpoint");
-            AssertRefused(text.Replace("\"schemaVersion\": 3,", "\"schemaVersion\": 4,"), "newer");
+            AssertRefused(text.Replace("\"schemaVersion\": 4,", "\"schemaVersion\": 5,"), "newer");
             AssertRefused(text.Replace(Pcg32.AlgorithmName, "xorshift128"), "random");
             AssertRefused(ChangeFirstWeight(text, "0.5"), "State hash mismatch");
             AssertRefused(text.Replace("\"maxSpeed\": 5,", "\"maxSpeed\": 6,"), "Config hash mismatch");
@@ -176,7 +176,7 @@ namespace Eden.Tests.EditMode
                 Assert.That(problem, Does.Contain("Invalid JSON"));
                 Assert.That(fallback.Evolution.TotalTicks, Is.EqualTo(first.Evolution.TotalTicks), "the backup");
 
-                File.WriteAllText(path, secondText.Replace("\"schemaVersion\": 3,", "\"schemaVersion\": 99,"));
+                File.WriteAllText(path, secondText.Replace("\"schemaVersion\": 4,", "\"schemaVersion\": 99,"));
                 Assert.That(() => CheckpointFile.Load(path, out _),
                     Throws.TypeOf<CheckpointException>().With.Message.Contains("newer"));
                 Assert.That(() => CheckpointFile.Load(Path.Combine(directory, "missing.json"), out _),
