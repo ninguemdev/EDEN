@@ -67,6 +67,14 @@ namespace Eden.Application
             return slot.Action;
         }
 
+        /// <summary>The creature's own brain state (random stream, lifetime weight changes), for inspection.</summary>
+        public bool TryGetState(CreatureId creature, out BrainState state)
+        {
+            var found = slots.TryGetValue(creature, out var slot);
+            state = found ? slot.State : null;
+            return found;
+        }
+
         public bool TryGetBrain(CreatureId creature, out IBrain brain)
         {
             var found = slots.TryGetValue(creature, out var slot);
@@ -113,7 +121,7 @@ namespace Eden.Application
             var i = 0;
             foreach (var pair in slots)
                 saved[i++] = new BrainSlotState(pair.Key, pair.Value.Brain.Name, pair.Value.State.Random.State,
-                    pair.Value.Action, pair.Value.TicksUntilDecision);
+                    pair.Value.Action, pair.Value.TicksUntilDecision, pair.Value.State.Plastic);
             Array.Sort(saved, (a, b) => a.Creature.Value.CompareTo(b.Creature.Value));
             return saved;
         }
@@ -142,7 +150,16 @@ namespace Eden.Application
                 if (brain.Name != state.BrainName)
                     throw new ArgumentException($"{state.Creature} was saved with brain {state.BrainName}, " +
                                                 $"the factory gives {brain.Name}.", nameof(saved));
-                restored.Add(state.Creature, new Slot(brain, new BrainState(Pcg32.FromState(state.Random)))
+                var brainState = new BrainState(Pcg32.FromState(state.Random));
+                if (state.Plastic != null)
+                {
+                    if (!(brain is MlpBrain mlp) || !mlp.Plasticity.IsPlastic || !state.Plastic.IsValid())
+                        throw new ArgumentException($"{state.Creature} was saved with lifetime weight changes its brain " +
+                                                    "cannot hold, or with impossible values.", nameof(saved));
+                    brainState.EnsurePlastic().CopyFrom(state.Plastic);
+                }
+
+                restored.Add(state.Creature, new Slot(brain, brainState)
                 {
                     Action = state.Action, TicksUntilDecision = state.TicksUntilDecision
                 });
@@ -169,18 +186,28 @@ namespace Eden.Application
 
     /// <summary>
     /// What a <see cref="BrainController"/> keeps for one creature between ticks: which brain it uses (by name), the
-    /// creature's own random stream, the held action and how many ticks remain until its next decision.
+    /// creature's own random stream, the held action, how many ticks remain until its next decision and, for a plastic
+    /// network, what it learned so far in this life (a copy, detached from the live state).
     /// </summary>
     public readonly struct BrainSlotState
     {
         public BrainSlotState(CreatureId creature, string brainName, Pcg32State random, CreatureAction action,
-            int ticksUntilDecision)
+            int ticksUntilDecision, PlasticMemory plastic = null)
         {
             Creature = creature;
             BrainName = brainName ?? throw new ArgumentNullException(nameof(brainName));
             Random = random;
             Action = action;
             TicksUntilDecision = ticksUntilDecision;
+            if (plastic == null)
+            {
+                Plastic = null;
+            }
+            else
+            {
+                Plastic = new PlasticMemory();
+                Plastic.CopyFrom(plastic);
+            }
         }
 
         public CreatureId Creature { get; }
@@ -188,5 +215,8 @@ namespace Eden.Application
         public Pcg32State Random { get; }
         public CreatureAction Action { get; }
         public int TicksUntilDecision { get; }
+
+        /// <summary>Lifetime weight changes of a plastic network; null for any other brain.</summary>
+        public PlasticMemory Plastic { get; }
     }
 }

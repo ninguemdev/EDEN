@@ -38,6 +38,12 @@ namespace Eden.Evolution
         /// </summary>
         public BodyGeneSet ExpressedBodyGenes = BodyGeneSet.None;
 
+        /// <summary>
+        /// Lifetime plasticity (M7 experiment): genomes start with random plasticity coefficients and their brains change
+        /// during each life. Off (the default) keeps every network fixed during a life, as before.
+        /// </summary>
+        public bool Plasticity;
+
         /// <summary>Genomes per generation (proposed 64).</summary>
         public int PopulationSize = 64;
 
@@ -124,6 +130,7 @@ namespace Eden.Evolution
 
             ExperimentSeed = settings.ExperimentSeed;
             ExpressedBodyGenes = settings.ExpressedBodyGenes;
+            Plasticity = settings.Plasticity;
             EpisodeSeconds = settings.EpisodeSeconds;
             TrainingSeedsPerGeneration = settings.TrainingSeedsPerGeneration;
             EpisodeTicks = Math.Max(1L, (long)Math.Round((double)EpisodeSeconds * validated.TicksPerSecond));
@@ -139,6 +146,9 @@ namespace Eden.Evolution
 
         /// <summary>Body genes that shape the episode creature; <see cref="BodyGeneSet.None"/> is the fixed body.</summary>
         public BodyGeneSet ExpressedBodyGenes { get; }
+
+        /// <summary>Whether genomes carry plasticity coefficients (brains change during a life).</summary>
+        public bool Plasticity { get; }
 
         public float EpisodeSeconds { get; }
         public int TrainingSeedsPerGeneration { get; }

@@ -42,7 +42,7 @@ namespace Eden.Tests.EditMode
             Assert.That(shaped.CopyWeights(), Is.EqualTo(plain.CopyWeights()));
             Assert.That(shaped.HasSameContent(plain), Is.False, "body genes are part of the content");
             Assert.That(shaped.HasSameContent(new Genome(NetworkTopology.Mlp12x16x3, weights, Extreme)), Is.True);
-            Assert.That(Genome.CurrentSchemaVersion, Is.EqualTo(2));
+            Assert.That(Genome.CurrentSchemaVersion, Is.EqualTo(3));
         }
 
         [Test]
@@ -295,9 +295,9 @@ namespace Eden.Tests.EditMode
             var text = CheckpointCodec.Encode(checkpoint, "0.1.0", "test", savedAt);
 
             Assert.That(text, Does.Not.Contain("body").IgnoreCase, "the fixed body is written as before body genes");
-            var old = text.Replace("\"schemaVersion\": 4,", "\"schemaVersion\": 1,")
+            var old = text.Replace("\"schemaVersion\": 5,", "\"schemaVersion\": 1,")
                 .Replace("\"configSchema\": 5,", "\"configSchema\": 3,")
-                .Replace("\"genomeSchema\": 2", "\"genomeSchema\": 1");
+                .Replace("\"genomeSchema\": 3", "\"genomeSchema\": 1");
             Assert.That(old, Is.Not.EqualTo(text));
             var decoded = CheckpointCodec.Decode(old, out var info);
             Assert.That(info.SchemaVersion, Is.EqualTo(1));

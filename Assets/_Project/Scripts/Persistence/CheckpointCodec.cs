@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using Eden.Application;
+using Eden.Brains;
 using Eden.Domain;
 using Eden.Evolution;
 using Eden.Simulation;
@@ -22,11 +23,13 @@ namespace Eden.Persistence
     /// fixed body, where costs change nothing) read as the same run. Reproduction came after that: the reproduction
     /// settings, a creature's parent, generation and cooldown, the genomes of creatures born in a shared world and its
     /// genealogy are written only when reproduction is on or they are set, so config schema 4 files read the same way.
+    /// Plasticity (schema 5, genome schema 3) likewise: the experiment option, a genome's coefficients and a brain's
+    /// lifetime weight changes are written only when used, so a genome schema 2 file reads as fixed networks.
     /// </summary>
     public static class CheckpointCodec
     {
         public const string Format = "eden-checkpoint";
-        public const int SchemaVersion = 4;
+        public const int SchemaVersion = 5;
 
         /// <summary>Limits checked before allocating; generous for the lab, small enough to refuse absurd files.</summary>
         public const int MaxLineageEntries = 8000000;
@@ -121,7 +124,7 @@ namespace Eden.Persistence
                 var actual = saved[expected.Key];
                 // A schema 1 genome is today's genome with neutral body genes, and a schema 3 config is today's config
                 // with the default body costs, which do nothing for the fixed body those files always have.
-                if (actual.Kind == JsonKind.Number && (expected.Key == "genomeSchema" && actual.Text == "1" ||
+                if (actual.Kind == JsonKind.Number && (expected.Key == "genomeSchema" && (actual.Text == "1" || actual.Text == "2") ||
                                                        expected.Key == "configSchema" && (actual.Text == "3" || actual.Text == "4")))
                     continue;
                 if (actual.Kind != expected.Value.Kind || actual.Text != expected.Value.Text)
@@ -169,8 +172,13 @@ namespace Eden.Persistence
                 .Add("world", EncodeSettings(s.World));
             if (s.ExpressedBodyGenes != BodyGeneSet.None)
                 settings.Add("expressedBodyGenes", EncodeGeneSet(s.ExpressedBodyGenes));
+            if (s.Plasticity)
+                settings.Add("plasticity", JsonValue.Of(true));
             return settings;
         }
+
+        // Absent means off; an explicit false does not read back the same and is refused.
+        private static bool DecodePlasticityOption(JsonValue saved) => saved != null && saved.Boolean();
 
         private static readonly string[] GeneNames = { "size", "speed", "sensor", "efficiency" };
 
@@ -220,7 +228,8 @@ namespace Eden.Persistence
                 MutationProbability = saved["mutationProbability"].Float(),
                 MutationSigma = saved["mutationSigma"].Float(),
                 World = DecodeSettings(saved["world"]),
-                ExpressedBodyGenes = DecodeGeneSet(saved.TryGet("expressedBodyGenes"))
+                ExpressedBodyGenes = DecodeGeneSet(saved.TryGet("expressedBodyGenes")),
+                Plasticity = DecodePlasticityOption(saved.TryGet("plasticity"))
             };
             // Both validate every value and report all problems together.
             new EvaluationPlan(settings);
@@ -387,6 +396,7 @@ namespace Eden.Persistence
             saved.Add("weights", weights);
             if (!genome.Body.IsNeutral)
                 saved.Add("body", EncodeBodyGenes(genome.Body));
+            AddPlasticity(saved, genome.Plasticity);
             return saved;
         }
 
@@ -399,7 +409,7 @@ namespace Eden.Persistence
             var weights = new float[values.Count];
             for (var w = 0; w < weights.Length; w++)
                 weights[w] = values[w].Float();
-            return new Genome(expected, weights, DecodeBodyGenes(saved.TryGet("body")));
+            return new Genome(expected, weights, DecodeBodyGenes(saved.TryGet("body")), DecodePlasticity(saved.TryGet("plasticity")));
         }
 
         private static Checkpoint DecodeCheckpoint(JsonValue config, JsonValue state)
@@ -619,7 +629,27 @@ namespace Eden.Persistence
                 .Add("weights", weights);
             if (!genome.Body.IsNeutral)
                 saved.Add("body", EncodeBodyGenes(genome.Body));
+            AddPlasticity(saved, genome.Plasticity);
             return saved;
+        }
+
+        private static void AddPlasticity(JsonValue saved, PlasticityGenes plasticity)
+        {
+            if (!plasticity.IsFixed)
+                saved.Add("plasticity", JsonValue.NewArray()
+                    .Add(JsonValue.Of(plasticity.LearningRate))
+                    .Add(JsonValue.Of(plasticity.Decay)));
+        }
+
+        // Missing means a fixed network; an explicit [0, 0] does not read back the same and is refused.
+        private static PlasticityGenes DecodePlasticity(JsonValue saved)
+        {
+            if (saved == null)
+                return PlasticityGenes.Fixed;
+            var values = saved.ArrayOf(2);
+            if (values.Count != 2)
+                throw new CheckpointException($"{values.Path}: expected [learning rate, decay].");
+            return new PlasticityGenes(values[0].Float(), values[1].Float());
         }
 
         private static JsonValue EncodeBodyGenes(BodyGenes genes)
@@ -661,7 +691,7 @@ namespace Eden.Persistence
             for (var p = 0; p < parents.Length; p++)
                 parents[p] = parentValues[p].Long(1);
             return new Individual(saved["id"].Long(1), parents, saved["birthGeneration"].Int(0),
-                new Genome(expected, weights, DecodeBodyGenes(saved.TryGet("body"))),
+                new Genome(expected, weights, DecodeBodyGenes(saved.TryGet("body")), DecodePlasticity(saved.TryGet("plasticity"))),
                 saved["mutatedWeights"].Int(0, expected.ParameterCount));
         }
 
@@ -864,7 +894,7 @@ namespace Eden.Persistence
             var values = JsonValue.NewArray();
             foreach (var slot in brains)
             {
-                values.Add(JsonValue.NewObject()
+                var saved = JsonValue.NewObject()
                     .Add("creature", JsonValue.Of(slot.Creature.Value))
                     .Add("brain", JsonValue.Of(slot.BrainName))
                     .Add("random", EncodeRandom(slot.Random))
@@ -872,7 +902,10 @@ namespace Eden.Persistence
                         .Add(JsonValue.Of(slot.Action.Thrust))
                         .Add(JsonValue.Of(slot.Action.Turn))
                         .Add(JsonValue.Of(slot.Action.Strafe)))
-                    .Add("ticksUntilDecision", JsonValue.Of(slot.TicksUntilDecision)));
+                    .Add("ticksUntilDecision", JsonValue.Of(slot.TicksUntilDecision));
+                if (slot.Plastic != null)
+                    saved.Add("plastic", EncodePlastic(slot.Plastic));
+                values.Add(saved);
             }
 
             return values;
@@ -890,10 +923,49 @@ namespace Eden.Persistence
                     throw new CheckpointException($"{action.Path}: expected [thrust, turn, strafe].");
                 brains[i] = new BrainSlotState(new CreatureId(value["creature"].Int(1)), value["brain"].String(),
                     DecodeRandom(value["random"]), new CreatureAction(action[0].Float(), action[1].Float(), action[2].Float()),
-                    value["ticksUntilDecision"].Int(0));
+                    value["ticksUntilDecision"].Int(0), DecodePlastic(value.TryGet("plastic")));
             }
 
             return brains;
+        }
+
+        private static JsonValue EncodePlastic(PlasticMemory memory) =>
+            JsonValue.NewObject()
+                .Add("deltaWeights", Floats(memory.DeltaWeights))
+                .Add("lastHidden", Floats(memory.LastHidden))
+                .Add("lastOutput", Floats(memory.LastOutput))
+                .Add("lastEnergy", JsonValue.Of(memory.LastEnergy))
+                .Add("hasPrevious", JsonValue.Of(memory.HasPrevious));
+
+        // Limits are checked when the brains are restored.
+        private static PlasticMemory DecodePlastic(JsonValue saved)
+        {
+            if (saved == null)
+                return null;
+            var memory = new PlasticMemory();
+            ReadFloats(saved["deltaWeights"], memory.DeltaWeights);
+            ReadFloats(saved["lastHidden"], memory.LastHidden);
+            ReadFloats(saved["lastOutput"], memory.LastOutput);
+            memory.LastEnergy = saved["lastEnergy"].Float();
+            memory.HasPrevious = saved["hasPrevious"].Boolean();
+            return memory;
+        }
+
+        private static JsonValue Floats(float[] values)
+        {
+            var array = JsonValue.NewArray();
+            foreach (var value in values)
+                array.Add(JsonValue.Of(value));
+            return array;
+        }
+
+        private static void ReadFloats(JsonValue saved, float[] destination)
+        {
+            var values = saved.ArrayOf(destination.Length);
+            if (values.Count != destination.Length)
+                throw new CheckpointException($"{values.Path}: expected {destination.Length} values.");
+            for (var i = 0; i < destination.Length; i++)
+                destination[i] = values[i].Float();
         }
 
         private static JsonValue EncodeRandom(Pcg32State state) =>

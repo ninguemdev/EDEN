@@ -181,7 +181,7 @@ namespace Eden.Evolution
                 body = new BodyGenes(genes[0], genes[1], genes[2], genes[3]);
             }
 
-            return new Genome(parent.Topology, weights, body);
+            return new Genome(parent.Topology, weights, body, parent.Plasticity);
         }
 
         /// <summary>Parent indices from best to worst.</summary>

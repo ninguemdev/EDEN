@@ -25,7 +25,8 @@ namespace Eden.Editor
     /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.AblateBodyFromCommandLine
     ///   [-eden-variants ablation|extended|fixed,all,no-size,only-sensor,…] and the battery options -logFile -
     /// -eden-body takes the expressed body genes: none (the fixed body, default), all, or a comma list of
-    /// size, speed, sensor, efficiency; the battery commands accept it too.
+    /// size, speed, sensor, efficiency; -eden-plasticity on|off turns lifetime plasticity on (default off). The battery
+    /// commands accept both.
     /// Settings not given keep the proposed defaults of <see cref="EvolutionSettings"/> and <see cref="BatterySettings"/>.
     /// </summary>
     public static class EvolutionBatch
@@ -269,6 +270,9 @@ namespace Eden.Editor
                         break;
                     case "-eden-body":
                         settings.ExpressedBodyGenes = BodyGeneSetOf(value);
+                        break;
+                    case "-eden-plasticity" when value == "on" || value == "off":
+                        settings.Plasticity = value == "on";
                         break;
                     case "-eden-output":
                         output = value;
