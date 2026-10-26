@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa), **M3** (evolução por gerações), **M4** (laboratório completo e checkpoints, o MVP) e **M5** (biologia parametrizada) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O laboratório inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. O genoma carrega genes de corpo limitados, cada característica com custo explícito; o laboratório pode evoluir o corpo junto com o cérebro (o corpo fixo continua o padrão e o controle), e uma ablação por gene compara as variantes com a variação entre execuções. O próximo marco é o **M6** (ecossistema contínuo). Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa), **M3** (evolução por gerações), **M4** (laboratório completo e checkpoints, o MVP) e **M5** (biologia parametrizada) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O laboratório inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. O genoma carrega genes de corpo limitados, cada característica com custo explícito; o laboratório pode evoluir o corpo junto com o cérebro (o corpo fixo continua o padrão e o controle), e uma ablação por gene compara as variantes com a variação entre execuções. O **M6** (ecossistema contínuo) está em andamento: no mundo compartilhado as criaturas já podem se reproduzir localmente, sem torneio, com energia conservada e teto de população. Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -122,6 +122,21 @@ Cada execução do mundo compartilhado grava um diretório em `%USERPROFILE%\App
 **Salvar** grava o experimento entre dois ticks em `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\Checkpoints\lab.json` (fora do repositório): a evolução inteira (configuração, população com os genomas, linhagem, histórico do gráfico, resultados já obtidos na geração em curso e o episódio em andamento) e, no mundo compartilhado, o mundo com a agenda de reposição, os geradores aleatórios e o estado do cérebro de cada criatura. **Carregar** volta exatamente a esse ponto: a execução retomada continua tick a tick igual à que foi salva (no mesmo computador e na mesma versão). Os logs da execução retomada vão para um diretório novo, que registra de onde ela veio: o arquivo, o hash do estado salvo, a geração, a fase e quantos episódios da avaliação em andamento já estavam prontos no checkpoint (esses vêm do arquivo e não são rodados de novo; o episódio interrompido continua do tick em que estava). Somando as linhas exportadas antes de salvar e depois de carregar, os CSVs ficam idênticos aos de uma execução sem interrupção.
 
 O arquivo é JSON legível, com versão do formato, versão do app, configuração e hashes. A gravação escreve primeiro um arquivo temporário na mesma pasta, confere que ele pode ser lido e só então troca o checkpoint; o anterior fica como `lab.json.bak`. Ao carregar, um arquivo corrompido, editado, incoerente ou de uma versão mais nova do formato é recusado com o motivo no painel, e a execução atual continua intacta; se o principal estiver estragado, o backup é usado.
+
+## Ecossistema contínuo: reprodução local
+
+No mundo compartilhado as criaturas podem se reproduzir sozinhas, sem torneio nem geração global: quem nasce e quem morre depende só do que acontece no mundo. A reprodução é desligada por padrão (o mundo compartilhado continua igual ao de antes) e nunca acontece nos episódios isolados da evolução. Liga-se nas configurações do mundo do `LabRunner` no Inspector (`Reproduction`) ou com `-eden-reproduction on` no executável.
+
+Regras (aplicadas em fase própria, depois de energia, idade e mortes, com os pais em ordem de id):
+
+- uma criatura viva se reproduz quando já é **madura** (20 s de idade), tem pelo menos **70% da própria capacidade** de energia, terminou o **intervalo** desde o último filho (15 s) e ainda fica com energia depois de pagar;
+- o filho recebe **40% da energia** do pai (no máximo a própria capacidade) e o pai perde isso **mais um custo** de 5 que não vai para ninguém: um nascimento nunca cria energia;
+- o filho nasce a 1 unidade do pai, dentro da arena, com o próximo id, o pai como único ascendente e **geração genealógica** = geração do pai + 1 (as criaturas iniciais são a geração 0);
+- no **teto de população** (256) o nascimento é recusado antes de qualquer sorteio ou débito; ninguém é descartado para abrir espaço, e uma população extinta não é reposta.
+
+Com cérebros de rede (aleatória ou da população evoluída), o filho herda uma cópia mutada do genoma do pai (5% por peso ou gene de corpo expresso, σ = 0,10), sorteada de um fluxo próprio do filho, e ganha o seu cérebro. Com cérebros de referência o filho só copia os genes de corpo. O HUD mostra o teto, os nascimentos e a maior geração genealógica viva; o inspetor mostra o pai, a geração e quando a criatura poderá se reproduzir. Salvar e Carregar guardam pais, gerações, intervalos e os genomas dos nascidos. Todos esses valores são propostas a medir.
+
+Numa primeira observação (mínimo, heurístico, seed 3, 7 563 s simulados) houve 2 346 nascimentos, a maior geração viva chegou a 109 e a população se manteve perto de 30, limitada pela comida, bem abaixo do teto. Métricas por janela, genealogia e extinção explícita na interface vêm na próxima tarefa do M6.
 
 ## Evolução por gerações
 
@@ -260,8 +275,8 @@ O controle reproduz exatamente a bateria do M3. Todas as variantes com genes de 
 
 Pelo Editor: **Window → General → Test Runner**, abas EditMode e PlayMode.
 
-- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, genes de corpo (limites, herança e mutação, expressão no mundo, corpo fixo idêntico ao anterior e regras de custo: nenhum corpo melhor que a referência em tudo), avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados, arquivos de antes dos genes de corpo ainda lidos), ticks sem alocação de memória após o aquecimento (gravador de alocações da Unity), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, ablação dos genes de corpo (mesmo orçamento por variante, controle idêntico à bateria comum, diversidade de corpo, relatório), além de execuções longas com verificação de invariantes e independência de FPS.
-- **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id, gravação do CSV e os controles do laboratório, inclusive salvar, carregar, a medição de desempenho e o corpo evolutivo (tamanho desenhado, alcance do sensor e inspetor).
+- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, genes de corpo (limites, herança e mutação, expressão no mundo, corpo fixo idêntico ao anterior e regras de custo: nenhum corpo melhor que a referência em tudo), avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados, arquivos de antes dos genes de corpo ainda lidos), ticks sem alocação de memória após o aquecimento (gravador de alocações da Unity), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, reprodução local (maturidade, limiar, intervalo, teto sem custo, energia conservada, herança com fluxo próprio do filho, retomada idêntica com nascimentos), ablação dos genes de corpo (mesmo orçamento por variante, controle idêntico à bateria comum, diversidade de corpo, relatório), além de execuções longas com verificação de invariantes e independência de FPS.
+- **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id, gravação do CSV e os controles do laboratório, inclusive salvar, carregar, a medição de desempenho o corpo evolutivo (tamanho desenhado, alcance do sensor e inspetor) e a reprodução no mundo compartilhado (filhos com genoma e cérebro próprios, salvar e carregar com nascimentos).
 
 Pela linha de comando, com o Editor **fechado** para este projeto:
 
@@ -289,6 +304,7 @@ O executável sai em `Builds/Windows/EDEN.exe` e roda sem o Editor. Para um buil
 | `-eden-preset minimal\|standard\|stress` | preset inicial |
 | `-eden-brain heuristic\|random\|neural` | cérebro inicial do mundo compartilhado |
 | `-eden-body fixed\|evolving` | corpo da evolução (padrão `fixed`) |
+| `-eden-reproduction on\|off` | reprodução local no mundo compartilhado (padrão `off`) |
 | `-eden-seed N` | seed do run (ou do experimento de evolução) |
 | `-eden-select ID` | já começa com a criatura `ID` selecionada |
 | `-eden-max` | já começa na velocidade máxima |
@@ -376,7 +392,7 @@ Outras pastas: `Scenes`, `UI` (UXML e tema do UI Toolkit), `Art` e `Settings` (a
 | M3 | evolução por gerações: avaliação isolada, elites, torneio, mutação, seeds de validação | concluído |
 | M4 | laboratório completo e checkpoints (MVP) | concluído |
 | M5 | biologia parametrizada: genes de corpo com custos e trade-offs, ablação por gene | concluído |
-| M6 | ecossistema contínuo com reprodução local | planejado |
+| M6 | ecossistema contínuo com reprodução local | em andamento |
 | M7 | adaptação individual (plasticidade) como experimento | planejado |
 | M8 | escala orientada por perfilamento | planejado |
 
