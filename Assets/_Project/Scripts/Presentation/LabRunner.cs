@@ -45,7 +45,8 @@ namespace Eden.Presentation
     /// reaches the simulation. In evolution mode the world shown is the isolated episode being evaluated. The run can
     /// be saved to and loaded from a checkpoint between ticks.
     /// Command line (builds): -eden-mode shared|evolution, -eden-preset minimal|standard|stress,
-    /// -eden-brain heuristic|random|neural, -eden-body fixed|evolving, -eden-seed N, -eden-select ID, -eden-max, and for a measured run
+    /// -eden-brain heuristic|random|neural, -eden-body fixed|evolving, -eden-reproduction on|off, -eden-seed N,
+    /// -eden-select ID, -eden-max, and for a measured run
     /// -eden-benchmark SECONDS [-eden-benchmark-warmup SECONDS] [-eden-benchmark-output DIR] (see <see cref="LabBenchmark"/>).
     /// </summary>
     public sealed class LabRunner : MonoBehaviour
@@ -76,6 +77,7 @@ namespace Eden.Presentation
         private MetricsCsvLog metricsLog;
         private EvolutionCsvLog evolutionLog;
         private SimulationSettings sharedSettings;
+        private SharedGenomes sharedGenomes;
         private IReadOnlyList<Individual> sharedIndividuals;
         private int sharedGeneration;
         private CreatureDeath? selectedDeath;
@@ -90,6 +92,15 @@ namespace Eden.Presentation
 
         /// <summary>Body choice for the next evolution (see <see cref="LabChoice.EvolvingBody"/>).</summary>
         public bool EvolvingBody => evolvingBody;
+
+        /// <summary>
+        /// World rules of the lab, as edited in the Inspector (or by -eden-reproduction); a preset sets the population and
+        /// food of each shared world made from it. Changes take effect at the next start.
+        /// </summary>
+        public SimulationSettings WorldTemplate => settings;
+
+        /// <summary>Genomes of the shared world's neural creatures, children included; null for other brains.</summary>
+        public SharedGenomes SharedGenomes => sharedGenomes;
         public ExperimentPreset Preset => ExperimentPreset.All[preset];
         public int Seed => seed;
 
@@ -161,6 +172,7 @@ namespace Eden.Presentation
                 return;
             CloseMetricsLog();
             mode = LabMode.IsolatedEvolution;
+            sharedGenomes = null;
             ClearSelection();
             ShowEpisode();
             hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody), true);
@@ -177,7 +189,8 @@ namespace Eden.Presentation
             try
             {
                 var shared = mode == LabMode.SharedWorld
-                    ? new SharedWorldSnapshot(sharedSettings, Simulation.Capture(), controller.Capture())
+                    ? new SharedWorldSnapshot(sharedSettings, Simulation.Capture(), controller.Capture(),
+                        sharedGenomes?.Capture())
                     : null;
                 var checkpoint = new Checkpoint(ModeName(mode), Preset.Name, (ulong)seed, KindName(brain),
                     Evolution?.Capture(), shared);
@@ -210,6 +223,7 @@ namespace Eden.Presentation
             EvolutionSession session;
             WorldSimulation world;
             BrainController brains;
+            SharedGenomes genomes = null;
             IReadOnlyList<Individual> individuals = null;
             var name = MlpBrain.BrainName;
             try
@@ -242,7 +256,12 @@ namespace Eden.Presentation
                     }
 
                     world = WorldSimulation.Restore(config, saved.SharedWorld.World);
-                    brains = CreateController(config, loadedBrain, individuals, out name);
+                    genomes = CreateGenomes(config, loadedBrain, individuals, session);
+                    if (genomes == null && saved.SharedWorld.BornGenomes.Count > 0)
+                        throw new CheckpointException("Only neural brains have genomes to restore.");
+                    genomes?.Restore(saved.SharedWorld.BornGenomes, world.World);
+                    world.Heredity = genomes;
+                    brains = CreateController(config, loadedBrain, genomes, out name);
                     brains.Restore(saved.SharedWorld.Brains);
                 }
             }
@@ -267,6 +286,7 @@ namespace Eden.Presentation
             controller = brains;
             BrainName = name;
             sharedSettings = saved.SharedWorld?.Settings;
+            sharedGenomes = genomes;
             sharedIndividuals = individuals;
             sharedGeneration = session?.LastTraining?.Summary.Generation ?? 0;
             metrics = new MetricsRecorder(world.World.Config, world.World.Config.TicksPerSecond);
@@ -558,6 +578,7 @@ namespace Eden.Presentation
             }
 
             controller.Forget(deaths);
+            sharedGenomes?.Forget(deaths);
             if (metrics.Record(Simulation))
                 metricsLog?.Append(metrics.LastSample);
         }
@@ -585,7 +606,9 @@ namespace Eden.Presentation
             Simulation = new WorldSimulation(individuals == null
                 ? WorldFactory.CreateInitial(config)
                 : WorldFactory.CreateInitial(config, i => plan.ExpressedGenes(individuals[i].Genome.Body)));
-            controller = CreateController(config, brain, sharedIndividuals, out var name);
+            sharedGenomes = CreateGenomes(config, brain, individuals, Evolution);
+            Simulation.Heredity = sharedGenomes;
+            controller = CreateController(config, brain, sharedGenomes, out var name);
             BrainName = name;
             metrics = new MetricsRecorder(config, config.TicksPerSecond);
             if (writeMetrics)
@@ -598,6 +621,7 @@ namespace Eden.Presentation
             evolutionLog = null;
             EvolutionDirectory = null;
             sharedIndividuals = null;
+            sharedGenomes = null;
             var evolutionSettings = Preset.Evolution((ulong)seed);
             evolutionSettings.ExpressedBodyGenes = evolvingBody ? BodyGeneSet.All : BodyGeneSet.None;
             Evolution = new EvolutionSession(evolutionSettings);
@@ -775,6 +799,9 @@ namespace Eden.Presentation
                     case "-eden-body" when value == "fixed" || value == "evolving":
                         evolvingBody = value == "evolving";
                         break;
+                    case "-eden-reproduction" when value == "on" || value == "off":
+                        settings.Reproduction = value == "on";
+                        break;
                     case "-eden-preset":
                         for (var p = 0; p < ExperimentPreset.All.Count; p++)
                             if (ExperimentPreset.All[p].Name == value) preset = p;
@@ -795,19 +822,32 @@ namespace Eden.Presentation
             return select;
         }
 
-        // Evolved brains take creature id i from individuals[i - 1], so a shared world restarted or restored from the
-        // same individuals gets the same brains.
-        private static BrainController CreateController(SimulationConfig config, LabBrainKind kind,
-            IReadOnlyList<Individual> individuals, out string brainName)
+        // Founder genomes: evolved creature id i is individuals[i - 1] (the same individuals give the same brains after a
+        // restart or a load), neural ones are random per id. Children's genomes come from their parents (SharedGenomes).
+        private static SharedGenomes CreateGenomes(SimulationConfig config, LabBrainKind kind,
+            IReadOnlyList<Individual> individuals, EvolutionSession evolution)
         {
             switch (kind)
             {
                 case LabBrainKind.Evolved:
-                    brainName = MlpBrain.BrainName;
-                    return new BrainController(config, id => new MlpBrain(individuals[id.Value - 1].Genome));
+                    return new SharedGenomes(config, id => individuals[id.Value - 1].Genome,
+                        evolution.Evolution.Plan.ExpressedBodyGenes);
+                case LabBrainKind.Neural:
+                    return new SharedGenomes(config, id => InitialGenomes.RandomFor(config, id), BodyGeneSet.None);
+                default:
+                    return null;
+            }
+        }
+
+        private static BrainController CreateController(SimulationConfig config, LabBrainKind kind, SharedGenomes genomes,
+            out string brainName)
+        {
+            switch (kind)
+            {
+                case LabBrainKind.Evolved:
                 case LabBrainKind.Neural:
                     brainName = MlpBrain.BrainName;
-                    return new BrainController(config, id => new MlpBrain(InitialGenomes.RandomFor(config, id)));
+                    return new BrainController(config, id => new MlpBrain(genomes.GenomeOf(id)));
                 case LabBrainKind.Random:
                     brainName = RandomBrain.BrainName;
                     return BrainController.Shared(config, new RandomBrain());

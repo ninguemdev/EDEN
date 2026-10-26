@@ -63,8 +63,9 @@ namespace Eden.Domain
                 errors.Add($"next creature id must be at least 1 (was {nextCreatureId})");
             if (nextFoodId < 1)
                 errors.Add($"next food id must be at least 1 (was {nextFoodId})");
-            if (creatures.Count > SimulationConfig.MaxPopulation)
-                errors.Add($"{creatures.Count} creatures exceed the limit of {SimulationConfig.MaxPopulation}");
+            var limit = config.Reproduction ? config.PopulationCap : SimulationConfig.MaxPopulation;
+            if (creatures.Count > limit)
+                errors.Add($"{creatures.Count} creatures exceed the limit of {limit}");
             if (food.Count > SimulationConfig.MaxFood)
                 errors.Add($"{food.Count} food items exceed the limit of {SimulationConfig.MaxFood}");
             if (errors.Count == 0)
@@ -82,7 +83,9 @@ namespace Eden.Domain
                 world.creatures.Add(new CreatureState(saved.Id, saved.Position, saved.Heading, saved.Energy, saved.Genes,
                     saved.Body)
                 {
-                    Velocity = saved.Velocity, AgeTicks = saved.AgeTicks, FoodEnergyEaten = saved.FoodEnergyEaten
+                    Velocity = saved.Velocity, AgeTicks = saved.AgeTicks, FoodEnergyEaten = saved.FoodEnergyEaten,
+                    Parent = saved.Parent, Generation = saved.Generation,
+                    ReproductionCooldownTicks = saved.ReproductionCooldownTicks
                 });
             }
 
@@ -122,6 +125,21 @@ namespace Eden.Domain
             var creature = new CreatureState(new CreatureId(NextCreatureId++), position, heading, energy, genes, body);
             creatures.Add(creature);
             return creature;
+        }
+
+        /// <summary>
+        /// Adds a child of <paramref name="parent"/>: next id, the parent as its only parent, one generation after it and
+        /// no cooldown. Energy and placement are the caller's rules (see the simulation's birth phase).
+        /// </summary>
+        public CreatureState AddOffspring(CreatureState parent, Float2 position, float heading, float energy,
+            BodyGenes genes)
+        {
+            if (parent == null)
+                throw new ArgumentNullException(nameof(parent));
+            var child = AddCreature(position, heading, energy, genes);
+            child.Parent = parent.Id;
+            child.Generation = parent.Generation + 1;
+            return child;
         }
 
         public FoodState AddFood(Float2 position, float energy)
@@ -200,6 +218,12 @@ namespace Eden.Domain
                     errors.Add($"{name} has a non-finite velocity");
                 if (!(creature.Heading >= 0f && creature.Heading < 2f * MathF.PI))
                     errors.Add($"{name} heading {creature.Heading} is outside [0, 2π)");
+                if (creature.Parent.HasValue ? creature.Parent.Value.Value >= id || creature.Generation < 1
+                        : creature.Generation != 0)
+                    errors.Add($"{name} has parent {creature.Parent} and generation {creature.Generation}; a creature born " +
+                               "in the run has an older parent and generation >= 1, any other has generation 0");
+                if (creature.ReproductionCooldownTicks < 0 || creature.ReproductionCooldownTicks > config.ReproductionCooldownTicks)
+                    errors.Add($"{name} cooldown {creature.ReproductionCooldownTicks} is outside [0, {config.ReproductionCooldownTicks}]");
                 if (!creature.Body.Equals(CreatureBody.Express(config, creature.Genes)))
                     errors.Add($"{name} body {creature.Body} is not its genes {creature.Genes} expressed in the config");
                 else if (!(creature.Energy > 0f && creature.Energy <= creature.Body.MaxEnergy))

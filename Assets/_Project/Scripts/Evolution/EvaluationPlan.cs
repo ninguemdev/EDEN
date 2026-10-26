@@ -26,8 +26,9 @@ namespace Eden.Evolution
         public int ValidationSeedCount = 5;
 
         /// <summary>
-        /// World of an isolated episode. Population is always forced to one creature; food is proposed at 32 so that
-        /// foraging alone in the 50 × 50 arena is not trivial. Values are starting points to be measured.
+        /// World of an isolated episode. Population is always forced to one creature, which never reproduces; food is
+        /// proposed at 32 so that foraging alone in the 50 × 50 arena is not trivial. Values are starting points to be
+        /// measured.
         /// </summary>
         public SimulationSettings World = new SimulationSettings { InitialPopulation = 1, InitialFood = 32 };
 
@@ -118,6 +119,7 @@ namespace Eden.Evolution
 
             world = settings.World.Clone();
             world.InitialPopulation = 1;
+            world.Reproduction = false;
             var validated = new SimulationConfig(world);
 
             ExperimentSeed = settings.ExperimentSeed;

@@ -55,7 +55,9 @@ namespace Eden.Persistence
     /// <summary>A shared world between ticks: its settings, its state and its creatures' brain state.</summary>
     public sealed class SharedWorldSnapshot
     {
-        public SharedWorldSnapshot(SimulationSettings settings, SimulationSnapshot world, IReadOnlyList<BrainSlotState> brains)
+        /// <param name="bornGenomes">Brain genomes of the creatures born in the world (none when brains have no genome).</param>
+        public SharedWorldSnapshot(SimulationSettings settings, SimulationSnapshot world, IReadOnlyList<BrainSlotState> brains,
+            IReadOnlyList<BornGenome> bornGenomes = null)
         {
             Settings = settings?.Clone() ?? throw new ArgumentNullException(nameof(settings));
             World = world ?? throw new ArgumentNullException(nameof(world));
@@ -65,6 +67,10 @@ namespace Eden.Persistence
             for (var i = 0; i < copy.Length; i++)
                 copy[i] = brains[i];
             Brains = copy;
+            var genomes = new BornGenome[bornGenomes?.Count ?? 0];
+            for (var i = 0; i < genomes.Length; i++)
+                genomes[i] = bornGenomes[i];
+            BornGenomes = genomes;
         }
 
         /// <summary>A copy of the settings the world was created with.</summary>
@@ -72,6 +78,7 @@ namespace Eden.Persistence
 
         public SimulationSnapshot World { get; }
         public IReadOnlyList<BrainSlotState> Brains { get; }
+        public IReadOnlyList<BornGenome> BornGenomes { get; }
     }
 
     /// <summary>Where and how a checkpoint was written; recorded for people, never used to decide results.</summary>

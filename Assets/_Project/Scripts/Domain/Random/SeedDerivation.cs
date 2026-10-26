@@ -16,7 +16,10 @@ namespace Eden.Domain
         Brain = 5,
 
         /// <summary>Per-creature streams for initial random genomes.</summary>
-        Genome = 6
+        Genome = 6,
+
+        /// <summary>Per-creature streams for the mutation of an offspring born in a shared world (by child id).</summary>
+        Birth = 7
     }
 
     /// <summary>

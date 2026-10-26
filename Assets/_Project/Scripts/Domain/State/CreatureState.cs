@@ -50,6 +50,15 @@ namespace Eden.Domain
         /// <summary>Total food energy eaten during this life, before clamping to the energy maximum.</summary>
         public float FoodEnergyEaten { get; set; }
 
+        /// <summary>Parent of a creature born in the world; null for a creature the run started with.</summary>
+        public CreatureId? Parent { get; set; }
+
+        /// <summary>Genealogical generation: 0 for the creatures the run started with, 1 + the parent's otherwise.</summary>
+        public int Generation { get; set; }
+
+        /// <summary>Ticks left before the creature may reproduce again (0: no cooldown).</summary>
+        public long ReproductionCooldownTicks { get; set; }
+
         /// <summary>Set during the tick the creature dies; dead creatures leave the world at the end of that tick.</summary>
         public DeathCause DeathCause { get; set; }
 

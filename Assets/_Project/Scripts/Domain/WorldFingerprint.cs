@@ -38,6 +38,9 @@ namespace Eden.Domain
                 hash.Add(creature.Genes.Speed);
                 hash.Add(creature.Genes.Sensor);
                 hash.Add(creature.Genes.Efficiency);
+                hash.Add(creature.Parent.HasValue ? (ulong)creature.Parent.Value.Value : 0UL);
+                hash.Add((ulong)creature.Generation);
+                hash.Add(creature.ReproductionCooldownTicks);
             }
 
             hash.Add((ulong)world.Food.Count);

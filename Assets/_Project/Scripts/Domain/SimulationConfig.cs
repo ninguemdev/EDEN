@@ -9,7 +9,7 @@ namespace Eden.Domain
     /// </summary>
     public sealed class SimulationConfig
     {
-        public const int CurrentSchemaVersion = 4;
+        public const int CurrentSchemaVersion = 5;
         public const int MaxTicksPerSecond = 240;
         public const int MaxDecisionIntervalTicks = 1000;
         public const int MaxPopulation = 4096;
@@ -51,6 +51,18 @@ namespace Eden.Domain
             RequireRange(errors, nameof(s.SpeedCostExponent), s.SpeedCostExponent, 0f, MaxCostExponent);
             RequireRange(errors, nameof(s.SensorCostExponent), s.SensorCostExponent, 0f, MaxCostExponent);
             RequireRange(errors, nameof(s.EfficiencyPowerExponent), s.EfficiencyPowerExponent, 0f, MaxCostExponent);
+            RequireRange(errors, nameof(s.PopulationCap), s.PopulationCap, 1, MaxPopulation);
+            if (s.Reproduction && s.PopulationCap < s.InitialPopulation)
+                errors.Add($"{nameof(s.PopulationCap)} ({s.PopulationCap}) must not be below {nameof(s.InitialPopulation)} " +
+                           $"({s.InitialPopulation})");
+            RequirePositive(errors, nameof(s.MaturitySeconds), s.MaturitySeconds, MaxDurationSeconds);
+            RequireRange(errors, nameof(s.ReproductionEnergyFraction), s.ReproductionEnergyFraction, 0.01f, 1f);
+            RequireRange(errors, nameof(s.OffspringEnergyFraction), s.OffspringEnergyFraction, 0.01f, 0.99f);
+            RequireNonNegative(errors, nameof(s.ReproductionCost), s.ReproductionCost);
+            RequireRange(errors, nameof(s.ReproductionCooldownSeconds), s.ReproductionCooldownSeconds, 0f, MaxDurationSeconds);
+            RequirePositive(errors, nameof(s.BirthDistance), s.BirthDistance, MaxArenaSize);
+            RequireRange(errors, nameof(s.BirthMutationProbability), s.BirthMutationProbability, 0f, 1f);
+            RequireRange(errors, nameof(s.BirthMutationSigma), s.BirthMutationSigma, 0f, 3f);
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid simulation config: " + string.Join("; ", errors));
 
@@ -79,10 +91,22 @@ namespace Eden.Domain
             SpeedCostExponent = s.SpeedCostExponent;
             SensorCostExponent = s.SensorCostExponent;
             EfficiencyPowerExponent = s.EfficiencyPowerExponent;
+            Reproduction = s.Reproduction;
+            PopulationCap = s.PopulationCap;
+            MaturitySeconds = s.MaturitySeconds;
+            ReproductionEnergyFraction = s.ReproductionEnergyFraction;
+            OffspringEnergyFraction = s.OffspringEnergyFraction;
+            ReproductionCost = s.ReproductionCost;
+            ReproductionCooldownSeconds = s.ReproductionCooldownSeconds;
+            BirthDistance = s.BirthDistance;
+            BirthMutationProbability = s.BirthMutationProbability;
+            BirthMutationSigma = s.BirthMutationSigma;
 
             TickDuration = 1f / TicksPerSecond;
             MaxAgeTicks = Math.Max(1L, (long)Math.Round((double)MaxAgeSeconds * TicksPerSecond));
             FoodRespawnTicks = Math.Max(1L, (long)Math.Round((double)FoodRespawnSeconds * TicksPerSecond));
+            MaturityTicks = Math.Max(1L, (long)Math.Round((double)MaturitySeconds * TicksPerSecond));
+            ReproductionCooldownTicks = (long)Math.Round((double)ReproductionCooldownSeconds * TicksPerSecond);
         }
 
         public static SimulationConfig CreateDefault(ulong seed) => new SimulationConfig(new SimulationSettings { Seed = seed });
@@ -134,6 +158,21 @@ namespace Eden.Domain
 
         /// <summary>Power of the metabolism factor in a body's acceleration.</summary>
         public float EfficiencyPowerExponent { get; }
+
+        /// <summary>Whether creatures reproduce (continuous mode); the values below only matter when they do.</summary>
+        public bool Reproduction { get; }
+
+        public int PopulationCap { get; }
+        public float MaturitySeconds { get; }
+        public float ReproductionEnergyFraction { get; }
+        public float OffspringEnergyFraction { get; }
+        public float ReproductionCost { get; }
+        public float ReproductionCooldownSeconds { get; }
+        public float BirthDistance { get; }
+        public float BirthMutationProbability { get; }
+        public float BirthMutationSigma { get; }
+        public long MaturityTicks { get; }
+        public long ReproductionCooldownTicks { get; }
 
         /// <summary>Fixed simulated time per tick, in seconds. Never scaled to speed a run up.</summary>
         public float TickDuration { get; }

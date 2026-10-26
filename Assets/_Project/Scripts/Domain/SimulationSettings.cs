@@ -51,6 +51,37 @@ namespace Eden.Domain
         /// <summary>Acceleration follows the metabolism factor to this power (a thrifty metabolism gives less power).</summary>
         public float EfficiencyPowerExponent = 1f;
 
+        // Continuous mode: local asexual reproduction. Off by default; isolated episodes never reproduce.
+        /// <summary>Living, mature creatures with enough energy and no cooldown give birth near themselves.</summary>
+        public bool Reproduction;
+
+        /// <summary>Most creatures alive at once; a birth that would exceed it is refused without any cost.</summary>
+        public int PopulationCap = 256;
+
+        /// <summary>Age before a creature can reproduce.</summary>
+        public float MaturitySeconds = 20f;
+
+        /// <summary>Share of its own energy capacity a creature needs to reproduce.</summary>
+        public float ReproductionEnergyFraction = 0.7f;
+
+        /// <summary>Share of the parent's energy handed to the child (at most the child's capacity).</summary>
+        public float OffspringEnergyFraction = 0.4f;
+
+        /// <summary>Energy the parent loses on top of what it hands over; it goes to nobody.</summary>
+        public float ReproductionCost = 5f;
+
+        /// <summary>Time after a birth before the same parent can reproduce again.</summary>
+        public float ReproductionCooldownSeconds = 15f;
+
+        /// <summary>Distance from the parent at which the child is placed (then kept inside the arena).</summary>
+        public float BirthDistance = 1f;
+
+        /// <summary>Chance that each weight or expressed body gene of a child mutates.</summary>
+        public float BirthMutationProbability = 0.05f;
+
+        /// <summary>Standard deviation of the Gaussian noise of a mutation at birth.</summary>
+        public float BirthMutationSigma = 0.10f;
+
         public SimulationSettings Clone() => (SimulationSettings)MemberwiseClone();
     }
 }

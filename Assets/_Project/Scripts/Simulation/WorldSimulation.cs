@@ -10,11 +10,13 @@ namespace Eden.Simulation
     /// </summary>
     public sealed class WorldSimulation
     {
+        private const float FullTurn = 2f * MathF.PI;
         private static readonly SimulationEvent FoodRespawn = new SimulationEvent(SimulationEventKind.FoodRespawn);
 
         private readonly TickScheduler<SimulationEvent> agenda;
         private readonly List<ScheduledEvent<SimulationEvent>> dueEvents = new List<ScheduledEvent<SimulationEvent>>();
         private readonly List<CreatureDeath> deaths = new List<CreatureDeath>();
+        private readonly List<CreatureBirth> births = new List<CreatureBirth>();
         private Observation[] observations = Array.Empty<Observation>();
         private CreatureAction[] actions = Array.Empty<CreatureAction>();
         private float[] foodGains = Array.Empty<float>();
@@ -29,12 +31,16 @@ namespace Eden.Simulation
             World = world ?? throw new ArgumentNullException(nameof(world));
             this.agenda = agenda;
 
-            // Room for the most there can be (food is never created, only respawned; creatures are never born), so
-            // ticks do not allocate as lists grow; a new isolated episode is allocation-free from its first tick.
-            agenda.Reserve(world.Config.InitialFood);
-            dueEvents.Capacity = world.Config.InitialFood;
-            deaths.Capacity = Math.Max(world.Config.InitialPopulation, world.Creatures.Count);
-            EnsureCapacity(world.Creatures.Count);
+            // Room for the most there can be (food is never created, only respawned; creatures are born only up to the
+            // cap), so ticks do not allocate as lists grow; a new isolated episode is allocation-free from its first tick.
+            var config = world.Config;
+            var most = Math.Max(config.Reproduction ? config.PopulationCap : config.InitialPopulation, world.Creatures.Count);
+            agenda.Reserve(config.InitialFood);
+            dueEvents.Capacity = config.InitialFood;
+            deaths.Capacity = most;
+            if (config.Reproduction)
+                births.Capacity = most;
+            EnsureCapacity(most);
         }
 
         /// <summary>
@@ -74,6 +80,15 @@ namespace Eden.Simulation
         /// <summary>Creatures that died during the last tick, in id order.</summary>
         public IReadOnlyList<CreatureDeath> LastDeaths => deaths;
 
+        /// <summary>Creatures born during the last tick, in id order (their parents' order).</summary>
+        public IReadOnlyList<CreatureBirth> LastBirths => births;
+
+        /// <summary>Births refused during the last tick because the population was at its cap; nobody paid for them.</summary>
+        public int LastBirthsRefused { get; private set; }
+
+        /// <summary>What children inherit; null gives every child its parent's body genes. Never saved: set it again.</summary>
+        public IHeredity Heredity { get; set; }
+
         public int LastFoodEaten { get; private set; }
 
         /// <summary>Observation values corrected by <see cref="ObservationLimits.Sanitize"/> in the last tick.</summary>
@@ -89,7 +104,7 @@ namespace Eden.Simulation
 
         /// <summary>
         /// Runs one tick: agenda, observe all (checked against <see cref="ObservationLimits"/>), decide in id order,
-        /// move, eat, energy/age/death, cleanup.
+        /// move, eat, energy/age/death, births (when the config allows reproduction), cleanup.
         /// </summary>
         public void Step(ICreatureController controller)
         {
@@ -102,6 +117,8 @@ namespace Eden.Simulation
             var tick = World.Tick;
             var creatures = World.Creatures;
             deaths.Clear();
+            births.Clear();
+            LastBirthsRefused = 0;
             LastFoodEaten = 0;
             LastCorrectedInputValues = 0;
 
@@ -125,6 +142,8 @@ namespace Eden.Simulation
 
             ResolveFeeding(tick, count);
             ApplyEnergyAndAging(tick, count);
+            if (config.Reproduction)
+                ApplyBirths(tick, count);
 
             World.RemoveEatenFood();
             World.RemoveDeadCreatures();
@@ -217,6 +236,8 @@ namespace Eden.Simulation
                 var energy = creature.Energy + foodGains[i] - cost;
                 creature.Energy = energy < 0f ? 0f : energy > body.MaxEnergy ? body.MaxEnergy : energy;
                 creature.AgeTicks++;
+                if (creature.ReproductionCooldownTicks > 0)
+                    creature.ReproductionCooldownTicks--;
 
                 var cause = creature.Energy <= 0f ? DeathCause.Starvation
                     : creature.AgeTicks >= config.MaxAgeTicks ? DeathCause.OldAge
@@ -227,6 +248,49 @@ namespace Eden.Simulation
                 deaths.Add(new CreatureDeath(creature.Id, tick, cause));
             }
         }
+
+        // Parents in id order, children appended (so id order holds). A parent must be alive, mature, out of cooldown and
+        // hold the configured share of its capacity, and must keep some energy after paying. At the cap the birth is
+        // refused before anything is drawn or paid. The child gets min(share of the parent's energy, its capacity);
+        // the parent loses that plus the cost: no energy is created. Placement draws angle then heading from the spawn
+        // stream.
+        private void ApplyBirths(long tick, int count)
+        {
+            var config = World.Config;
+            var creatures = World.Creatures;
+            var alive = count - deaths.Count;
+            for (var i = 0; i < count; i++)
+            {
+                var parent = creatures[i];
+                if (!parent.IsAlive || parent.AgeTicks < config.MaturityTicks || parent.ReproductionCooldownTicks > 0 ||
+                    parent.Energy < config.ReproductionEnergyFraction * parent.Body.MaxEnergy ||
+                    parent.Energy * (1f - config.OffspringEnergyFraction) - config.ReproductionCost <= 0f)
+                    continue;
+                if (alive >= config.PopulationCap)
+                {
+                    LastBirthsRefused++;
+                    continue;
+                }
+
+                var childId = new CreatureId(World.NextCreatureId);
+                var genes = Heredity?.Conceive(parent, childId) ?? parent.Genes;
+                var capacity = genes.IsNeutral ? World.ReferenceBody.MaxEnergy : CreatureBody.Express(config, genes).MaxEnergy;
+                var transfer = Math.Min(parent.Energy * config.OffspringEnergyFraction, capacity);
+                parent.Energy -= transfer + config.ReproductionCost;
+                parent.ReproductionCooldownTicks = config.ReproductionCooldownTicks;
+
+                var random = World.SpawnRandom;
+                var angle = random.NextFloat() * FullTurn;
+                var heading = random.NextFloat() * FullTurn;
+                var x = Clamp(parent.Position.X + MathF.Cos(angle) * config.BirthDistance, config.ArenaWidth);
+                var y = Clamp(parent.Position.Y + MathF.Sin(angle) * config.BirthDistance, config.ArenaHeight);
+                var child = World.AddOffspring(parent, new Float2(x, y), heading, transfer, genes);
+                births.Add(new CreatureBirth(child.Id, parent.Id, tick));
+                alive++;
+            }
+        }
+
+        private static float Clamp(float value, float size) => value < 0f ? 0f : value > size ? size : value;
 
         private void EnsureCapacity(int count)
         {

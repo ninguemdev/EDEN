@@ -19,12 +19,14 @@ namespace Eden.Persistence
     /// invariant culture and the shortest text that reads back to the same bits. Body genes came later: expressed genes,
     /// a genome's and a creature's body genes and the world's body cost exponents are written only when they differ
     /// from the fixed body and the default costs, so older checkpoints (genome schema 1, config schema 3, always the
-    /// fixed body, where costs change nothing) read as the same run.
+    /// fixed body, where costs change nothing) read as the same run. Reproduction came after that: the reproduction
+    /// settings, a creature's parent, generation and cooldown and the genomes of creatures born in a shared world are
+    /// written only when reproduction is on or they are set, so config schema 4 files read the same way.
     /// </summary>
     public static class CheckpointCodec
     {
         public const string Format = "eden-checkpoint";
-        public const int SchemaVersion = 3;
+        public const int SchemaVersion = 4;
 
         /// <summary>Limits checked before allocating; generous for the lab, small enough to refuse absurd files.</summary>
         public const int MaxLineageEntries = 8000000;
@@ -120,7 +122,7 @@ namespace Eden.Persistence
                 // A schema 1 genome is today's genome with neutral body genes, and a schema 3 config is today's config
                 // with the default body costs, which do nothing for the fixed body those files always have.
                 if (actual.Kind == JsonKind.Number && (expected.Key == "genomeSchema" && actual.Text == "1" ||
-                                                       expected.Key == "configSchema" && actual.Text == "3"))
+                                                       expected.Key == "configSchema" && (actual.Text == "3" || actual.Text == "4")))
                     continue;
                 if (actual.Kind != expected.Value.Kind || actual.Text != expected.Value.Text)
                     throw new CheckpointException($"Saved with {expected.Key} {actual.Text}; this build uses " +
@@ -257,6 +259,20 @@ namespace Eden.Persistence
             AddIfNotDefault(settings, "speedCostExponent", s.SpeedCostExponent, Defaults.SpeedCostExponent);
             AddIfNotDefault(settings, "sensorCostExponent", s.SensorCostExponent, Defaults.SensorCostExponent);
             AddIfNotDefault(settings, "efficiencyPowerExponent", s.EfficiencyPowerExponent, Defaults.EfficiencyPowerExponent);
+            if (s.Reproduction)
+            {
+                settings.Add("reproduction", JsonValue.NewObject()
+                    .Add("populationCap", JsonValue.Of(s.PopulationCap))
+                    .Add("maturitySeconds", JsonValue.Of(s.MaturitySeconds))
+                    .Add("energyFraction", JsonValue.Of(s.ReproductionEnergyFraction))
+                    .Add("offspringEnergyFraction", JsonValue.Of(s.OffspringEnergyFraction))
+                    .Add("cost", JsonValue.Of(s.ReproductionCost))
+                    .Add("cooldownSeconds", JsonValue.Of(s.ReproductionCooldownSeconds))
+                    .Add("birthDistance", JsonValue.Of(s.BirthDistance))
+                    .Add("mutationProbability", JsonValue.Of(s.BirthMutationProbability))
+                    .Add("mutationSigma", JsonValue.Of(s.BirthMutationSigma)));
+            }
+
             return settings;
         }
 
@@ -299,6 +315,22 @@ namespace Eden.Persistence
                 SensorCostExponent = FloatOr(saved, "sensorCostExponent", Defaults.SensorCostExponent),
                 EfficiencyPowerExponent = FloatOr(saved, "efficiencyPowerExponent", Defaults.EfficiencyPowerExponent)
             };
+            // Absent means off; the other reproduction values then keep their defaults and change nothing.
+            var reproduction = saved.TryGet("reproduction");
+            if (reproduction != null)
+            {
+                settings.Reproduction = true;
+                settings.PopulationCap = reproduction["populationCap"].Int();
+                settings.MaturitySeconds = reproduction["maturitySeconds"].Float();
+                settings.ReproductionEnergyFraction = reproduction["energyFraction"].Float();
+                settings.OffspringEnergyFraction = reproduction["offspringEnergyFraction"].Float();
+                settings.ReproductionCost = reproduction["cost"].Float();
+                settings.ReproductionCooldownSeconds = reproduction["cooldownSeconds"].Float();
+                settings.BirthDistance = reproduction["birthDistance"].Float();
+                settings.BirthMutationProbability = reproduction["mutationProbability"].Float();
+                settings.BirthMutationSigma = reproduction["mutationSigma"].Float();
+            }
+
             new SimulationConfig(settings);
             return settings;
         }
@@ -308,13 +340,48 @@ namespace Eden.Persistence
         private static JsonValue EncodeState(Checkpoint checkpoint)
         {
             var shared = checkpoint.SharedWorld;
+            JsonValue sharedWorld = JsonValue.Null();
+            if (shared != null)
+            {
+                sharedWorld = JsonValue.NewObject()
+                    .Add("world", EncodeWorld(shared.World))
+                    .Add("brains", EncodeBrains(shared.Brains));
+                if (shared.BornGenomes.Count > 0)
+                {
+                    var genomes = JsonValue.NewArray();
+                    foreach (var entry in shared.BornGenomes)
+                        genomes.Add(EncodeGenome(entry.Genome, JsonValue.NewObject().Add("creature", JsonValue.Of(entry.Creature.Value))));
+                    sharedWorld.Add("bornGenomes", genomes);
+                }
+            }
+
             return JsonValue.NewObject()
                 .Add("evolution", checkpoint.Evolution == null ? JsonValue.Null() : EncodeEvolution(checkpoint.Evolution))
-                .Add("sharedWorld", shared == null
-                    ? JsonValue.Null()
-                    : JsonValue.NewObject()
-                        .Add("world", EncodeWorld(shared.World))
-                        .Add("brains", EncodeBrains(shared.Brains)));
+                .Add("sharedWorld", sharedWorld);
+        }
+
+        // Weights (only the MVP network) and body genes when they are not neutral, added to <paramref name="saved"/>.
+        private static JsonValue EncodeGenome(Genome genome, JsonValue saved)
+        {
+            var weights = JsonValue.NewArray();
+            for (var w = 0; w < genome.WeightCount; w++)
+                weights.Add(JsonValue.Of(genome.GetWeight(w)));
+            saved.Add("weights", weights);
+            if (!genome.Body.IsNeutral)
+                saved.Add("body", EncodeBodyGenes(genome.Body));
+            return saved;
+        }
+
+        private static Genome DecodeGenome(JsonValue saved)
+        {
+            var expected = NetworkTopology.Mlp12x16x3;
+            var values = saved["weights"].ArrayOf(expected.ParameterCount);
+            if (values.Count != expected.ParameterCount)
+                throw new CheckpointException($"{values.Path}: {expected} needs {expected.ParameterCount} weights.");
+            var weights = new float[values.Count];
+            for (var w = 0; w < weights.Length; w++)
+                weights[w] = values[w].Float();
+            return new Genome(expected, weights, DecodeBodyGenes(saved.TryGet("body")));
         }
 
         private static Checkpoint DecodeCheckpoint(JsonValue config, JsonValue state)
@@ -336,10 +403,19 @@ namespace Eden.Persistence
             {
                 var settings = DecodeSettings(config["sharedWorld"]);
                 var saved = state["sharedWorld"];
+                var most = settings.Reproduction ? settings.PopulationCap : settings.InitialPopulation;
+                var born = saved.TryGet("bornGenomes");
+                var genomes = new List<BornGenome>();
+                if (born != null)
+                {
+                    var values = born.ArrayOf(most);
+                    for (var i = 0; i < values.Count; i++)
+                        genomes.Add(new BornGenome(new CreatureId(values[i]["creature"].Int(1)), DecodeGenome(values[i])));
+                }
+
                 shared = new SharedWorldSnapshot(settings,
-                    DecodeWorld(saved["world"], settings.InitialPopulation, settings.InitialFood,
-                        new SimulationConfig(settings)),
-                    DecodeBrains(saved["brains"]));
+                    DecodeWorld(saved["world"], most, settings.InitialFood, new SimulationConfig(settings)),
+                    DecodeBrains(saved["brains"]), genomes);
             }
             else if (!state["sharedWorld"].IsNull)
             {
@@ -654,6 +730,12 @@ namespace Eden.Persistence
                     .Add("energy", JsonValue.Of(creature.Energy))
                     .Add("ageTicks", JsonValue.Of(creature.AgeTicks))
                     .Add("foodEnergyEaten", JsonValue.Of(creature.FoodEnergyEaten));
+                if (creature.Parent.HasValue)
+                    saved.Add("parent", JsonValue.Of(creature.Parent.Value.Value));
+                if (creature.Generation != 0)
+                    saved.Add("generation", JsonValue.Of(creature.Generation));
+                if (creature.ReproductionCooldownTicks != 0)
+                    saved.Add("reproductionCooldownTicks", JsonValue.Of(creature.ReproductionCooldownTicks));
                 if (!creature.Genes.IsNeutral)
                     saved.Add("bodyGenes", EncodeBodyGenes(creature.Genes));
                 creatures.Add(saved);
@@ -708,7 +790,10 @@ namespace Eden.Persistence
                 {
                     Velocity = ReadPair(value["velocity"]),
                     AgeTicks = value["ageTicks"].Long(0),
-                    FoodEnergyEaten = value["foodEnergyEaten"].Float()
+                    FoodEnergyEaten = value["foodEnergyEaten"].Float(),
+                    Parent = value.TryGet("parent") is JsonValue parent ? new CreatureId(parent.Int(1)) : (CreatureId?)null,
+                    Generation = value.TryGet("generation")?.Int(0) ?? 0,
+                    ReproductionCooldownTicks = value.TryGet("reproductionCooldownTicks")?.Long(0) ?? 0L
                 };
             }
 

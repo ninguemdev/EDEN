@@ -71,7 +71,10 @@ namespace Eden.Simulation
                     Velocity = creature.Velocity,
                     AgeTicks = creature.AgeTicks,
                     FoodEnergyEaten = creature.FoodEnergyEaten,
-                    DeathCause = creature.DeathCause
+                    DeathCause = creature.DeathCause,
+                    Parent = creature.Parent,
+                    Generation = creature.Generation,
+                    ReproductionCooldownTicks = creature.ReproductionCooldownTicks
                 };
 
         private static FoodState Clone(FoodState item)
