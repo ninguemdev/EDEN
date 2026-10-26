@@ -20,6 +20,7 @@ namespace Eden.Simulation
         private Observation[] observations = Array.Empty<Observation>();
         private CreatureAction[] actions = Array.Empty<CreatureAction>();
         private float[] foodGains = Array.Empty<float>();
+        private EnergyFlows energy;
 
         public WorldSimulation(WorldState world)
             : this(world, new TickScheduler<SimulationEvent>())
@@ -91,6 +92,12 @@ namespace Eden.Simulation
 
         public int LastFoodEaten { get; private set; }
 
+        /// <summary>Food items put back by the agenda in the last tick.</summary>
+        public int LastFoodRespawned { get; private set; }
+
+        /// <summary>Energy flows of the last tick; they explain exactly how the creatures' total energy changed.</summary>
+        public EnergyFlows LastEnergy => energy;
+
         /// <summary>Observation values corrected by <see cref="ObservationLimits.Sanitize"/> in the last tick.</summary>
         public int LastCorrectedInputValues { get; private set; }
 
@@ -120,6 +127,8 @@ namespace Eden.Simulation
             births.Clear();
             LastBirthsRefused = 0;
             LastFoodEaten = 0;
+            LastFoodRespawned = 0;
+            energy = default;
             LastCorrectedInputValues = 0;
 
             RunDueEvents(tick);
@@ -178,6 +187,7 @@ namespace Eden.Simulation
                 {
                     case SimulationEventKind.FoodRespawn:
                         World.AddFood(WorldFactory.RandomArenaPosition(World.SpawnRandom, World.Config), World.Config.FoodEnergy);
+                        LastFoodRespawned++;
                         break;
                     default:
                         throw new InvalidOperationException($"Unknown event kind {due.Payload.Kind}.");
@@ -233,8 +243,14 @@ namespace Eden.Simulation
                 var body = creature.Body;
                 var cost = config.TickDuration *
                            (body.MetabolismPerSecond + body.MovementCostPerSecond * effort + body.SensorCostPerSecond);
-                var energy = creature.Energy + foodGains[i] - cost;
-                creature.Energy = energy < 0f ? 0f : energy > body.MaxEnergy ? body.MaxEnergy : energy;
+                // Kept as one expression: splitting it would round the intermediate sum and change every run.
+                var left = creature.Energy + foodGains[i] - cost;
+                // A creature pays at most what it holds; food that does not fit is lost.
+                energy.Food += foodGains[i];
+                energy.Spent += left < 0f ? (double)creature.Energy + foodGains[i] : cost;
+                if (left > body.MaxEnergy)
+                    energy.Overflow += left - body.MaxEnergy;
+                creature.Energy = left < 0f ? 0f : left > body.MaxEnergy ? body.MaxEnergy : left;
                 creature.AgeTicks++;
                 if (creature.ReproductionCooldownTicks > 0)
                     creature.ReproductionCooldownTicks--;
@@ -245,6 +261,7 @@ namespace Eden.Simulation
                 if (cause == DeathCause.None)
                     continue;
                 creature.DeathCause = cause;
+                energy.CarriedAwayByDeaths += creature.Energy;
                 deaths.Add(new CreatureDeath(creature.Id, tick, cause));
             }
         }
@@ -278,6 +295,8 @@ namespace Eden.Simulation
                 var transfer = Math.Min(parent.Energy * config.OffspringEnergyFraction, capacity);
                 parent.Energy -= transfer + config.ReproductionCost;
                 parent.ReproductionCooldownTicks = config.ReproductionCooldownTicks;
+                energy.Transferred += transfer;
+                energy.BirthCosts += config.ReproductionCost;
 
                 var random = World.SpawnRandom;
                 var angle = random.NextFloat() * FullTurn;
