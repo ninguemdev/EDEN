@@ -8,6 +8,7 @@
                 <ui:DropdownField name="mode-field" label="Modo" class="lab-field" />
                 <ui:DropdownField name="preset-field" label="Preset" class="lab-field" />
                 <ui:DropdownField name="brain-field" label="Cérebro" class="lab-field" />
+                <ui:DropdownField name="body-field" label="Corpo" class="lab-field" />
                 <ui:IntegerField name="seed-field" label="Seed" value="1" class="lab-field" />
                 <ui:VisualElement class="lab-row">
                     <ui:Button name="start-button" text="Iniciar" class="lab-button lab-button--primary" />

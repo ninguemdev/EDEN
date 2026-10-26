@@ -45,7 +45,7 @@ namespace Eden.Presentation
     /// reaches the simulation. In evolution mode the world shown is the isolated episode being evaluated. The run can
     /// be saved to and loaded from a checkpoint between ticks.
     /// Command line (builds): -eden-mode shared|evolution, -eden-preset minimal|standard|stress,
-    /// -eden-brain heuristic|random|neural, -eden-seed N, -eden-select ID, -eden-max, and for a measured run
+    /// -eden-brain heuristic|random|neural, -eden-body fixed|evolving, -eden-seed N, -eden-select ID, -eden-max, and for a measured run
     /// -eden-benchmark SECONDS [-eden-benchmark-warmup SECONDS] [-eden-benchmark-output DIR] (see <see cref="LabBenchmark"/>).
     /// </summary>
     public sealed class LabRunner : MonoBehaviour
@@ -62,6 +62,9 @@ namespace Eden.Presentation
         [SerializeField] private LabMode mode = LabMode.SharedWorld;
         [SerializeField, Range(0, 2)] private int preset = 1;
         [SerializeField] private LabBrainKind brain = LabBrainKind.Heuristic;
+
+        [Tooltip("A new evolution expresses and mutates all body genes; off keeps the fixed reference body (control).")]
+        [SerializeField] private bool evolvingBody;
         [SerializeField] private bool writeMetrics = true;
         [SerializeField] private WorldView worldView;
         [SerializeField] private LabHud hud;
@@ -84,6 +87,9 @@ namespace Eden.Presentation
         public FixedStepClock Clock { get; private set; }
         public LabMode Mode => mode;
         public LabBrainKind BrainKind => brain;
+
+        /// <summary>Body choice for the next evolution (see <see cref="LabChoice.EvolvingBody"/>).</summary>
+        public bool EvolvingBody => evolvingBody;
         public ExperimentPreset Preset => ExperimentPreset.All[preset];
         public int Seed => seed;
 
@@ -126,6 +132,7 @@ namespace Eden.Presentation
             preset = Mathf.Clamp(choice.Preset, 0, ExperimentPreset.All.Count - 1);
             seed = Math.Max(0, choice.Seed);
             brain = choice.Brain == LabBrainKind.Evolved && Evolution == null ? LabBrainKind.Heuristic : choice.Brain;
+            evolvingBody = choice.EvolvingBody;
             StartRun();
         }
 
@@ -143,7 +150,7 @@ namespace Eden.Presentation
                 StartSharedWorld();
             ResetClock(Simulation.World.Config.TicksPerSecond);
             worldView.Bind(Simulation.World);
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain), Evolution != null);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody), Evolution != null);
             RefreshHud();
         }
 
@@ -156,7 +163,7 @@ namespace Eden.Presentation
             mode = LabMode.IsolatedEvolution;
             ClearSelection();
             ShowEpisode();
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain), true);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody), true);
             RefreshHud();
         }
 
@@ -252,6 +259,7 @@ namespace Eden.Presentation
             preset = loadedPreset;
             seed = (int)saved.Seed;
             brain = loadedBrain;
+            evolvingBody = session != null && session.Evolution.Plan.ExpressedBodyGenes != BodyGeneSet.None;
             Evolution = session;
             EvolutionDirectory = null;
             MetricsDirectory = null;
@@ -276,7 +284,7 @@ namespace Eden.Presentation
             hud?.ShowNetwork(null);
             ResetClock(world.World.Config.TicksPerSecond);
             worldView.Bind(world.World);
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain), Evolution != null);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody), Evolution != null);
             ShowCheckpointStatus(LabText.CheckpointLoaded(CheckpointPath, world.World.Tick, EvolutionShown, problem));
             return true;
         }
@@ -570,7 +578,13 @@ namespace Eden.Presentation
 
             var config = new SimulationConfig(runSettings);
             sharedSettings = runSettings;
-            Simulation = new WorldSimulation(WorldFactory.CreateInitial(config));
+            // Evolved creatures live with the bodies their genes express in the evolution; any other brain gets the
+            // reference body.
+            var individuals = sharedIndividuals;
+            var plan = Evolution?.Evolution.Plan;
+            Simulation = new WorldSimulation(individuals == null
+                ? WorldFactory.CreateInitial(config)
+                : WorldFactory.CreateInitial(config, i => plan.ExpressedGenes(individuals[i].Genome.Body)));
             controller = CreateController(config, brain, sharedIndividuals, out var name);
             BrainName = name;
             metrics = new MetricsRecorder(config, config.TicksPerSecond);
@@ -584,7 +598,9 @@ namespace Eden.Presentation
             evolutionLog = null;
             EvolutionDirectory = null;
             sharedIndividuals = null;
-            Evolution = new EvolutionSession(Preset.Evolution((ulong)seed));
+            var evolutionSettings = Preset.Evolution((ulong)seed);
+            evolutionSettings.ExpressedBodyGenes = evolvingBody ? BodyGeneSet.All : BodyGeneSet.None;
+            Evolution = new EvolutionSession(evolutionSettings);
             BrainName = MlpBrain.BrainName;
             if (writeMetrics)
                 OpenEvolutionLog();
@@ -755,6 +771,9 @@ namespace Eden.Presentation
                         break;
                     case "-eden-mode" when value == "evolution":
                         mode = LabMode.IsolatedEvolution;
+                        break;
+                    case "-eden-body" when value == "fixed" || value == "evolving":
+                        evolvingBody = value == "evolving";
                         break;
                     case "-eden-preset":
                         for (var p = 0; p < ExperimentPreset.All.Count; p++)

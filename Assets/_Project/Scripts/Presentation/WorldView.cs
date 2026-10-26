@@ -5,8 +5,8 @@ using UnityEngine;
 namespace Eden.Presentation
 {
     /// <summary>
-    /// Draws the world with pooled sprites: arena, food and creatures (body colored by energy, a nose dot showing
-    /// heading, a ring on the selected one). Creatures are drawn between their pose before the last tick (see
+    /// Draws the world with pooled sprites: arena, food and creatures (body sized by its eat radius and colored by the
+    /// share of its own capacity it holds, a nose dot showing heading, a ring and the sensor range on the selected one). Creatures are drawn between their pose before the last tick (see
     /// <see cref="RememberPreviousTick"/>) and their current pose, so motion is smooth at any frame rate although ticks
     /// run at 20 Hz. Read-only: it never changes simulation state and never draws from simulation random streams.
     /// Arena units map 1:1 to Unity world units.
@@ -23,6 +23,7 @@ namespace Eden.Presentation
         private static readonly Color FedColor = new Color32(94, 214, 168, 255);
         private static readonly Color NoseColor = new Color32(14, 26, 31, 255);
         private static readonly Color SelectionColor = Color.white;
+        private static readonly Color SensorColor = new Color(1f, 1f, 1f, 0.06f);
 
         [SerializeField] private Camera targetCamera;
         [SerializeField] private Sprite circleSprite;
@@ -78,6 +79,24 @@ namespace Eden.Presentation
             return false;
         }
 
+        /// <summary>
+        /// Size the creature is drawn at relative to the reference body, and the diameter of its sensor disk in arena
+        /// units (0 unless it is selected).
+        /// </summary>
+        public bool TryGetDrawnBody(CreatureId creature, out float scale, out float sensorDiameter)
+        {
+            if (creatures.TryGetValue(creature, out var visual))
+            {
+                scale = visual.Root.transform.localScale.x;
+                sensorDiameter = visual.Sensor.enabled ? visual.Sensor.transform.localScale.x * scale : 0f;
+                return true;
+            }
+
+            scale = 0f;
+            sensorDiameter = 0f;
+            return false;
+        }
+
         /// <summary>Where a creature was last drawn, in arena units and degrees.</summary>
         public bool TryGetDrawnPose(CreatureId creature, out Vector2 position, out float headingDegrees)
         {
@@ -130,7 +149,7 @@ namespace Eden.Presentation
         public void Render(WorldState world, CreatureId? selected, float fraction = 1f)
         {
             frame++;
-            var maxEnergy = world.Config.MaxEnergy;
+            var referenceRadius = world.Config.EatRadius;
             var interpolate = fraction < 1f && HasPrevious(world);
             LastFraction = interpolate ? Mathf.Clamp01(fraction) : 1f;
             // Indexed loops: a foreach over the read-only lists would allocate an enumerator every frame.
@@ -157,8 +176,15 @@ namespace Eden.Presentation
 
                 visual.Root.transform.localPosition = new Vector3(x, y, 0f);
                 visual.Root.transform.localRotation = Quaternion.Euler(0f, 0f, heading);
-                visual.Body.color = Color.Lerp(HungryColor, FedColor, Mathf.Clamp01(creature.Energy / maxEnergy));
-                visual.Selection.enabled = selected.HasValue && selected.Value == creature.Id;
+                var body = creature.Body;
+                var size = body.EatRadius / referenceRadius;
+                visual.Root.transform.localScale = new Vector3(size, size, 1f);
+                visual.Body.color = Color.Lerp(HungryColor, FedColor, Mathf.Clamp01(creature.Energy / body.MaxEnergy));
+                var isSelected = selected.HasValue && selected.Value == creature.Id;
+                visual.Selection.enabled = isSelected;
+                visual.Sensor.enabled = isSelected;
+                if (isSelected)
+                    visual.Sensor.transform.localScale = Vector3.one * (2f * body.SensorRange / size);
             }
 
             for (var i = 0; i < world.Food.Count; i++)
@@ -234,7 +260,9 @@ namespace Eden.Presentation
             var selection = CreateRenderer("Selection", root.transform, circleSprite, SelectionColor, 1);
             selection.transform.localScale = Vector3.one * CreatureDiameter * 1.5f;
             selection.enabled = false;
-            return new CreatureVisual(root, body, selection);
+            var sensor = CreateRenderer("Sensor", root.transform, circleSprite, SensorColor, -1);
+            sensor.enabled = false;
+            return new CreatureVisual(root, body, selection, sensor);
         }
 
         private FoodVisual CreateFoodVisual()
@@ -275,16 +303,20 @@ namespace Eden.Presentation
 
         private sealed class CreatureVisual
         {
-            public CreatureVisual(GameObject root, SpriteRenderer body, SpriteRenderer selection)
+            public CreatureVisual(GameObject root, SpriteRenderer body, SpriteRenderer selection, SpriteRenderer sensor)
             {
                 Root = root;
                 Body = body;
                 Selection = selection;
+                Sensor = sensor;
             }
 
             public GameObject Root { get; }
             public SpriteRenderer Body { get; }
             public SpriteRenderer Selection { get; }
+
+            /// <summary>Disk of the sensor range, shown for the selected creature only.</summary>
+            public SpriteRenderer Sensor { get; }
             public int Frame { get; set; }
         }
 

@@ -65,6 +65,9 @@ namespace Eden.Presentation
             AppendSpeed(text, clock);
             text.AppendLine($"Preset {PresetLabel(preset)}  ·  Seed do experimento {plan.ExperimentSeed}  ·  " +
                             $"validação a cada {session.ValidationInterval} gerações em {plan.ValidationSeedCount} seeds separadas");
+            text.AppendLine(plan.ExpressedBodyGenes == BodyGeneSet.None
+                ? "Corpo fixo (controle): todos com o corpo de referência"
+                : "Corpo evolutivo: tamanho, velocidade, sensor e eficiência herdados e mutados, cada um com custo");
 
             var last = session.LastTraining?.Summary;
             if (last != null)
@@ -131,10 +134,12 @@ namespace Eden.Presentation
             text.AppendLine(brainName == MlpBrain.BrainName
                 ? "Cérebro: rede 12-16-3 com genoma próprio"
                 : "Cérebro: " + BrainLabel(brainName));
-            text.AppendLine($"Energia {creature.Energy:0.0} / {config.MaxEnergy:0}");
+            text.AppendLine($"Energia {creature.Energy:0.0} / {creature.Body.MaxEnergy:0.#}");
             text.AppendLine($"Idade {creature.AgeTicks * (double)config.TickDuration:0.0} s de {config.MaxAgeSeconds:0} s");
             text.AppendLine($"Comida ingerida {creature.FoodEnergyEaten:0} de energia");
             text.AppendLine($"Posição ({creature.Position.X:0.0}; {creature.Position.Y:0.0}) — só inspeção");
+            text.AppendLine();
+            AppendBody(text, creature, config);
             text.AppendLine();
             text.AppendLine("Sensores (entrada do cérebro)");
             text.AppendLine($"energia {sensed.Energy:0.00}  idade {sensed.Age:0.00}");
@@ -148,6 +153,31 @@ namespace Eden.Presentation
             text.AppendLine("Ação mantida");
             text.Append($"propulsão {action.Thrust:0.00}  giro {action.Turn:0.00}  lateral {action.Strafe:0.00}");
             return text.ToString();
+        }
+
+        // Each trait with its factor of the reference, then what the body spends per second at rest and at full push.
+        private static void AppendBody(StringBuilder text, CreatureState creature, SimulationConfig config)
+        {
+            var body = creature.Body;
+            if (creature.Genes.IsNeutral)
+            {
+                text.AppendLine("Corpo de referência (genes neutros)");
+            }
+            else
+            {
+                var genes = creature.Genes;
+                text.AppendLine($"Corpo (genes tam. {genes.Size:+0.00;-0.00;0} vel. {genes.Speed:+0.00;-0.00;0} " +
+                                $"sensor {genes.Sensor:+0.00;-0.00;0} efic. {genes.Efficiency:+0.00;-0.00;0})");
+                text.AppendLine($"raio {body.EatRadius:0.00} (×{body.EatRadius / config.EatRadius:0.00})  " +
+                                $"capacidade {body.MaxEnergy:0} (×{body.MaxEnergy / config.MaxEnergy:0.00})");
+                text.AppendLine($"vel. máx. {body.MaxSpeed:0.0} (×{body.MaxSpeed / config.MaxSpeed:0.00})  " +
+                                $"aceleração {body.MaxAcceleration:0.0} (×{body.MaxAcceleration / config.MaxAcceleration:0.00})");
+                text.AppendLine($"alcance {body.SensorRange:0.0} (×{body.SensorRange / config.SensorRange:0.00})");
+            }
+
+            var resting = body.MetabolismPerSecond + body.SensorCostPerSecond;
+            text.AppendLine($"Gasto/s: repouso {resting:0.00} (metabolismo {body.MetabolismPerSecond:0.00} + sensor " +
+                            $"{body.SensorCostPerSecond:0.00}), propulsão máxima +{body.MovementCostPerSecond:0.00}");
         }
 
         public static string DeadCreature(CreatureId id, CreatureDeath? death)
