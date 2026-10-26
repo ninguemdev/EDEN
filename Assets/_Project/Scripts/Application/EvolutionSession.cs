@@ -144,6 +144,9 @@ namespace Eden.Application
         /// <summary>Ticks simulated over all episodes of the session.</summary>
         public long TotalTicks { get; private set; }
 
+        /// <summary>Episodes finished by this object (not saved: a restored session counts from its restore).</summary>
+        public long EpisodesRun { get; private set; }
+
         /// <summary>Raised with every training and validation report as soon as it is complete.</summary>
         public event Action<GenerationReport> ReportCompleted;
 
@@ -174,7 +177,9 @@ namespace Eden.Application
             var ran = 0L;
             while (ran < maxTicks)
             {
+                var completed = Job.CompletedEpisodes;
                 ran += Job.Advance(maxTicks - ran);
+                EpisodesRun += Job.CompletedEpisodes - completed;
                 if (!Job.IsComplete)
                     break;
                 CompleteJob();

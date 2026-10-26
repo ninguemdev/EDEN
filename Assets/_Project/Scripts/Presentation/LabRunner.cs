@@ -45,7 +45,8 @@ namespace Eden.Presentation
     /// reaches the simulation. In evolution mode the world shown is the isolated episode being evaluated. The run can
     /// be saved to and loaded from a checkpoint between ticks.
     /// Command line (builds): -eden-mode shared|evolution, -eden-preset minimal|standard|stress,
-    /// -eden-brain heuristic|random|neural, -eden-seed N, -eden-select ID, -eden-max.
+    /// -eden-brain heuristic|random|neural, -eden-seed N, -eden-select ID, -eden-max, and for a measured run
+    /// -eden-benchmark SECONDS [-eden-benchmark-warmup SECONDS] [-eden-benchmark-output DIR] (see <see cref="LabBenchmark"/>).
     /// </summary>
     public sealed class LabRunner : MonoBehaviour
     {
@@ -77,6 +78,7 @@ namespace Eden.Presentation
         private CreatureDeath? selectedDeath;
         private float hudTimer;
         private float networkTimer;
+        private LabBenchmark benchmark;
 
         public WorldSimulation Simulation { get; private set; }
         public FixedStepClock Clock { get; private set; }
@@ -100,6 +102,9 @@ namespace Eden.Presentation
         /// <summary>Export of the lab's evolution; kept open while the shared world shows its population.</summary>
         public string EvolutionDirectory { get; private set; }
         public WorldView View => worldView;
+
+        /// <summary>Directory of the performance report once a measured run has finished; null otherwise.</summary>
+        public string BenchmarkDirectory => benchmark?.Directory;
         public LabHud Hud => hud;
 
         /// <summary>File of Salvar/Carregar (persistentDataPath/Checkpoints/lab.json by default); its backup sits next to it.</summary>
@@ -396,10 +401,29 @@ namespace Eden.Presentation
             metricsLog = null;
         }
 
+        /// <summary>
+        /// Measures the current run: after <paramref name="warmupSeconds"/> of real time, records
+        /// <paramref name="seconds"/> and writes a performance report (to <paramref name="output"/>, or under
+        /// persistentDataPath/Benchmarks). Metrics logs are switched off so the measurement leaves disk writes out.
+        /// </summary>
+        public void StartBenchmark(double warmupSeconds, double seconds, string output = null)
+        {
+            benchmark?.Dispose();
+            benchmark = new LabBenchmark(warmupSeconds, seconds, output);
+            writeMetrics = false;
+            CloseMetricsLog();
+            MetricsDirectory = null;
+            hud?.Root?.SetEnabled(false);
+        }
+
         private void Awake()
         {
             CheckpointPath ??= Path.Combine(UnityEngine.Application.persistentDataPath, "Checkpoints", "lab.json");
-            var selectAtStart = ApplyCommandLine(Environment.GetCommandLineArgs(), out var maxSpeed);
+            var arguments = Environment.GetCommandLineArgs();
+            var selectAtStart = ApplyCommandLine(arguments, out var maxSpeed);
+            benchmark = LabBenchmark.FromCommandLine(arguments);
+            if (benchmark != null)
+                writeMetrics = false;
             if (hud != null)
             {
                 hud.StartClicked += () => StartExperiment(hud.ReadChoice());
@@ -416,19 +440,33 @@ namespace Eden.Presentation
             StartRun();
             if (maxSpeed)
                 ToggleMaxSpeed();
+            if (benchmark != null)
+                hud?.Root?.SetEnabled(false);
             if (selectAtStart > 0)
                 Select(new CreatureId(selectAtStart));
         }
 
-        private void OnDestroy() => CloseLogs();
+        private void OnDestroy()
+        {
+            CloseLogs();
+            benchmark?.Dispose();
+        }
 
         private void Update()
         {
             HandleInput();
             var realDelta = Time.unscaledDeltaTime;
-            RunTicks(Clock.Advance(realDelta));
+            benchmark?.BeginSimulation();
+            var ticks = Clock.Advance(realDelta);
+            RunTicks(ticks);
             if (Clock.IsUnpaced && !Clock.IsPaused)
-                Clock.RecordUnpaced(realDelta, RunWithinBudget());
+            {
+                var ran = RunWithinBudget();
+                Clock.RecordUnpaced(realDelta, ran);
+                ticks += ran;
+            }
+
+            benchmark?.EndSimulation(ticks);
             if (mode == LabMode.IsolatedEvolution)
                 ShowEpisode();
 
@@ -443,6 +481,14 @@ namespace Eden.Presentation
             hudTimer += Time.unscaledDeltaTime;
             if (hudTimer >= HudRefreshSeconds)
                 RefreshHud();
+
+            // Builds quit when the measurement is written; in the Editor (tests) the run goes on.
+            if (benchmark != null && benchmark.EndFrame(realDelta, this))
+            {
+                hud?.Root?.SetEnabled(true);
+                if (!UnityEngine.Application.isEditor)
+                    UnityEngine.Application.Quit();
+            }
         }
 
         private void RunTicks(int ticks)
@@ -476,11 +522,18 @@ namespace Eden.Presentation
 
         private void StepOnce()
         {
+            if (benchmark != null)
+                Simulation.Timings = benchmark.Timings;
             Simulation.Step(controller);
-            foreach (var death in Simulation.LastDeaths)
-                if (Selected.HasValue && death.Creature == Selected.Value)
-                    selectedDeath = death;
-            controller.Forget(Simulation.LastDeaths);
+            benchmark?.RecordTick();
+            var deaths = Simulation.LastDeaths;
+            for (var i = 0; i < deaths.Count; i++)
+            {
+                if (Selected.HasValue && deaths[i].Creature == Selected.Value)
+                    selectedDeath = deaths[i];
+            }
+
+            controller.Forget(deaths);
             if (metrics.Record(Simulation))
                 metricsLog?.Append(metrics.LastSample);
         }
@@ -554,6 +607,9 @@ namespace Eden.Presentation
 
         private void HandleInput()
         {
+            // A measured run keeps the scenario it was started with, whatever is typed or clicked meanwhile.
+            if (benchmark != null && !benchmark.IsFinished)
+                return;
             var keyboard = Keyboard.current;
             if (keyboard != null && (hud == null || !hud.IsTyping))
             {

@@ -28,6 +28,13 @@ namespace Eden.Simulation
         private readonly List<ScheduledEvent<T>> queue = new List<ScheduledEvent<T>>();
 
         public int Count => queue.Count;
+
+        /// <summary>Makes room for <paramref name="capacity"/> pending events, so scheduling up to that many never allocates.</summary>
+        public void Reserve(int capacity)
+        {
+            if (queue.Capacity < capacity)
+                queue.Capacity = capacity;
+        }
         public long NextSequence { get; private set; }
 
         /// <summary>Last tick passed to <see cref="DrainDue"/>; events can only be scheduled after it.</summary>

@@ -66,8 +66,10 @@ namespace Eden.Application
 
             foodEaten += simulation.LastFoodEaten;
             TotalFoodEaten += simulation.LastFoodEaten;
-            foreach (var death in simulation.LastDeaths)
+            var deaths = simulation.LastDeaths;
+            for (var i = 0; i < deaths.Count; i++)
             {
+                var death = deaths[i];
                 if (death.Cause == DeathCause.Starvation)
                     starvationDeaths++;
                 else if (death.Cause == DeathCause.OldAge)
@@ -79,8 +81,8 @@ namespace Eden.Application
                 return false;
 
             var energy = 0f;
-            foreach (var creature in world.Creatures)
-                energy += creature.Energy;
+            for (var i = 0; i < world.Creatures.Count; i++)
+                energy += world.Creatures[i].Energy;
             var population = world.Creatures.Count;
 
             LastSample = new MetricsSample(world.Tick, (double)world.Tick / config.TicksPerSecond, population,
