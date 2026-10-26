@@ -56,8 +56,9 @@ namespace Eden.Persistence
     public sealed class SharedWorldSnapshot
     {
         /// <param name="bornGenomes">Brain genomes of the creatures born in the world (none when brains have no genome).</param>
+        /// <param name="genealogy">Every creature the world has had (none without reproduction).</param>
         public SharedWorldSnapshot(SimulationSettings settings, SimulationSnapshot world, IReadOnlyList<BrainSlotState> brains,
-            IReadOnlyList<BornGenome> bornGenomes = null)
+            IReadOnlyList<BornGenome> bornGenomes = null, IReadOnlyList<GenealogyEntry> genealogy = null)
         {
             Settings = settings?.Clone() ?? throw new ArgumentNullException(nameof(settings));
             World = world ?? throw new ArgumentNullException(nameof(world));
@@ -71,6 +72,10 @@ namespace Eden.Persistence
             for (var i = 0; i < genomes.Length; i++)
                 genomes[i] = bornGenomes[i];
             BornGenomes = genomes;
+            var entries = new GenealogyEntry[genealogy?.Count ?? 0];
+            for (var i = 0; i < entries.Length; i++)
+                entries[i] = genealogy[i];
+            Genealogy = entries;
         }
 
         /// <summary>A copy of the settings the world was created with.</summary>
@@ -79,6 +84,7 @@ namespace Eden.Persistence
         public SimulationSnapshot World { get; }
         public IReadOnlyList<BrainSlotState> Brains { get; }
         public IReadOnlyList<BornGenome> BornGenomes { get; }
+        public IReadOnlyList<GenealogyEntry> Genealogy { get; }
     }
 
     /// <summary>Where and how a checkpoint was written; recorded for people, never used to decide results.</summary>

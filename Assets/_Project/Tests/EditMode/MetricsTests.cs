@@ -51,12 +51,17 @@ namespace Eden.Tests.EditMode
             var simulation = new WorldSimulation(world);
             var recorder = new MetricsRecorder(world.Config, 10);
 
-            for (var t = 0; t < 10; t++)
+            var closed = false;
+            for (var t = 0; t < 10 && !closed; t++)
             {
                 simulation.Step(new ConstantController(CreatureAction.Idle));
-                recorder.Record(simulation);
+                closed = recorder.Record(simulation);
             }
 
+            // Both starve before the window ends; the extinction closes it at once, with their deaths.
+            Assert.That(closed, Is.True);
+            Assert.That(recorder.LastSample.Extinct, Is.True);
+            Assert.That(recorder.LastSample.Tick, Is.LessThan(10));
             Assert.That(recorder.LastSample.StarvationDeathsInWindow, Is.EqualTo(2));
             Assert.That(recorder.LastSample.OldAgeDeathsInWindow, Is.EqualTo(0));
             Assert.That(recorder.LastSample.Population, Is.EqualTo(0));
@@ -71,7 +76,7 @@ namespace Eden.Tests.EditMode
             try
             {
                 Thread.CurrentThread.CurrentCulture = new CultureInfo("pt-BR");
-                Assert.That(MetricsCsvLog.FormatRow(sample), Is.EqualTo("40,2,60,120,7,1,0,43.21,55"));
+                Assert.That(MetricsCsvLog.FormatRow(sample), Is.EqualTo("40,2,60,120,7,1,0,43.21,55,0,0,0,0"));
             }
             finally
             {
@@ -93,7 +98,7 @@ namespace Eden.Tests.EditMode
                 }
 
                 var lines = File.ReadAllLines(path);
-                Assert.That(lines, Is.EqualTo(new[] { MetricsCsvLog.Header, "20,1,64,128,3,0,0,49.9,3" }));
+                Assert.That(lines, Is.EqualTo(new[] { MetricsCsvLog.Header, "20,1,64,128,3,0,0,49.9,3,0,0,0,0" }));
             }
             finally
             {
