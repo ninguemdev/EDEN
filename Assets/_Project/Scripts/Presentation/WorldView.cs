@@ -5,9 +5,11 @@ using UnityEngine;
 namespace Eden.Presentation
 {
     /// <summary>
-    /// Draws the current world state with pooled sprites: arena, food and creatures (body colored by energy,
-    /// a nose dot showing heading, a ring on the selected one). Read-only: it never changes simulation state
-    /// and never draws from simulation random streams. Arena units map 1:1 to Unity world units.
+    /// Draws the world with pooled sprites: arena, food and creatures (body colored by energy, a nose dot showing
+    /// heading, a ring on the selected one). Creatures are drawn between their pose before the last tick (see
+    /// <see cref="RememberPreviousTick"/>) and their current pose, so motion is smooth at any frame rate although ticks
+    /// run at 20 Hz. Read-only: it never changes simulation state and never draws from simulation random streams.
+    /// Arena units map 1:1 to Unity world units.
     /// </summary>
     public sealed class WorldView : MonoBehaviour
     {
@@ -33,11 +35,64 @@ namespace Eden.Presentation
         private readonly Stack<FoodVisual> foodPool = new Stack<FoodVisual>();
         private readonly List<CreatureId> staleCreatures = new List<CreatureId>();
         private readonly List<FoodId> staleFood = new List<FoodId>();
+        private readonly Dictionary<CreatureId, Pose> previous = new Dictionary<CreatureId, Pose>();
+        private WorldState previousWorld;
+        private long previousTick = -1;
         private SpriteRenderer arena;
         private int frame;
 
         public int VisibleCreatures => creatures.Count;
         public int VisibleFood => food.Count;
+
+        /// <summary>Fraction of the way from the previous to the current pose used by the last <see cref="Render"/>.</summary>
+        public float LastFraction { get; private set; } = 1f;
+
+        /// <summary>
+        /// Keeps every creature's pose before a tick runs; called before the last tick of a frame. The next renders
+        /// draw from these poses toward the state after that tick.
+        /// </summary>
+        public void RememberPreviousTick(WorldState world)
+        {
+            previous.Clear();
+            previousWorld = world;
+            previousTick = world.Tick;
+            for (var i = 0; i < world.Creatures.Count; i++)
+            {
+                var creature = world.Creatures[i];
+                previous[creature.Id] = new Pose(creature.Position.X, creature.Position.Y, creature.Heading);
+            }
+        }
+
+        /// <summary>Remembered pose of a creature for the current tick's interpolation, if there is one.</summary>
+        public bool TryGetPreviousPose(WorldState world, CreatureId creature, out Vector2 position, out float headingRadians)
+        {
+            if (HasPrevious(world) && previous.TryGetValue(creature, out var pose))
+            {
+                position = new Vector2(pose.X, pose.Y);
+                headingRadians = pose.Heading;
+                return true;
+            }
+
+            position = default;
+            headingRadians = 0f;
+            return false;
+        }
+
+        /// <summary>Where a creature was last drawn, in arena units and degrees.</summary>
+        public bool TryGetDrawnPose(CreatureId creature, out Vector2 position, out float headingDegrees)
+        {
+            if (creatures.TryGetValue(creature, out var visual))
+            {
+                var drawn = visual.Root.transform;
+                position = drawn.localPosition;
+                headingDegrees = drawn.localEulerAngles.z;
+                return true;
+            }
+
+            position = default;
+            headingDegrees = 0f;
+            return false;
+        }
 
         /// <summary>Resets visuals for a new world and fits the camera to its arena.</summary>
         public void Bind(WorldState world)
@@ -48,6 +103,8 @@ namespace Eden.Presentation
             foreach (var visual in food.Values)
                 Release(visual);
             food.Clear();
+            previous.Clear();
+            previousWorld = null;
 
             var config = world.Config;
             if (arena == null)
@@ -66,10 +123,16 @@ namespace Eden.Presentation
             Render(world, null);
         }
 
-        public void Render(WorldState world, CreatureId? selected)
+        /// <summary>
+        /// Draws <paramref name="world"/>; creatures remembered just before the last tick are drawn
+        /// <paramref name="fraction"/> of the way from that pose to the current one (1 draws the current state).
+        /// </summary>
+        public void Render(WorldState world, CreatureId? selected, float fraction = 1f)
         {
             frame++;
             var maxEnergy = world.Config.MaxEnergy;
+            var interpolate = fraction < 1f && HasPrevious(world);
+            LastFraction = interpolate ? Mathf.Clamp01(fraction) : 1f;
             // Indexed loops: a foreach over the read-only lists would allocate an enumerator every frame.
             for (var i = 0; i < world.Creatures.Count; i++)
             {
@@ -82,8 +145,18 @@ namespace Eden.Presentation
                 }
 
                 visual.Frame = frame;
-                visual.Root.transform.localPosition = new Vector3(creature.Position.X, creature.Position.Y, 0f);
-                visual.Root.transform.localRotation = Quaternion.Euler(0f, 0f, creature.Heading * Mathf.Rad2Deg);
+                var x = creature.Position.X;
+                var y = creature.Position.Y;
+                var heading = creature.Heading * Mathf.Rad2Deg;
+                if (interpolate && previous.TryGetValue(creature.Id, out var before))
+                {
+                    x = Mathf.Lerp(before.X, x, LastFraction);
+                    y = Mathf.Lerp(before.Y, y, LastFraction);
+                    heading = Mathf.LerpAngle(before.Heading * Mathf.Rad2Deg, heading, LastFraction);
+                }
+
+                visual.Root.transform.localPosition = new Vector3(x, y, 0f);
+                visual.Root.transform.localRotation = Quaternion.Euler(0f, 0f, heading);
                 visual.Body.color = Color.Lerp(HungryColor, FedColor, Mathf.Clamp01(creature.Energy / maxEnergy));
                 visual.Selection.enabled = selected.HasValue && selected.Value == creature.Id;
             }
@@ -110,6 +183,9 @@ namespace Eden.Presentation
             var world = targetCamera.ScreenToWorldPoint(new Vector3(screenPosition.x, screenPosition.y, 0f));
             return transform.InverseTransformPoint(world);
         }
+
+        // The remembered poses belong to the tick just before the one shown, in the same world.
+        private bool HasPrevious(WorldState world) => previousWorld == world && previousTick == world.Tick - 1;
 
         private void RemoveStale()
         {
@@ -179,6 +255,22 @@ namespace Eden.Presentation
             if (spriteMaterial != null)
                 renderer.sharedMaterial = spriteMaterial;
             return renderer;
+        }
+
+        private readonly struct Pose
+        {
+            public Pose(float x, float y, float heading)
+            {
+                X = x;
+                Y = y;
+                Heading = heading;
+            }
+
+            public float X { get; }
+            public float Y { get; }
+
+            /// <summary>Radians, as in the simulation.</summary>
+            public float Heading { get; }
         }
 
         private sealed class CreatureVisual

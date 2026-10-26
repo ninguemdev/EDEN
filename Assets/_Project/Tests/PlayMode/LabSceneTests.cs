@@ -1,7 +1,11 @@
 using System;
 using System.Collections;
 using System.IO;
+using Eden.Application;
+using Eden.Brains;
+using Eden.Domain;
 using Eden.Presentation;
+using Eden.Simulation;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -206,6 +210,68 @@ namespace Eden.Tests.PlayMode
             Assert.That(lines.Length, Is.GreaterThanOrEqualTo(3), "header plus at least two one-second samples");
             Assert.That(lines[1], Does.StartWith($"{ticksPerSecond},1,"));
             Assert.That(File.ReadAllText(Path.Combine(directory, "run-info.txt")), Does.Contain("seed="));
+        }
+
+        [UnityTest]
+        public IEnumerator View_DrawsCreaturesBetweenTheLastTwoTicks()
+        {
+            var view = runner.View;
+            var checkedFrames = 0;
+            var waited = 0f;
+            while (checkedFrames < 10 && waited < TimeoutSeconds)
+            {
+                yield return null;
+                waited += Time.unscaledDeltaTime;
+                var world = runner.Simulation.World;
+                var fraction = view.LastFraction;
+                if (fraction <= 0f || fraction >= 1f)
+                    continue;
+
+                foreach (var creature in world.Creatures)
+                {
+                    var current = new Vector2(creature.Position.X, creature.Position.Y);
+                    if (!view.TryGetPreviousPose(world, creature.Id, out var before, out var beforeHeading) ||
+                        (current - before).sqrMagnitude < 1e-6f)
+                        continue;
+
+                    Assert.That(view.TryGetDrawnPose(creature.Id, out var drawn, out var drawnHeading), Is.True);
+                    var expected = Vector2.Lerp(before, current, fraction);
+                    Assert.That(Vector2.Distance(drawn, expected), Is.LessThan(1e-4f), "position between the ticks");
+                    Assert.That(Vector2.Distance(drawn, current), Is.GreaterThan(0f), "not the latest state");
+                    var expectedHeading = Mathf.LerpAngle(beforeHeading * Mathf.Rad2Deg,
+                        creature.Heading * Mathf.Rad2Deg, fraction);
+                    Assert.That(Mathf.Abs(Mathf.DeltaAngle(drawnHeading, expectedHeading)), Is.LessThan(1e-3f), "heading");
+                    checkedFrames++;
+                    break;
+                }
+            }
+
+            Assert.That(checkedFrames, Is.EqualTo(10), "frames drawn between two ticks");
+
+            runner.TogglePause();
+            yield return null;
+            Assert.That(view.LastFraction, Is.EqualTo(1f), "paused: the latest state");
+        }
+
+        [UnityTest]
+        public IEnumerator View_InterpolationLeavesTheSimulationUnchanged()
+        {
+            Assert.That(runner.BrainKind, Is.EqualTo(LabBrainKind.Heuristic), "the scene starts with the heuristic brain");
+            yield return WaitUntil(() => runner.Simulation.World.Tick >= 40);
+            runner.TogglePause();
+            yield return null;
+
+            var world = runner.Simulation.World;
+            var headless = new WorldSimulation(WorldFactory.CreateInitial(world.Config));
+            var brains = BrainController.Shared(world.Config, new HeuristicBrain());
+            while (headless.World.Tick < world.Tick)
+            {
+                headless.Step(brains);
+                brains.Forget(headless.LastDeaths);
+            }
+
+            Assert.That(headless.ComputeFingerprint(), Is.EqualTo(runner.Simulation.ComputeFingerprint()),
+                "the drawn run is the same run as without a view");
         }
 
         private static IEnumerator WaitUntil(Func<bool> condition)
