@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text;
@@ -8,11 +7,13 @@ using Eden.Evolution;
 namespace Eden.Persistence
 {
     /// <summary>
-    /// Export of a generational experiment into one directory: <c>experiment.txt</c> (key=value settings),
-    /// <c>generations.csv</c> (one summary row per generation), <c>individuals.csv</c> (one row per evaluated
-    /// individual and evaluation mode, with id, parents and birth generation) and <c>episodes.csv</c> (one row per individual × seed,
-    /// before aggregation). Rows of the three CSV files join on generation, evaluation mode and candidate. Numbers use the invariant
-    /// culture; non-finite values are written as empty fields.
+    /// Export of a generational experiment into one directory: <c>experiment.txt</c> and <c>experiment.json</c> (the
+    /// settings, their hash, the unit of every column and, for a resumed run, where it came from; see
+    /// <see cref="ExperimentHeader"/>), <c>generations.csv</c> (one summary row per generation), <c>individuals.csv</c>
+    /// (one row per evaluated individual and evaluation mode, with id, parents and birth generation),
+    /// <c>episodes.csv</c> (one row per individual × seed, before aggregation) and <c>summary.json</c>, rewritten after
+    /// every generation. Rows of the three CSV files join on generation, evaluation mode and candidate. Numbers use the
+    /// invariant culture; non-finite values are written as empty fields.
     /// </summary>
     public sealed class EvolutionCsvLog : IDisposable
     {
@@ -25,27 +26,31 @@ namespace Eden.Persistence
             "generation,evaluation_mode,candidate,individual_id,parent_ids,birth_generation,elite,mutated_weights,valid," +
             "mean_fitness,mean_food_energy,survival_rate,mean_survived_seconds,mean_final_energy";
 
+        private readonly ExportTally tally = new ExportTally();
         private CsvFile generations;
         private CsvFile individuals;
         private CsvFile episodes;
 
-        public EvolutionCsvLog(string directory, IEnumerable<string> experimentInfo)
+        public EvolutionCsvLog(string directory, ExperimentHeader header)
         {
             if (string.IsNullOrEmpty(directory))
                 throw new ArgumentException("A directory is required.", nameof(directory));
-            if (experimentInfo == null)
-                throw new ArgumentNullException(nameof(experimentInfo));
 
+            Header = header ?? throw new ArgumentNullException(nameof(header));
             Directory.CreateDirectory(directory);
             DirectoryPath = directory;
             File.WriteAllText(Path.Combine(directory, "experiment.txt"),
-                string.Join("\n", experimentInfo) + "\n", new UTF8Encoding(false));
+                string.Join("\n", header.Describe()) + "\n", new UTF8Encoding(false));
+            File.WriteAllText(Path.Combine(directory, "experiment.json"), ExperimentJson.Experiment(header),
+                new UTF8Encoding(false));
+            WriteSummary();
             generations = new CsvFile(Path.Combine(directory, "generations.csv"), GenerationsHeader);
             individuals = new CsvFile(Path.Combine(directory, "individuals.csv"), IndividualsHeader);
             episodes = new CsvFile(Path.Combine(directory, "episodes.csv"), EvaluationCsv.Header);
         }
 
         public string DirectoryPath { get; }
+        public ExperimentHeader Header { get; }
         public int GenerationCount { get; private set; }
 
         public void Append(GenerationReport report)
@@ -61,6 +66,8 @@ namespace Eden.Persistence
             foreach (var episode in report.Evaluation.Episodes)
                 episodes.Append(EvaluationCsv.FormatRow(episode));
             GenerationCount++;
+            tally.Add(report);
+            WriteSummary();
         }
 
         public static string FormatGeneration(GenerationSummary summary)
@@ -116,42 +123,6 @@ namespace Eden.Persistence
                 Number(result.MeanFinalEnergy));
         }
 
-        /// <summary>Settings that define an experiment, written next to its data.</summary>
-        public static IReadOnlyList<string> Describe(EvaluationPlan plan, ReproductionRules rules, string appVersion,
-            DateTime createdUtc)
-        {
-            if (plan == null)
-                throw new ArgumentNullException(nameof(plan));
-            if (rules == null)
-                throw new ArgumentNullException(nameof(rules));
-
-            var culture = CultureInfo.InvariantCulture;
-            var world = plan.EpisodeConfig(0);
-            return new[]
-            {
-                "experiment_seed=" + plan.ExperimentSeed.ToString(culture),
-                "app_version=" + appVersion,
-                "created_utc=" + createdUtc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", culture),
-                "evaluation_mode=isolated",
-                "seed_scheme=" + EvaluationPlan.SeedSchemeVersion.ToString(culture),
-                "training_seeds_per_generation=" + plan.TrainingSeedsPerGeneration.ToString(culture),
-                "validation_seed=" + plan.ValidationSeed.ToString(culture),
-                "validation_seeds=" + string.Join(";", Array.ConvertAll(plan.ValidationSeeds(), s => s.ToString(culture))),
-                "episode_seconds=" + plan.EpisodeSeconds.ToString(culture),
-                "episode_ticks=" + plan.EpisodeTicks.ToString(culture),
-                "config_schema=" + world.SchemaVersion.ToString(culture),
-                "ticks_per_second=" + world.TicksPerSecond.ToString(culture),
-                "arena=" + world.ArenaWidth.ToString(culture) + "x" + world.ArenaHeight.ToString(culture),
-                "episode_food=" + world.InitialFood.ToString(culture),
-                "population=" + rules.PopulationSize.ToString(culture),
-                "elites=" + rules.EliteCount.ToString(culture),
-                "tournament_size=" + rules.TournamentSize.ToString(culture),
-                "mutation_probability=" + rules.MutationProbability.ToString(culture),
-                "mutation_sigma=" + rules.MutationSigma.ToString(culture),
-                "crossover=off"
-            };
-        }
-
         public void Dispose()
         {
             generations?.Dispose();
@@ -161,6 +132,9 @@ namespace Eden.Persistence
             individuals = null;
             episodes = null;
         }
+
+        private void WriteSummary() =>
+            ExperimentJson.WriteReplacing(Path.Combine(DirectoryPath, "summary.json"), ExperimentJson.Summary(Header, tally));
 
         private static string Number(float value) =>
             float.IsNaN(value) || float.IsInfinity(value)

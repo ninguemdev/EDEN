@@ -100,7 +100,7 @@ namespace Eden.Persistence
             return checkpoint;
         }
 
-        private static JsonValue EncodeAlgorithms() =>
+        internal static JsonValue EncodeAlgorithms() =>
             JsonValue.NewObject()
                 .Add("random", JsonValue.Of(Pcg32.AlgorithmName))
                 .Add("gaussian", JsonValue.Of(GaussianSampler.AlgorithmName))
@@ -137,16 +137,19 @@ namespace Eden.Persistence
                     : EncodeSettings(checkpoint.SharedWorld.Settings));
         }
 
-        private static JsonValue EncodeEvolutionSettings(EvolutionSnapshot evolution)
+        private static JsonValue EncodeEvolutionSettings(EvolutionSnapshot evolution) =>
+            EncodeEvolutionSettings(evolution.Settings, evolution.ValidationInterval);
+
+        /// <summary>Canonical form of an experiment definition, shared by checkpoints and experiment exports.</summary>
+        internal static JsonValue EncodeEvolutionSettings(EvolutionSettings s, int validationInterval)
         {
-            var s = evolution.Settings;
             return JsonValue.NewObject()
                 .Add("experimentSeed", JsonValue.Of(s.ExperimentSeed))
                 .Add("episodeSeconds", JsonValue.Of(s.EpisodeSeconds))
                 .Add("trainingSeedsPerGeneration", JsonValue.Of(s.TrainingSeedsPerGeneration))
                 .Add("validationSeed", JsonValue.Of(s.ValidationSeed))
                 .Add("validationSeedCount", JsonValue.Of(s.ValidationSeedCount))
-                .Add("validationInterval", JsonValue.Of(evolution.ValidationInterval))
+                .Add("validationInterval", JsonValue.Of(validationInterval))
                 .Add("populationSize", JsonValue.Of(s.PopulationSize))
                 .Add("eliteCount", JsonValue.Of(s.EliteCount))
                 .Add("tournamentSize", JsonValue.Of(s.TournamentSize))
@@ -509,7 +512,7 @@ namespace Eden.Persistence
             return episodes;
         }
 
-        private static JsonValue EncodeSummary(GenerationSummary s) =>
+        internal static JsonValue EncodeSummary(GenerationSummary s) =>
             JsonValue.NewObject()
                 .Add("generation", JsonValue.Of(s.Generation))
                 .Add("mode", JsonValue.Of(EvaluationCsv.ModeName(s.Mode)))
@@ -690,7 +693,7 @@ namespace Eden.Persistence
             return new Float2(pair[0].Float(), pair[1].Float());
         }
 
-        private static string PhaseName(EvolutionPhase phase) =>
+        internal static string PhaseName(EvolutionPhase phase) =>
             phase == EvolutionPhase.Baselines ? "baselines" : phase == EvolutionPhase.Validation ? "validation" : "training";
 
         private static EvolutionPhase ParsePhase(JsonValue saved)
@@ -743,7 +746,7 @@ namespace Eden.Persistence
             return value;
         }
 
-        private static string Hex(ulong value) => value.ToString("x16", CultureInfo.InvariantCulture);
+        internal static string Hex(ulong value) => value.ToString("x16", CultureInfo.InvariantCulture);
 
         /// <summary>64-bit FNV-1a of the UTF-8 text.</summary>
         internal static ulong Hash(string text)

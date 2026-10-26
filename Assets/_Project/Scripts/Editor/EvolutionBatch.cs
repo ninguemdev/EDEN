@@ -58,11 +58,10 @@ namespace Eden.Editor
 
             var evolution = new GenerationalEvolution(settings);
             var directory = output ?? DefaultDirectory($"seed{settings.ExperimentSeed}");
-            var info = EvolutionCsvLog.Describe(evolution.Plan, evolution.Rules, UnityEngine.Application.version,
-                DateTime.UtcNow);
+            var header = new ExperimentHeader(settings, 0, UnityEngine.Application.version, DateTime.UtcNow);
             var started = DateTime.UtcNow;
 
-            using (var log = new EvolutionCsvLog(directory, info))
+            using (var log = new EvolutionCsvLog(directory, header))
             {
                 for (var g = 0; g < generations; g++)
                 {
@@ -86,15 +85,7 @@ namespace Eden.Editor
             {
                 var result = runner.Run((run, report) =>
                 {
-                    if (logs[run] == null)
-                    {
-                        var runSettings = settings.WithExperimentSeed(runner.RunSeed(run));
-                        logs[run] = new EvolutionCsvLog(
-                            Path.Combine(directory, $"run{run}-seed{runner.RunSeed(run)}"),
-                            EvolutionCsvLog.Describe(new EvaluationPlan(runSettings), new ReproductionRules(runSettings),
-                                UnityEngine.Application.version, DateTime.UtcNow));
-                    }
-
+                    logs[run] ??= RunLog(directory, run, settings.WithExperimentSeed(runner.RunSeed(run)), battery, null);
                     logs[run].Append(report);
                     LogSummary(run, report.Summary);
                 });
@@ -110,6 +101,12 @@ namespace Eden.Editor
                     log?.Dispose();
             }
         }
+
+        private static EvolutionCsvLog RunLog(string directory, int run, EvolutionSettings runSettings,
+            BatterySettings battery, string preset) =>
+            new EvolutionCsvLog(Path.Combine(directory, $"run{run}-seed{runSettings.ExperimentSeed}"),
+                new ExperimentHeader(runSettings, battery.ValidationInterval, UnityEngine.Application.version,
+                    DateTime.UtcNow, preset));
 
         private static string ReadArguments(EvolutionSettings settings, BatterySettings battery)
         {

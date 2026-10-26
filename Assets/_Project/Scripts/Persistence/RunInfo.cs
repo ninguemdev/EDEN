@@ -2,10 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using Eden.Domain;
+using Eden.Evolution;
 
 namespace Eden.Persistence
 {
-    /// <summary>Plain key=value description of a run, written next to its metrics.</summary>
+    /// <summary>Plain key=value description of a shared world run, written next to its metrics.</summary>
     public static class RunInfo
     {
         public static IReadOnlyList<string> Describe(SimulationConfig config, string brainName, string appVersion,
@@ -20,6 +21,7 @@ namespace Eden.Persistence
                 "config_schema=" + config.SchemaVersion.ToString(culture),
                 "seed=" + config.Seed.ToString(culture),
                 "brain=" + brainName,
+                "evaluation_mode=" + EvaluationCsv.ModeName(EvaluationMode.SharedInspection),
                 "app_version=" + appVersion,
                 "created_utc=" + createdUtc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", culture),
                 "ticks_per_second=" + config.TicksPerSecond.ToString(culture),

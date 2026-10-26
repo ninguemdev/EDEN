@@ -190,6 +190,7 @@ namespace Eden.Presentation
         public bool LoadCheckpoint()
         {
             Checkpoint saved;
+            CheckpointInfo savedInfo;
             string problem;
             LabMode loadedMode;
             int loadedPreset;
@@ -201,7 +202,7 @@ namespace Eden.Presentation
             var name = MlpBrain.BrainName;
             try
             {
-                saved = CheckpointFile.LoadOrBackup(CheckpointPath, out _, out problem);
+                saved = CheckpointFile.LoadOrBackup(CheckpointPath, out savedInfo, out problem);
                 loadedMode = ParseMode(saved.Mode);
                 loadedPreset = PresetIndex(saved.Preset);
                 loadedBrain = ParseKind(saved.Brain);
@@ -257,7 +258,10 @@ namespace Eden.Presentation
             sharedGeneration = session?.LastTraining?.Summary.Generation ?? 0;
             metrics = new MetricsRecorder(world.World.Config, world.World.Config.TicksPerSecond);
             if (writeMetrics && session != null)
-                OpenEvolutionLog(CheckpointPath);
+            {
+                var file = problem == null ? CheckpointPath : CheckpointFile.BackupPath(CheckpointPath);
+                OpenEvolutionLog(new ResumeOrigin(file, savedInfo, saved.Evolution));
+            }
             if (writeMetrics && mode == LabMode.SharedWorld)
                 OpenMetricsLog(world.World.Config);
 
@@ -784,23 +788,16 @@ namespace Eden.Presentation
             }
         }
 
-        // A resumed evolution logs only what happens after the checkpoint, and says where it came from.
-        private void OpenEvolutionLog(string resumedFrom = null)
+        // A resumed evolution logs only the reports completed after the checkpoint, the one in progress included, and
+        // records where it came from and which episodes of that report the checkpoint already held.
+        private void OpenEvolutionLog(ResumeOrigin resumedFrom = null)
         {
             try
             {
                 var directory = CreateRunDirectory("EvolutionRuns", $"lab-seed{seed}-{Preset.Name}");
-                var evolution = Evolution.Evolution;
-                var info = new List<string>(EvolutionCsvLog.Describe(evolution.Plan, evolution.Rules,
-                    UnityEngine.Application.version, DateTime.UtcNow));
-                if (resumedFrom != null)
-                {
-                    info.Add("resumed_from=" + resumedFrom);
-                    info.Add("resumed_at_generation=" + evolution.Generation.ToString(CultureInfo.InvariantCulture));
-                    info.Add("resumed_at_total_ticks=" + Evolution.TotalTicks.ToString(CultureInfo.InvariantCulture));
-                }
-
-                var log = new EvolutionCsvLog(directory, info);
+                var header = new ExperimentHeader(Evolution.Evolution.Settings, Evolution.ValidationInterval,
+                    UnityEngine.Application.version, DateTime.UtcNow, Preset.Name, resumedFrom);
+                var log = new EvolutionCsvLog(directory, header);
                 evolutionLog = log;
                 EvolutionDirectory = directory;
                 Evolution.ReportCompleted += report => AppendEvolution(log, report);
