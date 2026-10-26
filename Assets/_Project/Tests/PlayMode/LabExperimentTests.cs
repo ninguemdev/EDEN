@@ -306,6 +306,46 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator SharedWorld_Extinction_StopsTheRun_IsRecorded_AndOnlyARestartGoesOn()
+        {
+            var rules = runner.WorldTemplate;
+            rules.Reproduction = true;
+            rules.MaturitySeconds = 30f;
+            rules.MaxAgeSeconds = 2f;
+            yield return StartFromControls(LabMode.SharedWorld, preset: 0, seed: 5, brain: LabBrainKind.Heuristic);
+            Assert.That(runner.Genealogy, Is.Not.Null);
+            yield return Press("max-button");
+            yield return WaitUntil(() => runner.ExtinctionTick.HasValue, 30f);
+            var directory = runner.RunDirectory;
+            var tick = runner.Simulation.World.Tick;
+
+            Assert.That(runner.Clock.IsPaused, Is.True, "extinction pauses the lab");
+            StringAssert.Contains($"EXTINÇÃO no tick {runner.ExtinctionTick}", runner.Hud.RunText);
+            StringAssert.Contains("ninguém é reposto", runner.Hud.RunText);
+            yield return Press("pause-button");
+            yield return WaitSeconds(0.3f);
+            yield return Press("step-button");
+            Assert.That(runner.Simulation.World.Tick, Is.EqualTo(tick), "an extinct world does not go on");
+            Assert.That(runner.Simulation.World.Creatures, Is.Empty);
+
+            runner.Select(new CreatureId(1));
+            yield return null;
+            StringAssert.Contains("Genealogia (geração 0, fundadora)", runner.Hud.InspectorText);
+            StringAssert.Contains("morreu de idade", runner.Hud.InspectorText);
+
+            runner.CloseLogs();
+            var metrics = File.ReadAllLines(Path.Combine(directory, "metrics.csv"));
+            Assert.That(metrics.Last(), Does.EndWith(",1"), "the extinction closes a metrics window");
+            var genealogy = File.ReadAllLines(Path.Combine(directory, "genealogy.csv"));
+            Assert.That(genealogy.Last(), Is.EqualTo($"{runner.ExtinctionTick},extinction,,,,"));
+            Assert.That(genealogy.Count(r => r.Contains(",founder,")), Is.EqualTo(32));
+
+            yield return Press("start-button");
+            Assert.That(runner.Simulation.World.Creatures.Count, Is.EqualTo(32), "a restart is a new world");
+            Assert.That(runner.ExtinctionTick, Is.Null);
+        }
+
+        [UnityTest]
         public IEnumerator Benchmark_MeasuresTheRunAndWritesAReport()
         {
             var directory = Path.Combine(Path.GetTempPath(), "eden-benchmark-" + Guid.NewGuid().ToString("N"));

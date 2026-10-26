@@ -75,6 +75,8 @@ namespace Eden.Presentation
         private BrainController controller;
         private MetricsRecorder metrics;
         private MetricsCsvLog metricsLog;
+        private GenealogyCsvLog genealogyLog;
+        private Genealogy genealogy;
         private EvolutionCsvLog evolutionLog;
         private SimulationSettings sharedSettings;
         private SharedGenomes sharedGenomes;
@@ -101,6 +103,12 @@ namespace Eden.Presentation
 
         /// <summary>Genomes of the shared world's neural creatures, children included; null for other brains.</summary>
         public SharedGenomes SharedGenomes => sharedGenomes;
+
+        /// <summary>Every creature of the shared world, dead ones included; null without reproduction.</summary>
+        public Genealogy Genealogy => genealogy;
+
+        /// <summary>Tick during which the shared world died out; null while anyone lives.</summary>
+        public long? ExtinctionTick => mode == LabMode.SharedWorld ? metrics?.ExtinctionTick : null;
         public ExperimentPreset Preset => ExperimentPreset.All[preset];
         public int Seed => seed;
 
@@ -190,7 +198,7 @@ namespace Eden.Presentation
             {
                 var shared = mode == LabMode.SharedWorld
                     ? new SharedWorldSnapshot(sharedSettings, Simulation.Capture(), controller.Capture(),
-                        sharedGenomes?.Capture())
+                        sharedGenomes?.Capture(), genealogy?.Capture())
                     : null;
                 var checkpoint = new Checkpoint(ModeName(mode), Preset.Name, (ulong)seed, KindName(brain),
                     Evolution?.Capture(), shared);
@@ -224,6 +232,7 @@ namespace Eden.Presentation
             WorldSimulation world;
             BrainController brains;
             SharedGenomes genomes = null;
+            Genealogy lineage = null;
             IReadOnlyList<Individual> individuals = null;
             var name = MlpBrain.BrainName;
             try
@@ -261,6 +270,9 @@ namespace Eden.Presentation
                         throw new CheckpointException("Only neural brains have genomes to restore.");
                     genomes?.Restore(saved.SharedWorld.BornGenomes, world.World);
                     world.Heredity = genomes;
+                    lineage = saved.SharedWorld.Genealogy.Count > 0
+                        ? Genealogy.Restore(saved.SharedWorld.Genealogy, world.World)
+                        : config.Reproduction ? new Genealogy(world.World) : null;
                     brains = CreateController(config, loadedBrain, genomes, out name);
                     brains.Restore(saved.SharedWorld.Brains);
                 }
@@ -287,6 +299,7 @@ namespace Eden.Presentation
             BrainName = name;
             sharedSettings = saved.SharedWorld?.Settings;
             sharedGenomes = genomes;
+            genealogy = lineage;
             sharedIndividuals = individuals;
             sharedGeneration = session?.LastTraining?.Summary.Generation ?? 0;
             metrics = new MetricsRecorder(world.World.Config, world.World.Config.TicksPerSecond);
@@ -303,6 +316,8 @@ namespace Eden.Presentation
             networkSnapshot.Clear();
             hud?.ShowNetwork(null);
             ResetClock(world.World.Config.TicksPerSecond);
+            if (mode == LabMode.SharedWorld && world.IsExtinct)
+                Clock.Pause();
             worldView.Bind(world.World);
             hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody), Evolution != null);
             ShowCheckpointStatus(LabText.CheckpointLoaded(CheckpointPath, world.World.Tick, EvolutionShown, problem));
@@ -427,6 +442,8 @@ namespace Eden.Presentation
         {
             metricsLog?.Dispose();
             metricsLog = null;
+            genealogyLog?.Dispose();
+            genealogyLog = null;
         }
 
         /// <summary>
@@ -490,7 +507,9 @@ namespace Eden.Presentation
             if (Clock.IsUnpaced && !Clock.IsPaused)
             {
                 var ran = RunWithinBudget();
-                Clock.RecordUnpaced(realDelta, ran);
+                // An extinction during these ticks pauses the clock; there is no speed to record then.
+                if (!Clock.IsPaused)
+                    Clock.RecordUnpaced(realDelta, ran);
                 ticks += ran;
             }
 
@@ -521,10 +540,11 @@ namespace Eden.Presentation
 
         // With rememberLast, the view keeps the poses from before the last tick so that it can draw between them and
         // the result; the ticks run are the same either way.
-        private void RunTicks(int ticks, bool rememberLast = false)
+        // Returns the ticks run: fewer than asked only when the shared world has died out (it never runs past that).
+        private int RunTicks(int ticks, bool rememberLast = false)
         {
             if (ticks <= 0)
-                return;
+                return 0;
             if (mode == LabMode.IsolatedEvolution)
             {
                 if (rememberLast)
@@ -538,15 +558,19 @@ namespace Eden.Presentation
                     Evolution.Advance(ticks);
                 }
 
-                return;
+                return ticks;
             }
 
             for (var i = 0; i < ticks; i++)
             {
+                if (Simulation.IsExtinct)
+                    return i;
                 if (rememberLast && i == ticks - 1)
                     worldView.RememberPreviousTick(Simulation.World);
                 StepOnce();
             }
+
+            return ticks;
         }
 
         // Whole ticks in chunks until the frame budget is used; checking the watch per chunk keeps its cost low.
@@ -557,8 +581,10 @@ namespace Eden.Presentation
             budgetWatch.Restart();
             do
             {
-                RunTicks(chunk);
-                ran += chunk;
+                var done = RunTicks(chunk);
+                ran += done;
+                if (done < chunk)
+                    break;
             } while (budgetWatch.Elapsed.TotalSeconds < MaxSpeedBudgetSeconds && ran < int.MaxValue - chunk);
 
             return ran;
@@ -579,8 +605,17 @@ namespace Eden.Presentation
 
             controller.Forget(deaths);
             sharedGenomes?.Forget(deaths);
+            genealogy?.Record(Simulation);
+            genealogyLog?.Append(Simulation, genealogy);
             if (metrics.Record(Simulation))
                 metricsLog?.Append(metrics.LastSample);
+            if (!Simulation.IsExtinct || deaths.Count == 0)
+                return;
+
+            // Nobody is put back: the world stops here and only an explicit restart (Iniciar or R) goes on.
+            genealogyLog?.AppendExtinction(deaths[0].Tick);
+            Clock.Pause();
+            RefreshHud();
         }
 
         private void StartSharedWorld()
@@ -608,6 +643,7 @@ namespace Eden.Presentation
                 : WorldFactory.CreateInitial(config, i => plan.ExpressedGenes(individuals[i].Genome.Body)));
             sharedGenomes = CreateGenomes(config, brain, individuals, Evolution);
             Simulation.Heredity = sharedGenomes;
+            genealogy = config.Reproduction ? new Genealogy(Simulation.World) : null;
             controller = CreateController(config, brain, sharedGenomes, out var name);
             BrainName = name;
             metrics = new MetricsRecorder(config, config.TicksPerSecond);
@@ -747,8 +783,16 @@ namespace Eden.Presentation
                 return text + LineageOf(creature);
             }
 
-            return LabText.DeadCreature(id, selectedDeath);
+            // A creature selected after its death: the genealogy remembers how it died.
+            var death = selectedDeath;
+            if (!death.HasValue && genealogy != null && genealogy.TryGet(id, out var entry) && !entry.IsAlive)
+                death = new CreatureDeath(id, entry.DeathTick, entry.DeathCause);
+            return LabText.DeadCreature(id, death) + GenealogyOf(id);
         }
+
+        private string GenealogyOf(CreatureId id) =>
+            genealogy == null || mode != LabMode.SharedWorld ? string.Empty
+                : "\n\n" + LabText.Genealogy(genealogy, id, Simulation.World.Config.TickDuration);
 
         private string LineageOf(CreatureState creature)
         {
@@ -762,8 +806,9 @@ namespace Eden.Presentation
 
             var index = creature.Id.Value - 1;
             if (sharedIndividuals == null || index < 0 || index >= sharedIndividuals.Count)
-                return string.Empty;
-            return "\n\n" + LabText.Lineage(sharedIndividuals[index], Evolution.Evolution.Lineage, sharedGeneration);
+                return GenealogyOf(creature.Id);
+            return GenealogyOf(creature.Id) + "\n\n" +
+                   LabText.Lineage(sharedIndividuals[index], Evolution.Evolution.Lineage, sharedGeneration);
         }
 
         private bool TryObserve(CreatureId id, out Observation observation)
@@ -909,6 +954,8 @@ namespace Eden.Presentation
                 File.WriteAllLines(Path.Combine(directory, "run-info.txt"),
                     RunInfo.Describe(config, BrainName, UnityEngine.Application.version, DateTime.UtcNow));
                 metricsLog = new MetricsCsvLog(Path.Combine(directory, "metrics.csv"));
+                if (genealogy != null)
+                    genealogyLog = new GenealogyCsvLog(Path.Combine(directory, "genealogy.csv"), genealogy);
                 MetricsDirectory = directory;
             }
             catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)

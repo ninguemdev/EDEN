@@ -54,7 +54,11 @@ namespace Eden.Presentation
 
             text.AppendLine($"Total comido: {metrics.TotalFoodEaten}");
             if (simulation.IsExtinct)
-                text.AppendLine("EXTINÇÃO: nenhuma criatura viva. R reinicia.");
+                text.AppendLine(metrics.ExtinctionTick.HasValue
+                    ? $"EXTINÇÃO no tick {metrics.ExtinctionTick.Value} " +
+                      $"({metrics.ExtinctionTick.Value * (double)config.TickDuration:0.0} s): nenhuma criatura viva e " +
+                      "ninguém é reposto. A simulação parou; Iniciar ou R começa um mundo novo."
+                    : "EXTINÇÃO: nenhuma criatura viva e ninguém é reposto. Iniciar ou R começa um mundo novo.");
             text.Append(runDirectory == null ? "Log de métricas: desligado" : "Log: " + runDirectory);
             return text.ToString();
         }
@@ -209,6 +213,33 @@ namespace Eden.Presentation
             var resting = body.MetabolismPerSecond + body.SensorCostPerSecond;
             text.AppendLine($"Gasto/s: repouso {resting:0.00} (metabolismo {body.MetabolismPerSecond:0.00} + sensor " +
                             $"{body.SensorCostPerSecond:0.00}), propulsão máxima +{body.MovementCostPerSecond:0.00}");
+        }
+
+        /// <summary>
+        /// Line of a creature back to its founder (the nearest ancestors and the founder when the line is long) and its
+        /// descendants, from the genealogy of the shared world.
+        /// </summary>
+        public static string Genealogy(Genealogy genealogy, CreatureId id, float tickDuration)
+        {
+            if (!genealogy.TryGet(id, out var entry))
+                return "Genealogia: sem registro (criatura anterior ao carregamento)";
+            var line = genealogy.Ancestry(id);
+            var text = new StringBuilder();
+            text.AppendLine($"Genealogia (geração {entry.Generation}" +
+                            (entry.Parent.HasValue ? $", nasceu em {entry.BirthTick * (double)tickDuration:0.0} s)" : ", fundadora)"));
+            const int shown = 5;
+            var names = new List<string>();
+            for (var i = 0; i < line.Count && i < shown; i++)
+                names.Add(line[i].Creature.ToString());
+            if (line.Count > shown + 1)
+                names.Add($"… {line.Count - shown - 1} …");
+            if (line.Count > shown)
+                names.Add(line[line.Count - 1].Creature.ToString());
+            var founder = line[line.Count - 1];
+            text.AppendLine(string.Join(" ← ", names) + (founder.Parent.HasValue ? " (linha anterior não registrada)" : " (fundadora)"));
+            var descendants = genealogy.Descendants(id, out var living);
+            text.Append(descendants == 0 ? "Sem descendentes" : $"{descendants} descendentes, {living} vivos");
+            return text.ToString();
         }
 
         public static string DeadCreature(CreatureId id, CreatureDeath? death)
