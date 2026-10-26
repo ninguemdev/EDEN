@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa), **M3** (evolução por gerações) e **M4** (laboratório completo e checkpoints, o MVP) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O laboratório inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. O **M5** (biologia parametrizada) está em andamento: o genoma carrega genes de corpo limitados, cada característica com custo explícito, e o laboratório pode evoluir o corpo junto com o cérebro (o corpo fixo continua o padrão e o controle). Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa), **M3** (evolução por gerações), **M4** (laboratório completo e checkpoints, o MVP) e **M5** (biologia parametrizada) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O laboratório inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. O genoma carrega genes de corpo limitados, cada característica com custo explícito; o laboratório pode evoluir o corpo junto com o cérebro (o corpo fixo continua o padrão e o controle), e uma ablação por gene compara as variantes com a variação entre execuções. O próximo marco é o **M6** (ecossistema contínuo). Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -232,11 +232,35 @@ O estresse teve a maior média, com 4× os episódios de treino do mínimo, mas 
   -executeMethod Eden.Editor.EpisodeCalibration.RunFromCommandLine -eden-seed 1 -eden-seeds 20 -logFile calibration.log
 ```
 
+### Ablação dos genes de corpo
+
+A ablação roda a mesma bateria (mesmas seeds de experimento e de validação, mesmas gerações, população e episódio) uma vez por variante de corpo: `fixed` (corpo fixo, controle), `all` (os quatro genes) e `no-<gene>` (todos menos um). Com `-eden-variants extended` entram também `only-<gene>` (um gene só); a lista pode ser dada explicitamente, por exemplo `-eden-variants fixed,all,only-sensor`. As variantes mudam só os genes expressos, então cada uma avalia exatamente os mesmos episódios:
+
+```powershell
+& "C:\Program Files\Unity\Hub\Editor\6000.3.27f1\Editor\Unity.exe" -batchmode -projectPath . `
+  -executeMethod Eden.Editor.EvolutionBatch.AblateBodyFromCommandLine -eden-seed 1 -logFile ablation.log
+```
+
+Aceita as opções da bateria. O diretório contém `variants.csv` (uma linha por variante, com a diferença para o corpo fixo e para todos os genes e os genes médios finais), `phenotypes.csv` (média e desvio de cada gene em cada geração de treino de cada execução, e a **diversidade de corpo**: o desvio médio dos genes expressos, o equivalente da diversidade dos pesos), `ablation.json`, `ablation.txt` e, por variante, os arquivos da bateria e de cada execução. Uma diferença só é tratada como efeito quando os intervalos média ± desvio entre execuções não se sobrepõem.
+
+Primeira ablação (bateria de aceitação, 5 execuções × 30 gerações × 64 genomas, seeds 1–5, seed de validação 1, custos padrão; 28 800 episódios de treino e 11 200 de validação por variante):
+
+| Variante | Genes | Mediana na validação, geração final | Campeão do treino | Sobrevivência | Diversidade de corpo final |
+| --- | --- | --- | --- | --- | --- |
+| fixed | — | 2,43 ± 0,93 | 2,53 ± 0,94 | 61% | 0 |
+| all | tamanho, velocidade, sensor, eficiência | 3,18 ± 0,83 | 3,43 ± 0,77 | 86% | 0,050 ± 0,014 |
+| no-size | velocidade, sensor, eficiência | 2,97 ± 1,19 | 3,09 ± 0,87 | 66% | 0,047 ± 0,013 |
+| no-speed | tamanho, sensor, eficiência | 3,00 ± 1,71 | 3,13 ± 1,93 | 60% | 0,056 ± 0,020 |
+| no-sensor | tamanho, velocidade, eficiência | 3,02 ± 0,67 | 3,61 ± 0,36 | 74% | 0,057 ± 0,016 |
+| no-efficiency | tamanho, velocidade, sensor | 3,84 ± 0,59 | 3,93 ± 0,67 | 84% | 0,049 ± 0,007 |
+
+O controle reproduz exatamente a bateria do M3. Todas as variantes com genes de corpo tiveram média acima do corpo fixo (de +0,54 a +1,41), mas nenhuma diferença passa da variação entre execuções, nem para o corpo fixo nem para todos os genes: com este orçamento nenhum gene isolado mostra efeito, e o relatório diz isso. A diversidade de corpo cai de cerca de 0,56 na geração 0 para cerca de 0,05 já na geração 5, o mesmo colapso precoce observado nos pesos ([#44](https://github.com/ninguemdev/EDEN/issues/44)); os genes médios finais variam muito entre execuções (por exemplo, tamanho +0,24 ± 0,53 com todos os genes), então a direção que cada linhagem toma depende mais da execução do que de uma pressão consistente. Nenhuma variante superou o heurístico (4,65) na mediana, exceto uma execução de `no-speed`.
+
 ## Testes
 
 Pelo Editor: **Window → General → Test Runner**, abas EditMode e PlayMode.
 
-- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, genes de corpo (limites, herança e mutação, expressão no mundo, corpo fixo idêntico ao anterior e regras de custo: nenhum corpo melhor que a referência em tudo), avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados, arquivos de antes dos genes de corpo ainda lidos), ticks sem alocação de memória após o aquecimento (gravador de alocações da Unity), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, além de execuções longas com verificação de invariantes e independência de FPS.
+- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, genes de corpo (limites, herança e mutação, expressão no mundo, corpo fixo idêntico ao anterior e regras de custo: nenhum corpo melhor que a referência em tudo), avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados, arquivos de antes dos genes de corpo ainda lidos), ticks sem alocação de memória após o aquecimento (gravador de alocações da Unity), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, ablação dos genes de corpo (mesmo orçamento por variante, controle idêntico à bateria comum, diversidade de corpo, relatório), além de execuções longas com verificação de invariantes e independência de FPS.
 - **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id, gravação do CSV e os controles do laboratório, inclusive salvar, carregar, a medição de desempenho e o corpo evolutivo (tamanho desenhado, alcance do sensor e inspetor).
 
 Pela linha de comando, com o Editor **fechado** para este projeto:
@@ -351,7 +375,7 @@ Outras pastas: `Scenes`, `UI` (UXML e tema do UI Toolkit), `Art` e `Settings` (a
 | M2 | rede neural fixa 12 → 16 → 3 na CPU, genoma por criatura e visualização da rede | concluído |
 | M3 | evolução por gerações: avaliação isolada, elites, torneio, mutação, seeds de validação | concluído |
 | M4 | laboratório completo e checkpoints (MVP) | concluído |
-| M5 | biologia parametrizada: genes de corpo com custos e trade-offs | em andamento |
+| M5 | biologia parametrizada: genes de corpo com custos e trade-offs, ablação por gene | concluído |
 | M6 | ecossistema contínuo com reprodução local | planejado |
 | M7 | adaptação individual (plasticidade) como experimento | planejado |
 | M8 | escala orientada por perfilamento | planejado |
