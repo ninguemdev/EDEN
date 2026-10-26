@@ -25,6 +25,8 @@ namespace Eden.Tests.EditMode
         [TestCase("random")]
         public void SharedWorld_TicksDoNotAllocateAfterWarmup(string brain)
         {
+            WarmUpEveryTickPath();
+
             // Full initial energy, so nobody starves within the 360 ticks below (100 energy, at most 5.25/s), and a
             // 15 s life, so every creature dies of old age at tick 300, inside the measured ticks.
             var config = new SimulationConfig(new SimulationSettings
@@ -70,6 +72,7 @@ namespace Eden.Tests.EditMode
         [TestCase("neural")]
         public void IsolatedEpisode_TicksDoNotAllocateAfterWarmup(string brain)
         {
+            WarmUpEveryTickPath();
             var plan = new EvaluationPlan(new EvolutionSettings { ExperimentSeed = 4 });
             var genome = InitialGenomes.Population(4, 1)[0];
             var episode = new IsolatedEpisode(plan,
@@ -176,6 +179,32 @@ namespace Eden.Tests.EditMode
                 if (Directory.Exists(directory))
                     Directory.Delete(directory, true);
             }
+        }
+
+        // Under Mono the first execution of a method can allocate once (JIT work), e.g. the first death of the process.
+        // That is warm-up, not a per-tick cost: a throwaway world with short lives runs every tick path first, so the
+        // measurements below see steady-state ticks even when a test runs alone in a fresh domain.
+        private static void WarmUpEveryTickPath()
+        {
+            var config = new SimulationConfig(new SimulationSettings
+            {
+                Seed = 1, InitialPopulation = 8, InitialFood = 64, MaxAgeSeconds = 6f, FoodRespawnSeconds = 0.5f
+            });
+            var world = new WorldSimulation(WorldFactory.CreateInitial(config)) { Timings = new TickTimings() };
+            var brains = new BrainController(config, id => id.Value % 2 == 0
+                ? (IBrain)new MlpBrain(InitialGenomes.RandomFor(config, id))
+                : new HeuristicBrain());
+            var metrics = new MetricsRecorder(config, config.TicksPerSecond);
+            var recorder = new PerformanceRecorder();
+            for (var i = 0; i < 160 && !world.IsExtinct; i++)
+            {
+                world.Step(brains);
+                brains.Forget(world.LastDeaths);
+                metrics.Record(world);
+                recorder.AddTick(world.Timings);
+            }
+
+            Assert.That(world.IsExtinct, Is.True, "the warm-up reached the deaths");
         }
     }
 }
