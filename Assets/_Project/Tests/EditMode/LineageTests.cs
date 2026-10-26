@@ -194,9 +194,9 @@ namespace Eden.Tests.EditMode
             {
                 Thread.CurrentThread.CurrentCulture = new CultureInfo("pt-BR");
                 var evolution = new GenerationalEvolution(SmallExperiment(54));
-                var info = EvolutionCsvLog.Describe(evolution.Plan, evolution.Rules, "0.1.0",
+                var header = new ExperimentHeader(SmallExperiment(54), 0, "0.1.0",
                     new DateTime(2026, 10, 23, 12, 0, 0, DateTimeKind.Utc));
-                using (var log = new EvolutionCsvLog(directory, info))
+                using (var log = new EvolutionCsvLog(directory, header))
                 {
                     log.Append(evolution.Advance());
                     log.Append(evolution.Advance());

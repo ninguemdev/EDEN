@@ -170,6 +170,12 @@ namespace Eden.Tests.PlayMode
             Assert.That(Position(), Is.EqualTo(atSave));
             Assert.That(runner.Evolution.Training.Count, Is.EqualTo(trainedAtSave), "history restored");
             Assert.That(runner.Hud.Chart.PlottedGenerations, Is.EqualTo(trainedAtSave));
+            var experiment = File.ReadAllLines(Path.Combine(runner.EvolutionDirectory, "experiment.txt"));
+            Assert.That(experiment, Does.Contain("resumed_from=" + runner.CheckpointPath)
+                .And.Contain("resumed_at_generation=" + trainedAtSave)
+                .And.Contain("resumed_at_phase=" + runner.Evolution.Phase.ToString().ToLowerInvariant())
+                .And.Contain("preset=minimal"), "the export says where it came from");
+            Assert.That(File.Exists(Path.Combine(runner.EvolutionDirectory, "experiment.json")), Is.True);
             yield return Step(12);
             Assert.That(Position(), Is.EqualTo(later), "continues exactly like the saved run");
         }

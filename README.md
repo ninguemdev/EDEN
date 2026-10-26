@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa) e **M3** (evolução por gerações) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O **M4** (laboratório completo e checkpoints) está em andamento: o laboratório já inicia, mostra e inspeciona uma evolução pela interface e salva e retoma o experimento em checkpoints. Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa) e **M3** (evolução por gerações) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O **M4** (laboratório completo e checkpoints) está em andamento: o laboratório já inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades e compara presets. Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -112,13 +112,13 @@ Se o computador não acompanhar a velocidade pedida, o excesso de trabalho é de
 
 Cada execução do mundo compartilhado grava um diretório em `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\SimulationRuns\<data>-seed<n>-<cérebro>\` (fora do repositório), com:
 
-- `run-info.txt`: seed, cérebro, versão e parâmetros principais;
+- `run-info.txt`: seed, cérebro, modo de avaliação (`shared_inspection`), versão e parâmetros principais;
 - `metrics.csv`: uma linha por segundo simulado, com números em formato invariável (ponto decimal):
   `tick, simulated_seconds, population, food_available, food_eaten_window, starvation_deaths_window, old_age_deaths_window, mean_energy, total_food_eaten`.
 
 ### Checkpoints
 
-**Salvar** grava o experimento entre dois ticks em `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\Checkpoints\lab.json` (fora do repositório): a evolução inteira (configuração, população com os genomas, linhagem, histórico do gráfico, resultados já obtidos na geração em curso e o episódio em andamento) e, no mundo compartilhado, o mundo com a agenda de reposição, os geradores aleatórios e o estado do cérebro de cada criatura. **Carregar** volta exatamente a esse ponto: a execução retomada continua tick a tick igual à que foi salva (no mesmo computador e na mesma versão). Os logs da execução retomada vão para um diretório novo, que registra de onde ela veio.
+**Salvar** grava o experimento entre dois ticks em `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\Checkpoints\lab.json` (fora do repositório): a evolução inteira (configuração, população com os genomas, linhagem, histórico do gráfico, resultados já obtidos na geração em curso e o episódio em andamento) e, no mundo compartilhado, o mundo com a agenda de reposição, os geradores aleatórios e o estado do cérebro de cada criatura. **Carregar** volta exatamente a esse ponto: a execução retomada continua tick a tick igual à que foi salva (no mesmo computador e na mesma versão). Os logs da execução retomada vão para um diretório novo, que registra de onde ela veio: o arquivo, o hash do estado salvo, a geração, a fase e quantos episódios da avaliação em andamento já estavam prontos no checkpoint (esses vêm do arquivo e não são rodados de novo; o episódio interrompido continua do tick em que estava). Somando as linhas exportadas antes de salvar e depois de carregar, os CSVs ficam idênticos aos de uma execução sem interrupção.
 
 O arquivo é JSON legível, com versão do formato, versão do app, configuração e hashes. A gravação escreve primeiro um arquivo temporário na mesma pasta, confere que ele pode ser lido e só então troca o checkpoint; o anterior fica como `lab.json.bak`. Ao carregar, um arquivo corrompido, editado, incoerente ou de uma versão mais nova do formato é recusado com o motivo no painel, e a execução atual continua intacta; se o principal estiver estragado, o backup é usado.
 
@@ -152,12 +152,13 @@ Para rodar: menu **EDEN → Evolution → Run 20 generations (seed 1)** no Edito
 
 Opções: `-eden-seed N`, `-eden-generations N`, `-eden-food N` (comida do episódio, padrão 32) e `-eden-output DIR`. Sem `-eden-output`, o resultado vai para `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\EvolutionRuns\<data>-seed<n>\`:
 
-- `experiment.txt`: todos os parâmetros do experimento;
+- `experiment.txt` e `experiment.json`: todos os parâmetros do experimento, o hash da configuração (o mesmo texto canônico que os checkpoints usam: hash igual, experimento igual), o modo de avaliação e a unidade de cada coluna dos CSVs; numa execução retomada, também a origem descrita em [checkpoints](#checkpoints);
+- `summary.json`: reescrito a cada geração com os totais de treino e validação, os últimos resumos, o melhor resultado de treino e o campeão na validação;
 - `generations.csv`: uma linha por geração com melhor, quartis, mediana, pior e média do fitness, sobrevivência, diversidade dos pesos (desvio padrão médio por peso e distância média ao centróide), indivíduos novos, elites e pais distintos;
 - `individuals.csv`: cada indivíduo avaliado, com id, pai, geração de nascimento e resultados;
 - `episodes.csv`: cada indivíduo × seed, antes de qualquer média.
 
-Os três CSVs se ligam por geração, modo de avaliação e candidato. O fitness de treino sozinho não separa progresso real de sobreajuste; para isso servem a validação e a bateria abaixo.
+Os três CSVs se ligam por geração, modo de avaliação (`training` ou `validation`) e candidato; números sempre com ponto decimal. O fitness é medido em energia de comida por segundo simulado. O fitness de treino sozinho não separa progresso real de sobreajuste; para isso servem a validação e a bateria abaixo.
 
 ### Validação e bateria de execuções
 
@@ -187,6 +188,27 @@ Primeira bateria de aceitação (valores propostos, 32 comidas por episódio, se
 
 Referências nos mesmos cenários: aleatório 0,13 (nunca sobrevive aos 120 s) e heurístico 4,65 (sempre sobrevive). A mediana final superou a da geração 0 e o aleatório nas 5 execuções, mas **não superou o heurístico em nenhuma**: depois de 30 gerações as redes evoluídas ainda ficam bem abaixo de regras simples escritas à mão. A variação entre execuções é grande e a diversidade dos pesos cai depressa nas primeiras gerações. É um resultado com esta configuração, não uma garantia.
 
+### Comparar presets
+
+A comparação roda a mesma bateria (mesmas seeds de experimento e de validação, mesmas gerações e o mesmo episódio) uma vez para cada preset, então os presets diferem só no número de genomas por geração:
+
+```powershell
+& "C:\Program Files\Unity\Hub\Editor\6000.3.27f1\Editor\Unity.exe" -batchmode -projectPath . `
+  -executeMethod Eden.Editor.EvolutionBatch.ComparePresetsFromCommandLine -eden-seed 1 -logFile presets.log
+```
+
+Aceita as opções da bateria e `-eden-presets minimal,standard,stress` (padrão: os três). O diretório contém `presets.csv` (uma linha por preset), `comparison.json` (definição comum, hash da configuração de cada preset, resultados e custo), `comparison.txt` e, por preset, os arquivos da bateria e de cada execução. Um preset maior avalia mais episódios por geração, por isso o relatório mostra quantos episódios cada um usou e só declara um vencedor quando a diferença passa da variação entre execuções.
+
+Primeira comparação (bateria de aceitação, 5 execuções × 30 gerações, seeds 1–5, seed de validação 1):
+
+| Preset | Genomas | Mediana na validação, geração final | Campeão do treino | Episódios de treino | Tempo de relógio |
+| --- | --- | --- | --- | --- | --- |
+| Mínimo | 32 | 2,30 ± 1,08 | 2,54 ± 1,15 | 14 400 | 100 s |
+| Padrão | 64 | 2,43 ± 0,93 | 2,53 ± 0,94 | 28 800 | 195 s |
+| Estresse | 128 | 2,80 ± 1,08 | 2,90 ± 1,33 | 57 600 | 395 s |
+
+O estresse teve a maior média, com 4× os episódios de treino do mínimo, mas a diferença fica dentro da variação entre execuções: com este orçamento os presets não se separam. Nos três, a mediana final superou o aleatório e a própria geração 0 em todas as execuções e não superou o heurístico (4,65) em nenhuma. O padrão repete exatamente a bateria acima.
+
 **Economia do episódio isolado.** Os valores (32 comidas, energia inicial 50, metabolismo 1/s, movimento 2/s, episódio de 120 s) foram medidos contra os cérebros de referência numa grade de combinações (comida 32/64/128, energia inicial 50/100, movimento 2/1, metabolismo 1/0,5, duração 120/60 s) em 20 seeds de calibração próprias, que não são de treino nem de validação. Com eles o heurístico sobrevive em todos os episódios (fitness 4,37 ± 0,36) e o aleatório em nenhum (0,09 ± 0,11), então foram mantidos. Para repetir a medição:
 
 ```powershell
@@ -198,7 +220,7 @@ Referências nos mesmos cenários: aleatório 0,13 (nunca sobrevive aos 120 s) e
 
 Pelo Editor: **Window → General → Test Runner**, abas EditMode e PlayMode.
 
-- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados), além de execuções longas com verificação de invariantes e independência de FPS.
+- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, além de execuções longas com verificação de invariantes e independência de FPS.
 - **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id, gravação do CSV e os controles do laboratório, inclusive salvar e carregar.
 
 Pela linha de comando, com o Editor **fechado** para este projeto:

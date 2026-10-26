@@ -110,6 +110,7 @@ namespace Eden.Tests.EditMode
 
             Assert.That(lines, Does.Contain("seed=12"));
             Assert.That(lines, Does.Contain("brain=heuristic-v1"));
+            Assert.That(lines, Does.Contain("evaluation_mode=shared_inspection"));
             Assert.That(lines, Does.Contain("created_utc=2026-10-23T12:00:00Z"));
             Assert.That(lines, Does.Contain("arena=50x50"));
         }

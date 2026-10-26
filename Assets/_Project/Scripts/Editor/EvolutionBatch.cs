@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Globalization;
 using System.IO;
 using Eden.Application;
@@ -17,6 +19,8 @@ namespace Eden.Editor
     /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.RunBatteryFromCommandLine
     ///   [-eden-seed N] [-eden-runs N] [-eden-generations N] [-eden-validation-interval N] [-eden-food N]
     ///   [-eden-output DIR] -logFile -
+    /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.ComparePresetsFromCommandLine
+    ///   [-eden-presets minimal,standard,stress] and the battery options -logFile -
     /// Settings not given keep the proposed defaults of <see cref="EvolutionSettings"/> and <see cref="BatterySettings"/>.
     /// </summary>
     public static class EvolutionBatch
@@ -51,6 +55,17 @@ namespace Eden.Editor
             });
         }
 
+        public static void ComparePresetsFromCommandLine()
+        {
+            RunAndExit(() =>
+            {
+                var settings = new EvolutionSettings { ExperimentSeed = 1 };
+                var battery = new BatterySettings();
+                var output = ReadArguments(settings, battery);
+                ComparePresets(settings, battery, ReadPresets(), output);
+            });
+        }
+
         private static void Run(EvolutionSettings settings, int generations, string output)
         {
             if (generations < 1)
@@ -58,11 +73,10 @@ namespace Eden.Editor
 
             var evolution = new GenerationalEvolution(settings);
             var directory = output ?? DefaultDirectory($"seed{settings.ExperimentSeed}");
-            var info = EvolutionCsvLog.Describe(evolution.Plan, evolution.Rules, UnityEngine.Application.version,
-                DateTime.UtcNow);
+            var header = new ExperimentHeader(settings, 0, UnityEngine.Application.version, DateTime.UtcNow);
             var started = DateTime.UtcNow;
 
-            using (var log = new EvolutionCsvLog(directory, info))
+            using (var log = new EvolutionCsvLog(directory, header))
             {
                 for (var g = 0; g < generations; g++)
                 {
@@ -86,15 +100,7 @@ namespace Eden.Editor
             {
                 var result = runner.Run((run, report) =>
                 {
-                    if (logs[run] == null)
-                    {
-                        var runSettings = settings.WithExperimentSeed(runner.RunSeed(run));
-                        logs[run] = new EvolutionCsvLog(
-                            Path.Combine(directory, $"run{run}-seed{runner.RunSeed(run)}"),
-                            EvolutionCsvLog.Describe(new EvaluationPlan(runSettings), new ReproductionRules(runSettings),
-                                UnityEngine.Application.version, DateTime.UtcNow));
-                    }
-
+                    logs[run] ??= RunLog(directory, run, settings.WithExperimentSeed(runner.RunSeed(run)), battery, null);
                     logs[run].Append(report);
                     LogSummary(run, report.Summary);
                 });
@@ -109,6 +115,66 @@ namespace Eden.Editor
                 foreach (var log in logs)
                     log?.Dispose();
             }
+        }
+
+        private static void ComparePresets(EvolutionSettings settings, BatterySettings battery,
+            IReadOnlyList<ExperimentPreset> presets, string output)
+        {
+            var comparison = new PresetComparison(settings, battery, presets);
+            var directory = output ?? DefaultDirectory($"presets-seed{settings.ExperimentSeed}x{battery.Runs}");
+            var logs = new Dictionary<(string, int), EvolutionCsvLog>();
+            try
+            {
+                var result = comparison.Run((preset, run, report) =>
+                {
+                    if (!logs.TryGetValue((preset.Name, run), out var log))
+                    {
+                        var runSettings = comparison.Settings(preset).WithExperimentSeed(settings.ExperimentSeed + (ulong)run);
+                        log = RunLog(Path.Combine(directory, preset.Name), run, runSettings, battery, preset.Name);
+                        logs.Add((preset.Name, run), log);
+                    }
+
+                    log.Append(report);
+                    LogSummary(run, report.Summary);
+                });
+
+                PresetComparisonReport.Write(directory, comparison, result, UnityEngine.Application.version, DateTime.UtcNow);
+                foreach (var line in PresetComparisonReport.Describe(result))
+                    Debug.Log("EDEN presets | " + line);
+                Debug.Log("EDEN preset comparison finished: output=" + directory);
+            }
+            finally
+            {
+                foreach (var log in logs.Values)
+                    log.Dispose();
+            }
+        }
+
+        private static EvolutionCsvLog RunLog(string directory, int run, EvolutionSettings runSettings,
+            BatterySettings battery, string preset) =>
+            new EvolutionCsvLog(Path.Combine(directory, $"run{run}-seed{runSettings.ExperimentSeed}"),
+                new ExperimentHeader(runSettings, battery.ValidationInterval, UnityEngine.Application.version,
+                    DateTime.UtcNow, preset));
+
+        private static IReadOnlyList<ExperimentPreset> ReadPresets()
+        {
+            var args = Environment.GetCommandLineArgs();
+            for (var i = 0; i + 1 < args.Length; i++)
+            {
+                if (args[i] != "-eden-presets")
+                    continue;
+                var presets = new List<ExperimentPreset>();
+                foreach (var name in args[i + 1].Split(','))
+                {
+                    var preset = ExperimentPreset.All.FirstOrDefault(p => p.Name == name.Trim()) ??
+                                 throw new ArgumentException($"Unknown preset \"{name}\".");
+                    presets.Add(preset);
+                }
+
+                return presets;
+            }
+
+            return ExperimentPreset.All;
         }
 
         private static string ReadArguments(EvolutionSettings settings, BatterySettings battery)
