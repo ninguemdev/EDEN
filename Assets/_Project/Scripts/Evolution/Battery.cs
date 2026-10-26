@@ -55,14 +55,24 @@ namespace Eden.Evolution
     {
         public ValidationPoint(GenerationSummary training, GenerationSummary validation, long championId,
             CandidateEvaluation championValidation)
+            : this(training, validation, championId,
+                championValidation?.MeanFitness ?? throw new ArgumentNullException(nameof(championValidation)),
+                championValidation.SurvivalRate)
+        {
+        }
+
+        /// <summary>A point as it was saved: the champion's validation results as values.</summary>
+        public ValidationPoint(GenerationSummary training, GenerationSummary validation, long championId,
+            float championFitness, float championSurvivalRate)
         {
             Training = training ?? throw new ArgumentNullException(nameof(training));
             Validation = validation ?? throw new ArgumentNullException(nameof(validation));
-            if (training.Generation != validation.Generation || validation.Mode != EvaluationMode.Validation)
+            if (training.Generation != validation.Generation || training.Mode != EvaluationMode.Training ||
+                validation.Mode != EvaluationMode.Validation)
                 throw new ArgumentException("Validation must cover the same generation.", nameof(validation));
             ChampionId = championId;
-            ChampionFitness = championValidation?.MeanFitness ?? throw new ArgumentNullException(nameof(championValidation));
-            ChampionSurvivalRate = championValidation.SurvivalRate;
+            ChampionFitness = championFitness;
+            ChampionSurvivalRate = championSurvivalRate;
         }
 
         public int Generation => Training.Generation;

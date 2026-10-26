@@ -20,6 +20,11 @@
                     <ui:Button name="faster-button" text="2×" class="lab-button" />
                     <ui:Button name="max-button" text="Máx." class="lab-button" />
                 </ui:VisualElement>
+                <ui:VisualElement class="lab-row">
+                    <ui:Button name="save-button" text="Salvar" class="lab-button" />
+                    <ui:Button name="load-button" text="Carregar" class="lab-button" />
+                </ui:VisualElement>
+                <ui:Label name="checkpoint-status" text="" style="display: none; font-size: 12px; color: rgb(160, 190, 180); white-space: normal; margin-top: 2px;" />
             </ui:VisualElement>
             <ui:Label name="run-stats" text="" style="font-size: 14px; color: rgb(214, 226, 220); white-space: normal; margin-top: 8px;" />
             <ui:VisualElement name="chart-panel" picking-mode="Ignore" style="display: none; margin-top: 8px;">
@@ -37,5 +42,5 @@
             </ui:VisualElement>
         </ui:VisualElement>
     </ui:VisualElement>
-    <ui:Label name="help" picking-mode="Ignore" text="Espaço pausar · . um tick · - / = velocidade · M máx. · clique ou [ ] selecionar · Esc limpar · R reiniciar · B trocar cérebro" style="position: absolute; left: 16px; bottom: 12px; font-size: 14px; color: rgb(140, 178, 164);" />
+    <ui:Label name="help" picking-mode="Ignore" text="Espaço pausar · . um tick · - / = velocidade · M máx. · clique ou [ ] selecionar · Esc limpar · R reiniciar · B trocar cérebro · F5 salvar · F9 carregar" style="position: absolute; left: 16px; bottom: 12px; font-size: 14px; color: rgb(140, 178, 164);" />
 </ui:UXML>

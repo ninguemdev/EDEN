@@ -124,6 +124,42 @@ namespace Eden.Evolution
             Candidates = candidates ?? throw new ArgumentNullException(nameof(candidates));
         }
 
+        /// <summary>
+        /// Evaluation rebuilt from saved per-episode results, which must be complete and in candidate-major, seed-minor
+        /// order for these seeds, generation and mode; candidates are aggregated as during the evaluation.
+        /// </summary>
+        public static GenerationEvaluation FromEpisodes(int generation, EvaluationMode mode, IReadOnlyList<ulong> seeds,
+            IReadOnlyList<EpisodeResult> episodes, int ticksPerSecond)
+        {
+            if (seeds == null || seeds.Count == 0)
+                throw new ArgumentException("At least one seed is required.", nameof(seeds));
+            if (episodes == null || episodes.Count == 0 || episodes.Count % seeds.Count != 0)
+                throw new ArgumentException($"Expected a whole number of candidates × {seeds.Count} seeds.", nameof(episodes));
+            if (ticksPerSecond < 1)
+                throw new ArgumentOutOfRangeException(nameof(ticksPerSecond));
+
+            var ordered = new EpisodeResult[episodes.Count];
+            var candidates = new CandidateEvaluation[episodes.Count / seeds.Count];
+            for (var i = 0; i < ordered.Length; i++)
+            {
+                var episode = episodes[i];
+                var candidate = i / seeds.Count;
+                var seedIndex = i % seeds.Count;
+                if (episode.Generation != generation || episode.Mode != mode || episode.Candidate != candidate ||
+                    episode.SeedIndex != seedIndex || episode.EpisodeSeed != seeds[seedIndex])
+                    throw new ArgumentException($"Episode {i} is not candidate {candidate} on seed {seedIndex}.", nameof(episodes));
+                ordered[i] = episode;
+            }
+
+            var seedCopy = new ulong[seeds.Count];
+            for (var s = 0; s < seedCopy.Length; s++)
+                seedCopy[s] = seeds[s];
+            for (var c = 0; c < candidates.Length; c++)
+                candidates[c] = new CandidateEvaluation(c, new ArraySegment<EpisodeResult>(ordered, c * seeds.Count, seeds.Count)
+                    .ToArray(), ticksPerSecond);
+            return new GenerationEvaluation(generation, mode, seedCopy, ordered, candidates);
+        }
+
         public int Generation { get; }
         public EvaluationMode Mode { get; }
         public IReadOnlyList<ulong> Seeds { get; }

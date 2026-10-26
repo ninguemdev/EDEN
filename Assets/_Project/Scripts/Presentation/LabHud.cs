@@ -38,6 +38,7 @@ namespace Eden.Presentation
             { "Heurístico", "Aleatório", "Rede aleatória", "População evoluída" };
 
         private Label runStats;
+        private Label checkpointStatus;
         private Label inspector;
         private VisualElement inspectorPanel;
         private VisualElement networkPanel;
@@ -62,8 +63,11 @@ namespace Eden.Presentation
         public event Action SlowerClicked;
         public event Action FasterClicked;
         public event Action MaxClicked;
+        public event Action SaveClicked;
+        public event Action LoadClicked;
 
         public string RunText => Bind() ? runStats.text : string.Empty;
+        public string CheckpointText => Bind() ? checkpointStatus.text : string.Empty;
         public string InspectorText => Bind() && inspectorVisible ? inspector.text : string.Empty;
         public bool NetworkVisible { get; private set; }
         public bool ChartVisible { get; private set; }
@@ -77,6 +81,15 @@ namespace Eden.Presentation
         {
             if (Bind())
                 runStats.text = text;
+        }
+
+        /// <summary>Outcome of the last save or load, under the checkpoint buttons; hidden when null.</summary>
+        public void ShowCheckpointStatus(string text)
+        {
+            if (!Bind())
+                return;
+            checkpointStatus.text = text ?? string.Empty;
+            checkpointStatus.style.display = text == null ? DisplayStyle.None : DisplayStyle.Flex;
         }
 
         /// <summary>Shows the inspector with <paramref name="text"/>, or hides it when the text is null.</summary>
@@ -236,8 +249,10 @@ namespace Eden.Presentation
             var chartHost = root.Q<VisualElement>("generation-chart-host");
             var legend = root.Q<Label>("chart-legend");
             var controlsElement = root.Q<VisualElement>("experiment-panel");
+            var checkpointLabel = root.Q<Label>("checkpoint-status");
             if (stats == null || inspectorLabel == null || inspectorElement == null || networkElement == null ||
-                host == null || chartElement == null || chartHost == null || legend == null || controlsElement == null)
+                host == null || chartElement == null || chartHost == null || legend == null || controlsElement == null ||
+                checkpointLabel == null)
                 return false;
 
             inspector = inspectorLabel;
@@ -278,6 +293,9 @@ namespace Eden.Presentation
             root.Q<Button>("faster-button").clicked += () => FasterClicked?.Invoke();
             maxButton = root.Q<Button>("max-button");
             maxButton.clicked += () => MaxClicked?.Invoke();
+            root.Q<Button>("save-button").clicked += () => SaveClicked?.Invoke();
+            root.Q<Button>("load-button").clicked += () => LoadClicked?.Invoke();
+            checkpointStatus = checkpointLabel;
             runStats = stats;
             ApplyChoice();
             return true;

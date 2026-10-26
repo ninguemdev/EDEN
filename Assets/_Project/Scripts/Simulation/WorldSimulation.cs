@@ -12,7 +12,7 @@ namespace Eden.Simulation
     {
         private static readonly SimulationEvent FoodRespawn = new SimulationEvent(SimulationEventKind.FoodRespawn);
 
-        private readonly TickScheduler<SimulationEvent> agenda = new TickScheduler<SimulationEvent>();
+        private readonly TickScheduler<SimulationEvent> agenda;
         private readonly List<ScheduledEvent<SimulationEvent>> dueEvents = new List<ScheduledEvent<SimulationEvent>>();
         private readonly List<CreatureDeath> deaths = new List<CreatureDeath>();
         private Observation[] observations = Array.Empty<Observation>();
@@ -20,9 +20,46 @@ namespace Eden.Simulation
         private float[] foodGains = Array.Empty<float>();
 
         public WorldSimulation(WorldState world)
+            : this(world, new TickScheduler<SimulationEvent>())
+        {
+        }
+
+        private WorldSimulation(WorldState world, TickScheduler<SimulationEvent> agenda)
         {
             World = world ?? throw new ArgumentNullException(nameof(world));
+            this.agenda = agenda;
         }
+
+        /// <summary>
+        /// Rebuilds a simulation from <paramref name="saved"/> with the config it ran with. The saved world is checked by
+        /// <see cref="WorldState.Restore"/> and the agenda by <see cref="TickScheduler{T}.Restore"/>; on any problem
+        /// nothing is built and an <see cref="ArgumentException"/> explains why.
+        /// </summary>
+        public static WorldSimulation Restore(SimulationConfig config, SimulationSnapshot saved)
+        {
+            if (config == null)
+                throw new ArgumentNullException(nameof(config));
+            if (saved == null)
+                throw new ArgumentNullException(nameof(saved));
+            if (saved.CorrectedInputValues < 0)
+                throw new ArgumentException("The corrected input count must not be negative.", nameof(saved));
+            foreach (var pending in saved.Agenda)
+            {
+                if (pending.Payload.Kind != SimulationEventKind.FoodRespawn)
+                    throw new ArgumentException($"Unknown event kind {pending.Payload.Kind}.", nameof(saved));
+            }
+
+            var world = WorldState.Restore(config, saved.Tick, saved.NextCreatureId, saved.NextFoodId, saved.WorldRandom,
+                saved.SpawnRandom, saved.Creatures, saved.Food);
+            var agenda = TickScheduler<SimulationEvent>.Restore(saved.Agenda, saved.NextEventSequence, saved.Tick - 1);
+            return new WorldSimulation(world, agenda) { CorrectedInputValues = saved.CorrectedInputValues };
+        }
+
+        /// <summary>Detached copy of the state between ticks; later steps never change it.</summary>
+        public SimulationSnapshot Capture() =>
+            new SimulationSnapshot(World.Tick, World.NextCreatureId, World.NextFoodId, World.WorldRandom.State,
+                World.SpawnRandom.State, World.Creatures, World.Food, agenda.SnapshotPending(), agenda.NextSequence,
+                CorrectedInputValues);
 
         public WorldState World { get; }
         public bool IsExtinct => World.Creatures.Count == 0;

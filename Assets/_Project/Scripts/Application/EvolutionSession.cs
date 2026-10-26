@@ -35,13 +35,78 @@ namespace Eden.Application
         private IReadOnlyList<Individual> jobIndividuals;
 
         public EvolutionSession(EvolutionSettings settings, int validationInterval = DefaultValidationInterval)
+            : this(new GenerationalEvolution(settings), validationInterval)
+        {
+            BeginTraining();
+        }
+
+        private EvolutionSession(GenerationalEvolution evolution, int validationInterval)
         {
             if (validationInterval < 1)
                 throw new ArgumentOutOfRangeException(nameof(validationInterval), "Must be at least 1.");
-            Evolution = new GenerationalEvolution(settings);
+            Evolution = evolution;
             evaluator = new IsolatedEvaluator(Evolution.Plan);
             ValidationInterval = validationInterval;
-            BeginTraining();
+        }
+
+        /// <summary>
+        /// Rebuilds a session saved between ticks; advancing it gives exactly what advancing the original would have.
+        /// The evolution, the evaluation in progress and the history are checked against each other first, and on any
+        /// problem nothing is built and an <see cref="ArgumentException"/> explains why.
+        /// </summary>
+        public static EvolutionSession Restore(EvolutionSnapshot saved)
+        {
+            if (saved == null)
+                throw new ArgumentNullException(nameof(saved));
+
+            var previous = saved.Generation > 0 ? saved.LastTrainingIndividuals : null;
+            var evolution = GenerationalEvolution.Restore(saved.Settings, saved.Generation, saved.Population,
+                Lineage.Restore(saved.Lineage), previous);
+            var session = new EvolutionSession(evolution, saved.ValidationInterval);
+            var plan = evolution.Plan;
+            var ticksPerSecond = plan.EpisodeConfig(plan.ValidationSeed).TicksPerSecond;
+
+            if (previous != null)
+            {
+                if (saved.LastTrainingEpisodes == null)
+                    throw new ArgumentException("The last training evaluation is missing.", nameof(saved));
+                var last = saved.Generation - 1;
+                session.LastTraining = new GenerationReport(GenerationEvaluation.FromEpisodes(last,
+                    EvaluationMode.Training, plan.TrainingSeeds(last), saved.LastTrainingEpisodes, ticksPerSecond), previous);
+            }
+
+            if (saved.BaselineEpisodes != null)
+            {
+                var baselines = GenerationEvaluation.FromEpisodes(0, EvaluationMode.Validation, plan.ValidationSeeds(),
+                    saved.BaselineEpisodes, ticksPerSecond);
+                if (baselines.Candidates.Count != 2)
+                    throw new ArgumentException("Baselines are the random and the heuristic brain.", nameof(saved));
+                session.RandomBaseline = baselines.Candidates[0];
+                session.HeuristicBaseline = baselines.Candidates[1];
+            }
+
+            CheckHistory(saved);
+            session.training.AddRange(saved.Training);
+            session.validation.AddRange(saved.Validation);
+            session.TotalTicks = saved.TotalTicks;
+
+            switch (saved.Phase)
+            {
+                case EvolutionPhase.Training:
+                    session.BeginTraining();
+                    break;
+                case EvolutionPhase.Baselines when session.LastTraining != null && session.HeuristicBaseline == null:
+                    session.BeginBaselines();
+                    break;
+                case EvolutionPhase.Validation when session.LastTraining != null && session.HeuristicBaseline != null:
+                    session.BeginValidation();
+                    break;
+                default:
+                    throw new ArgumentException($"Phase {saved.Phase} does not fit the saved evolution.", nameof(saved));
+            }
+
+            session.Job.Resume(saved.Job);
+            return session;
         }
 
         public GenerationalEvolution Evolution { get; }
@@ -81,6 +146,22 @@ namespace Eden.Application
 
         /// <summary>Raised with every training and validation report as soon as it is complete.</summary>
         public event Action<GenerationReport> ReportCompleted;
+
+        /// <summary>Detached copy of the session between ticks, for <see cref="Restore"/>.</summary>
+        public EvolutionSnapshot Capture()
+        {
+            EpisodeResult[] baselines = null;
+            if (HeuristicBaseline != null)
+            {
+                var episodes = new List<EpisodeResult>(RandomBaseline.Episodes);
+                episodes.AddRange(HeuristicBaseline.Episodes);
+                baselines = episodes.ToArray();
+            }
+
+            return new EvolutionSnapshot(Evolution.Settings, ValidationInterval, Evolution.Generation,
+                Evolution.Individuals, Evolution.Lineage.Entries(), LastTraining?.Individuals,
+                LastTraining?.Evaluation.Episodes, baselines, training, validation, TotalTicks, Phase, Job.Capture());
+        }
 
         /// <summary>
         /// Simulates up to <paramref name="maxTicks"/> ticks, completing evaluations and generations on the way, and
@@ -154,6 +235,27 @@ namespace Eden.Application
             Phase = EvolutionPhase.Validation;
             jobIndividuals = LastTraining.Individuals;
             Job = Evolution.BeginValidation(LastTraining);
+        }
+
+        // One training summary per finished generation and validation points in order, as a running session has them.
+        private static void CheckHistory(EvolutionSnapshot saved)
+        {
+            if (saved.Training.Count != saved.Generation || saved.TotalTicks < 0)
+                throw new ArgumentException($"Expected {saved.Generation} training summaries.", nameof(saved));
+            for (var g = 0; g < saved.Training.Count; g++)
+            {
+                if (saved.Training[g].Generation != g || saved.Training[g].Mode != EvaluationMode.Training)
+                    throw new ArgumentException($"Training summary {g} is out of place.", nameof(saved));
+            }
+
+            var previous = -1;
+            foreach (var point in saved.Validation)
+            {
+                if (point.Generation <= previous || point.Generation >= saved.Generation ||
+                    point.Generation % saved.ValidationInterval != 0)
+                    throw new ArgumentException($"Validation of generation {point.Generation} is out of place.", nameof(saved));
+                previous = point.Generation;
+            }
         }
 
         private static int IndexOf(IReadOnlyList<Individual> individuals, long id)

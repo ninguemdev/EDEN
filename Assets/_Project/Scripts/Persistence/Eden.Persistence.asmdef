@@ -3,6 +3,7 @@
   "rootNamespace": "Eden.Persistence",
   "references": [
     "Eden.Domain",
+    "Eden.Simulation",
     "Eden.Application",
     "Eden.Evolution"
   ],
