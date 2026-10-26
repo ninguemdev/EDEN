@@ -28,6 +28,13 @@ namespace Eden.Simulation
         {
             World = world ?? throw new ArgumentNullException(nameof(world));
             this.agenda = agenda;
+
+            // Room for the most there can be (food is never created, only respawned; creatures are never born), so
+            // ticks do not allocate as lists grow; a new isolated episode is allocation-free from its first tick.
+            agenda.Reserve(world.Config.InitialFood);
+            dueEvents.Capacity = world.Config.InitialFood;
+            deaths.Capacity = Math.Max(world.Config.InitialPopulation, world.Creatures.Count);
+            EnsureCapacity(world.Creatures.Count);
         }
 
         /// <summary>

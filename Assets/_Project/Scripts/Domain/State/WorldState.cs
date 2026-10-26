@@ -12,9 +12,13 @@ namespace Eden.Domain
         private readonly List<CreatureState> creatures = new List<CreatureState>();
         private readonly List<FoodState> food = new List<FoodState>();
 
+        // Eaten items that left the world, reused by AddFood; never part of the state.
+        private readonly Stack<FoodState> spareFood;
+
         public WorldState(SimulationConfig config)
         {
             Config = config;
+            spareFood = new Stack<FoodState>(config.InitialFood);
             WorldRandom = SeedDerivation.CreateStream(config.Seed, RandomStream.World);
             SpawnRandom = SeedDerivation.CreateStream(config.Seed, RandomStream.Spawn);
             NextCreatureId = 1;
@@ -25,6 +29,7 @@ namespace Eden.Domain
             Pcg32State worldRandom, Pcg32State spawnRandom)
         {
             Config = config;
+            spareFood = new Stack<FoodState>(config.InitialFood);
             Tick = tick;
             NextCreatureId = nextCreatureId;
             NextFoodId = nextFoodId;
@@ -107,16 +112,55 @@ namespace Eden.Domain
 
         public FoodState AddFood(Float2 position, float energy)
         {
-            var item = new FoodState(new FoodId(NextFoodId++), position, energy);
+            var id = new FoodId(NextFoodId++);
+            FoodState item;
+            if (spareFood.Count > 0)
+            {
+                item = spareFood.Pop();
+                item.Reuse(id, position, energy);
+            }
+            else
+            {
+                item = new FoodState(id, position, energy);
+            }
+
             food.Add(item);
             return item;
         }
 
-        /// <summary>Removes eaten food, keeping id order. Returns how many items were removed.</summary>
-        public int RemoveEatenFood() => food.RemoveAll(item => item.IsEaten);
+        /// <summary>Removes eaten food, keeping id order, and keeps the items for reuse. Returns how many were removed.</summary>
+        public int RemoveEatenFood()
+        {
+            var kept = 0;
+            for (var i = 0; i < food.Count; i++)
+            {
+                var item = food[i];
+                if (item.IsEaten)
+                    spareFood.Push(item);
+                else
+                    food[kept++] = item;
+            }
+
+            var removed = food.Count - kept;
+            food.RemoveRange(kept, removed);
+            return removed;
+        }
 
         /// <summary>Removes dead creatures, keeping id order. Returns how many creatures were removed.</summary>
-        public int RemoveDeadCreatures() => creatures.RemoveAll(creature => !creature.IsAlive);
+        public int RemoveDeadCreatures()
+        {
+            // A loop rather than RemoveAll: its delegate would be allocated at the first death.
+            var kept = 0;
+            for (var i = 0; i < creatures.Count; i++)
+            {
+                if (creatures[i].IsAlive)
+                    creatures[kept++] = creatures[i];
+            }
+
+            var removed = creatures.Count - kept;
+            creatures.RemoveRange(kept, removed);
+            return removed;
+        }
 
         private static void CheckCreatures(SimulationConfig config, IReadOnlyList<CreatureState> creatures, int nextId,
             List<string> errors)

@@ -70,8 +70,10 @@ namespace Eden.Presentation
         {
             frame++;
             var maxEnergy = world.Config.MaxEnergy;
-            foreach (var creature in world.Creatures)
+            // Indexed loops: a foreach over the read-only lists would allocate an enumerator every frame.
+            for (var i = 0; i < world.Creatures.Count; i++)
             {
+                var creature = world.Creatures[i];
                 if (!creatures.TryGetValue(creature.Id, out var visual))
                 {
                     visual = creaturePool.Count > 0 ? creaturePool.Pop() : CreateCreatureVisual();
@@ -86,8 +88,9 @@ namespace Eden.Presentation
                 visual.Selection.enabled = selected.HasValue && selected.Value == creature.Id;
             }
 
-            foreach (var item in world.Food)
+            for (var i = 0; i < world.Food.Count; i++)
             {
+                var item = world.Food[i];
                 if (!food.TryGetValue(item.Id, out var visual))
                 {
                     visual = foodPool.Count > 0 ? foodPool.Pop() : CreateFoodVisual();
