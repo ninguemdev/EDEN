@@ -4,7 +4,7 @@ EDEN é um laboratório visual de vida artificial feito em Unity. Uma populaçã
 
 O foco está em experimentos reproduzíveis e inspecionáveis: com a mesma seed e a mesma configuração, a simulação produz o mesmo resultado, e qualquer criatura pode ser selecionada para ver o que ela sente e o que decidiu.
 
-> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa) e **M3** (evolução por gerações) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O **M4** (laboratório completo e checkpoints) está em andamento: o laboratório já inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades e compara presets. Veja o [roadmap](#roadmap).
+> Estado atual: os marcos **M1** (simulação determinística e baseline), **M2** (rede neural fixa) e **M3** (evolução por gerações) estão concluídos. Genomas evoluem em episódios isolados, com seeds de validação fora da seleção e comparação com os cérebros de referência; na primeira bateria a evolução superou o aleatório, mas ainda não o heurístico. O **M4** (laboratório completo e checkpoints) está em andamento: o laboratório já inicia, mostra e inspeciona uma evolução pela interface, salva e retoma o experimento em checkpoints, exporta os dados com unidades, compara presets e mede o próprio desempenho no build. Veja o [roadmap](#roadmap).
 
 ## Como funciona
 
@@ -220,8 +220,8 @@ O estresse teve a maior média, com 4× os episódios de treino do mínimo, mas 
 
 Pelo Editor: **Window → General → Test Runner**, abas EditMode e PlayMode.
 
-- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, além de execuções longas com verificação de invariantes e independência de FPS.
-- **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id, gravação do CSV e os controles do laboratório, inclusive salvar e carregar.
+- **EditMode:** gerador aleatório (com os vetores oficiais do PCG32 e do SplitMix64), configuração, relógio de ticks, agenda de eventos, sensores, regras do mundo, cérebros, rede neural, genoma, avaliação isolada, seleção, mutação, linhagem, validação separada do treino, bateria, métricas e CSV, checkpoints (retomada idêntica à execução ininterrupta, floats exatos em outra cultura, arquivos corrompidos ou de versão futura recusados), ticks sem alocação de memória após o aquecimento (gravador de alocações da Unity), exportação (JSON com unidades; CSVs de antes de salvar e depois de carregar, no meio de um episódio, iguais aos da execução sem interrupção, sem episódio repetido), comparação de presets, além de execuções longas com verificação de invariantes e independência de FPS.
+- **PlayMode:** a cena Bootstrap real: renderização, pausa, avanço de um tick, inspeção por id, gravação do CSV e os controles do laboratório, inclusive salvar, carregar e a medição de desempenho.
 
 Pela linha de comando, com o Editor **fechado** para este projeto:
 
@@ -241,7 +241,7 @@ No Editor, menu **EDEN → Build → Windows x64**. Pela linha de comando (Edito
   -executeMethod Eden.Editor.WindowsBuild.BuildFromCommandLine -logFile build.log
 ```
 
-O executável sai em `Builds/Windows/EDEN.exe` e roda offline, sem o Editor. Opções de linha de comando do executável:
+O executável sai em `Builds/Windows/EDEN.exe` e roda sem o Editor. Para um build **Development** (com os contadores do profiler, usados para contar alocações na medição de desempenho), use o menu **EDEN → Build → Windows x64 (Development)** ou o método `BuildDevelopmentFromCommandLine`; ele sai em `Builds/WindowsDevelopment/EDEN.exe`. Opções de linha de comando do executável:
 
 | Opção | Efeito |
 | --- | --- |
@@ -252,7 +252,60 @@ O executável sai em `Builds/Windows/EDEN.exe` e roda offline, sem o Editor. Op�
 | `-eden-select ID` | já começa com a criatura `ID` selecionada |
 | `-eden-max` | já começa na velocidade máxima |
 
+| `-eden-benchmark S` | mede o desempenho por `S` segundos e fecha (veja abaixo) |
+| `-eden-benchmark-warmup S` | aquecimento antes da medição (padrão 5 s) |
+| `-eden-benchmark-output DIR` | onde gravar o relatório |
+
 Exemplos: `EDEN.exe -eden-brain neural -eden-select 5` e `EDEN.exe -eden-mode evolution -eden-preset minimal -eden-max -eden-select 1`.
+
+## Desempenho
+
+Para medir, rode o executável com o cenário e `-eden-benchmark`, por exemplo:
+
+```powershell
+.\Builds\Windows\EDEN.exe -eden-mode shared -eden-preset minimal -eden-brain heuristic -eden-benchmark 30 `
+  -screen-fullscreen 0 -screen-width 1280 -screen-height 720
+```
+
+Depois do aquecimento, o laboratório mede pelo tempo pedido, ignorando teclado e mouse, grava `performance.json` e `performance.txt` em `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\Benchmarks\<data>-<modo>-<preset>-<velocidade>-<build>\` e fecha. Os logs de métricas ficam desligados durante a medição. O relatório registra:
+
+- o hardware e a configuração: CPU, núcleos, RAM, GPU, API gráfica, sistema, janela e monitor, qualidade, vsync, tipo de build;
+- FPS e tempo de quadro (mediana, p95 e máximo), tempo de simulação por quadro, ticks por segundo efetivos e pedidos;
+- no mundo compartilhado, o custo de cada tick e das fases de sensores e de decisão (inferência);
+- coletas de lixo, heap gerenciado e memória da engine;
+- no build Development, as alocações feitas durante os ticks: por criatura-tick, ou por episódio na evolução.
+
+O que o runtime não fornece aparece como "indisponível", nunca como zero.
+
+**Sem alocação por tick.** Depois do aquecimento, um tick do mundo compartilhado ou de um episódio isolado não aloca memória gerenciada: a comida consumida é reaproveitada na reposição, as listas são dimensionadas para o máximo possível e nenhum laço cria enumeradores. Os testes medem isso com o gravador de alocações da Unity, com os três cérebros, incluindo comida comida, reposições e mortes. O que ainda aloca:
+
+- a criação de cada episódio isolado: cerca de 78 alocações por episódio no build Development;
+- a primeira execução de um caminho de código no processo, que no Mono pode alocar uma vez (JIT). Por exemplo, a primeira morte gerou 1 alocação numa medição de 30 s; depois disso, zero.
+
+**Primeira medição** (build release Mono, i5-13400, 16 GB, GPU Intel UHD Graphics 730, Windows 11, janela de 1280 × 720, qualidade Ultra com vsync a 60 Hz, 30 s após 5 s de aquecimento, seed 1, velocidade 1×):
+
+| Cenário | Criaturas (média) | FPS | Ticks/s | Tick mediana / p95 | Sensores (mediana) | Decisão (mediana) |
+| --- | --- | --- | --- | --- | --- | --- |
+| Mínimo, heurístico | 31,7 | 60,0 | 20,0 | 0,10 / 0,53 ms | 0,06 ms | 0,006 ms |
+| Padrão, heurístico | 61,9 | 60,0 | 20,0 | 0,90 / 1,60 ms | 0,56 ms | 0,014 ms |
+| Estresse, heurístico | 127,2 | 59,9 | 20,0 | 1,53 / 2,85 ms | 0,94 ms | 0,020 ms |
+| Mínimo, rede neural | 17,2 | 60,0 | 20,0 | 0,31 / 0,94 ms | 0,13 ms | 0,024 ms |
+| Padrão, rede neural | 45,6 | 60,0 | 20,0 | 1,27 / 2,66 ms | 0,67 ms | 0,050 ms |
+| Estresse, rede neural | 98,1 | 60,0 | 20,0 | 3,27 / 5,69 ms | 1,76 ms | 0,052 ms |
+
+Na evolução do preset mínimo em velocidade máxima, o laboratório manteve 59,7 FPS e cerca de 187 mil ticks/s, concluindo 2.458 episódios em 30 s.
+
+O que esses números dizem:
+
+- **A meta do preset mínimo (30 FPS e tick de 20 Hz em tempo real) foi atingida com folga em todos os presets.** O tick mais caro (estresse, p95 de 5,7 ms) usa cerca de 11% do intervalo de 50 ms entre ticks.
+- **Os sensores dominam o custo.** Cada criatura procura a comida mais próxima entre todas, então o custo cresce com criaturas × comida. A inferência da rede custa pouco.
+- **Com redes neurais aleatórias a população morre de fome** (de 32 para 7 no mínimo em 35 s), por isso a média de criaturas é menor nessas linhas.
+- O build Development dá números da mesma ordem.
+- **Os valores são de uma máquina em uso, não de um benchmark controlado.** Com CPU híbrida (núcleos P e E) e a janela em segundo plano, o mesmo cenário variou até ~4× entre sessões: 0,22 a 0,99 ms de mediana no padrão heurístico. Repetições na mesma sessão variaram até ~12%.
+- **Memória:** working set de ~340 MB no release (~650 MB no Development), com heap gerenciado de 10 a 16 MB. No mundo compartilhado houve 0 ou 1 coleta de lixo em 30 s; na evolução em velocidade máxima, ~15 coletas em 30 s, vindas da criação dos episódios, sem efeito visível no FPS.
+- **A GPU usada foi a integrada.** Uma RTX 2060 não seria prova de capacidade de simulação, que é limitada pela CPU.
+
+**Rede.** O código do EDEN não usa rede. A engine, porém, abre conexões HTTPS de telemetria da Unity quando há internet. Com todas as rotas HTTP fechadas (proxy inválido), o player não abriu nenhuma conexão e funcionou igual: 60 FPS, 20 ticks/s, mesma população.
 
 ## Estrutura
 
