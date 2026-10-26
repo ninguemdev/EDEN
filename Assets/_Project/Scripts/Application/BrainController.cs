@@ -106,6 +106,52 @@ namespace Eden.Application
                 slots.Remove(deaths[i].Creature);
         }
 
+        /// <summary>Per-creature state of every tracked creature, in id order (brains themselves come from the factory).</summary>
+        public BrainSlotState[] Capture()
+        {
+            var saved = new BrainSlotState[slots.Count];
+            var i = 0;
+            foreach (var pair in slots)
+                saved[i++] = new BrainSlotState(pair.Key, pair.Value.Brain.Name, pair.Value.State.Random.State,
+                    pair.Value.Action, pair.Value.TicksUntilDecision);
+            Array.Sort(saved, (a, b) => a.Creature.Value.CompareTo(b.Creature.Value));
+            return saved;
+        }
+
+        /// <summary>
+        /// Gives a controller that has not decided yet the saved per-creature state. Each creature's brain comes from
+        /// the factory again and must have the saved name; everything is checked before any slot is set.
+        /// </summary>
+        public void Restore(IReadOnlyList<BrainSlotState> saved)
+        {
+            if (saved == null)
+                throw new ArgumentNullException(nameof(saved));
+            if (slots.Count > 0)
+                throw new InvalidOperationException("Only a controller that has not decided yet can be restored.");
+
+            var restored = new Dictionary<CreatureId, Slot>(saved.Count);
+            foreach (var state in saved)
+            {
+                if (restored.ContainsKey(state.Creature))
+                    throw new ArgumentException($"{state.Creature} is saved twice.", nameof(saved));
+                if (state.TicksUntilDecision < 0 || state.TicksUntilDecision >= decisionInterval)
+                    throw new ArgumentException($"{state.Creature}: ticks until decision {state.TicksUntilDecision} " +
+                                                $"is outside [0, {decisionInterval}).", nameof(saved));
+                var brain = brainFor(state.Creature) ??
+                            throw new ArgumentException($"No brain was provided for {state.Creature}.", nameof(saved));
+                if (brain.Name != state.BrainName)
+                    throw new ArgumentException($"{state.Creature} was saved with brain {state.BrainName}, " +
+                                                $"the factory gives {brain.Name}.", nameof(saved));
+                restored.Add(state.Creature, new Slot(brain, new BrainState(Pcg32.FromState(state.Random)))
+                {
+                    Action = state.Action, TicksUntilDecision = state.TicksUntilDecision
+                });
+            }
+
+            foreach (var pair in restored)
+                slots.Add(pair.Key, pair.Value);
+        }
+
         private sealed class Slot
         {
             public Slot(IBrain brain, BrainState state)
@@ -119,5 +165,28 @@ namespace Eden.Application
             public CreatureAction Action { get; set; }
             public int TicksUntilDecision { get; set; }
         }
+    }
+
+    /// <summary>
+    /// What a <see cref="BrainController"/> keeps for one creature between ticks: which brain it uses (by name), the
+    /// creature's own random stream, the held action and how many ticks remain until its next decision.
+    /// </summary>
+    public readonly struct BrainSlotState
+    {
+        public BrainSlotState(CreatureId creature, string brainName, Pcg32State random, CreatureAction action,
+            int ticksUntilDecision)
+        {
+            Creature = creature;
+            BrainName = brainName ?? throw new ArgumentNullException(nameof(brainName));
+            Random = random;
+            Action = action;
+            TicksUntilDecision = ticksUntilDecision;
+        }
+
+        public CreatureId Creature { get; }
+        public string BrainName { get; }
+        public Pcg32State Random { get; }
+        public CreatureAction Action { get; }
+        public int TicksUntilDecision { get; }
     }
 }

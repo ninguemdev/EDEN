@@ -14,21 +14,65 @@ namespace Eden.Application
     public sealed class GenerationalEvolution
     {
         private readonly IsolatedEvaluator evaluator;
+        private readonly EvolutionSettings settings;
         private Individual[] individuals;
         private Genome[] population;
         private Offspring[] origins;
 
         public GenerationalEvolution(EvolutionSettings settings)
+            : this(settings ?? throw new ArgumentNullException(nameof(settings)), new Lineage())
         {
-            if (settings == null)
-                throw new ArgumentNullException(nameof(settings));
-            Plan = new EvaluationPlan(settings);
-            Rules = new ReproductionRules(settings);
-            evaluator = new IsolatedEvaluator(Plan);
-            Lineage = new Lineage();
             individuals = Lineage.Founders(InitialGenomes.Population(Rules.ExperimentSeed, Rules.PopulationSize));
             population = GenomesOf(individuals);
         }
+
+        private GenerationalEvolution(EvolutionSettings settings, Lineage lineage)
+        {
+            this.settings = settings.WithExperimentSeed(settings.ExperimentSeed);
+            Plan = new EvaluationPlan(settings);
+            Rules = new ReproductionRules(settings);
+            evaluator = new IsolatedEvaluator(Plan);
+            Lineage = lineage;
+        }
+
+        /// <summary>
+        /// Evolution saved at <paramref name="generation"/>: its population (in candidate order) and lineage, plus the
+        /// previous generation when there is one, from which <see cref="Origins"/> are rebuilt. Every individual must
+        /// match its lineage entry and every parent must be in the previous generation; nothing is built otherwise.
+        /// </summary>
+        public static GenerationalEvolution Restore(EvolutionSettings settings, int generation,
+            IReadOnlyList<Individual> population, Lineage lineage, IReadOnlyList<Individual> previous)
+        {
+            if (settings == null)
+                throw new ArgumentNullException(nameof(settings));
+            if (population == null)
+                throw new ArgumentNullException(nameof(population));
+            if (lineage == null)
+                throw new ArgumentNullException(nameof(lineage));
+            if (generation < 0)
+                throw new ArgumentOutOfRangeException(nameof(generation));
+            if ((generation == 0) != (previous == null))
+                throw new ArgumentException("Only generation 0 has no previous generation.", nameof(previous));
+
+            var evolution = new GenerationalEvolution(settings, lineage);
+            if (population.Count != evolution.Rules.PopulationSize)
+                throw new ArgumentException($"Expected {evolution.Rules.PopulationSize} individuals, got {population.Count}.",
+                    nameof(population));
+            CheckMembers(population, lineage, generation, nameof(population));
+            if (previous != null)
+            {
+                CheckMembers(previous, lineage, generation - 1, nameof(previous));
+                evolution.origins = OriginsOf(population, previous, generation);
+            }
+
+            evolution.individuals = Copy(population);
+            evolution.population = GenomesOf(evolution.individuals);
+            evolution.Generation = generation;
+            return evolution;
+        }
+
+        /// <summary>Copy of the settings this evolution was created with.</summary>
+        public EvolutionSettings Settings => settings.WithExperimentSeed(settings.ExperimentSeed);
 
         public EvaluationPlan Plan { get; }
         public ReproductionRules Rules { get; }
@@ -122,6 +166,65 @@ namespace Eden.Application
             }
 
             return true;
+        }
+
+        private static void CheckMembers(IReadOnlyList<Individual> members, Lineage lineage, int generation, string name)
+        {
+            var ids = new HashSet<long>();
+            foreach (var member in members)
+            {
+                if (member == null || !ids.Add(member.Id))
+                    throw new ArgumentException("Every individual must be present once.", name);
+                if (!lineage.Contains(member.Id) || lineage.BirthGeneration(member.Id) != member.BirthGeneration ||
+                    member.BirthGeneration > generation || !SameIds(lineage.ParentIds(member.Id), member.ParentIds))
+                    throw new ArgumentException($"Individual {member.Id} does not match its lineage.", name);
+                if (!member.Genome.Topology.Equals(NetworkTopology.Mlp12x16x3))
+                    throw new ArgumentException($"Individual {member.Id} has a {member.Genome.Topology} genome.", name);
+            }
+        }
+
+        // Elites are the same individuals as in the previous generation; every other child names its parent there.
+        private static Offspring[] OriginsOf(IReadOnlyList<Individual> population, IReadOnlyList<Individual> previous,
+            int generation)
+        {
+            var index = new Dictionary<long, int>();
+            for (var i = 0; i < previous.Count; i++)
+                index[previous[i].Id] = i;
+
+            var origins = new Offspring[population.Count];
+            for (var i = 0; i < origins.Length; i++)
+            {
+                var member = population[i];
+                var elite = member.BirthGeneration < generation;
+                var parentId = elite ? member.Id : member.ParentIds.Count == 1 ? member.ParentIds[0] : 0;
+                if (!index.TryGetValue(parentId, out var parent) || (!elite && member.BirthGeneration != generation))
+                    throw new ArgumentException($"Individual {member.Id} has no parent in generation {generation - 1}.",
+                        nameof(previous));
+                origins[i] = new Offspring(member.Genome, parent, elite, elite ? 0 : member.MutatedWeights);
+            }
+
+            return origins;
+        }
+
+        private static bool SameIds(IReadOnlyList<long> a, IReadOnlyList<long> b)
+        {
+            if (a.Count != b.Count)
+                return false;
+            for (var i = 0; i < a.Count; i++)
+            {
+                if (a[i] != b[i])
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static Individual[] Copy(IReadOnlyList<Individual> members)
+        {
+            var copy = new Individual[members.Count];
+            for (var i = 0; i < copy.Length; i++)
+                copy[i] = members[i];
+            return copy;
         }
 
         private static Genome[] GenomesOf(IReadOnlyList<Individual> members)

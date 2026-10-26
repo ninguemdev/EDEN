@@ -76,26 +76,55 @@ namespace Eden.Evolution
             CountOrigins(individuals);
         }
 
-        public int Generation { get; }
-        public EvaluationMode Mode { get; }
-        public int PopulationSize { get; }
-        public int ValidCount { get; }
+        private GenerationSummary()
+        {
+        }
 
-        public float Best { get; }
-        public float UpperQuartile { get; }
-        public float Median { get; }
-        public float LowerQuartile { get; }
-        public float Worst { get; }
+        /// <summary>
+        /// A summary as it was saved (e.g. in a checkpoint), for history that is shown but not recomputed. Counts are
+        /// checked; fitness values may be non-finite exactly as a computed summary can be.
+        /// </summary>
+        public static GenerationSummary Restore(int generation, EvaluationMode mode, int populationSize, int validCount,
+            float best, float upperQuartile, float median, float lowerQuartile, float worst, float meanFitness,
+            long bestIndividualId, float meanSurvivalRate, float meanFoodEnergy, float meanSurvivedSeconds,
+            float weightStdDev, float meanDistanceToCentroid, int newIndividuals, int elites, int distinctParents,
+            float meanMutatedWeights)
+        {
+            if (generation < 0 || populationSize < 1 || validCount < 0 || validCount > populationSize ||
+                bestIndividualId < 1 || newIndividuals < 0 || elites < 0 || newIndividuals + elites != populationSize ||
+                distinctParents < 0 || distinctParents > newIndividuals)
+                throw new ArgumentException($"Saved summary of generation {generation} has inconsistent counts.");
+            return new GenerationSummary
+            {
+                Generation = generation, Mode = mode, PopulationSize = populationSize, ValidCount = validCount,
+                Best = best, UpperQuartile = upperQuartile, Median = median, LowerQuartile = lowerQuartile, Worst = worst,
+                MeanFitness = meanFitness, BestIndividualId = bestIndividualId, MeanSurvivalRate = meanSurvivalRate,
+                MeanFoodEnergy = meanFoodEnergy, MeanSurvivedSeconds = meanSurvivedSeconds, WeightStdDev = weightStdDev,
+                MeanDistanceToCentroid = meanDistanceToCentroid, NewIndividuals = newIndividuals, Elites = elites,
+                DistinctParents = distinctParents, MeanMutatedWeights = meanMutatedWeights
+            };
+        }
+
+        public int Generation { get; private set; }
+        public EvaluationMode Mode { get; private set; }
+        public int PopulationSize { get; private set; }
+        public int ValidCount { get; private set; }
+
+        public float Best { get; private set; }
+        public float UpperQuartile { get; private set; }
+        public float Median { get; private set; }
+        public float LowerQuartile { get; private set; }
+        public float Worst { get; private set; }
 
         /// <summary>Mean of the valid fitness values; NaN when none is valid.</summary>
-        public float MeanFitness { get; }
+        public float MeanFitness { get; private set; }
 
         /// <summary>Individual with the best fitness (lowest index on ties).</summary>
-        public long BestIndividualId { get; }
+        public long BestIndividualId { get; private set; }
 
-        public float MeanSurvivalRate { get; }
-        public float MeanFoodEnergy { get; }
-        public float MeanSurvivedSeconds { get; }
+        public float MeanSurvivalRate { get; private set; }
+        public float MeanFoodEnergy { get; private set; }
+        public float MeanSurvivedSeconds { get; private set; }
 
         /// <summary>Standard deviation of each weight across the population, averaged over all weights.</summary>
         public float WeightStdDev { get; private set; }

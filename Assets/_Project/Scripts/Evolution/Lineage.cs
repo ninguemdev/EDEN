@@ -44,7 +44,7 @@ namespace Eden.Evolution
     /// </summary>
     public sealed class Lineage
     {
-        private readonly Dictionary<long, Entry> entries = new Dictionary<long, Entry>();
+        private readonly Dictionary<long, LineageEntry> entries = new Dictionary<long, LineageEntry>();
 
         /// <summary>Id the next new individual will get.</summary>
         public long NextId { get; private set; } = 1;
@@ -52,6 +52,47 @@ namespace Eden.Evolution
         public int Count => entries.Count;
 
         public bool Contains(long id) => entries.ContainsKey(id);
+
+        /// <summary>
+        /// Lineage of a saved experiment. Ids are handed out without gaps, so <paramref name="saved"/>[i] must describe
+        /// id i + 1; parents must come earlier, founders (no parents) belong to generation 0 and children are born
+        /// after their parents. Everything is checked before the lineage is built.
+        /// </summary>
+        public static Lineage Restore(IReadOnlyList<LineageEntry> saved)
+        {
+            if (saved == null)
+                throw new ArgumentNullException(nameof(saved));
+
+            for (var i = 0; i < saved.Count; i++)
+            {
+                var entry = saved[i];
+                if (entry.Id != i + 1)
+                    throw new ArgumentException($"Entry {i} has id {entry.Id}; ids must run from 1 without gaps.", nameof(saved));
+                if (entry.ParentIds == null || (entry.ParentIds.Count == 0) != (entry.BirthGeneration == 0))
+                    throw new ArgumentException($"Individual {entry.Id}: only generation 0 has no parents.", nameof(saved));
+                foreach (var parent in entry.ParentIds)
+                {
+                    if (parent < 1 || parent >= entry.Id || saved[(int)parent - 1].BirthGeneration >= entry.BirthGeneration)
+                        throw new ArgumentException($"Individual {entry.Id}: parent {parent} must be an earlier individual " +
+                                                    "born in an earlier generation.", nameof(saved));
+                }
+            }
+
+            var lineage = new Lineage();
+            foreach (var entry in saved)
+                lineage.entries.Add(entry.Id, entry);
+            lineage.NextId = saved.Count + 1;
+            return lineage;
+        }
+
+        /// <summary>Every individual created so far, in id order (what <see cref="Restore"/> takes back).</summary>
+        public LineageEntry[] Entries()
+        {
+            var all = new LineageEntry[entries.Count];
+            for (var i = 0; i < all.Length; i++)
+                all[i] = entries[i + 1];
+            return all;
+        }
 
         /// <summary>Generation 0: one new individual per genome, without parents.</summary>
         public Individual[] Founders(IReadOnlyList<Genome> genomes)
@@ -101,7 +142,7 @@ namespace Eden.Evolution
         {
             var chain = new List<long> { id };
             var entry = Get(id);
-            while (entry.ParentIds.Length > 0)
+            while (entry.ParentIds.Count > 0)
             {
                 var parent = entry.ParentIds[0];
                 chain.Add(parent);
@@ -114,28 +155,38 @@ namespace Eden.Evolution
         private Individual Register(long[] parentIds, int generation, Genome genome, int mutatedWeights)
         {
             var individual = new Individual(NextId, parentIds, generation, genome, mutatedWeights);
-            entries.Add(NextId, new Entry(parentIds, generation));
+            entries.Add(NextId, new LineageEntry(NextId, parentIds, generation));
             NextId++;
             return individual;
         }
 
-        private Entry Get(long id)
+        private LineageEntry Get(long id)
         {
             if (!entries.TryGetValue(id, out var entry))
                 throw new KeyNotFoundException($"Individual {id} is not in this lineage.");
             return entry;
         }
 
-        private readonly struct Entry
-        {
-            public Entry(long[] parentIds, int birthGeneration)
-            {
-                ParentIds = parentIds;
-                BirthGeneration = birthGeneration;
-            }
+    }
 
-            public long[] ParentIds { get; }
-            public int BirthGeneration { get; }
+    /// <summary>One individual of a <see cref="Lineage"/>: id, parents and birth generation (never its weights).</summary>
+    public readonly struct LineageEntry
+    {
+        private readonly long[] parentIds;
+
+        public LineageEntry(long id, IReadOnlyList<long> parentIds, int birthGeneration)
+        {
+            if (parentIds == null)
+                throw new ArgumentNullException(nameof(parentIds));
+            Id = id;
+            this.parentIds = new long[parentIds.Count];
+            for (var i = 0; i < this.parentIds.Length; i++)
+                this.parentIds[i] = parentIds[i];
+            BirthGeneration = birthGeneration;
         }
+
+        public long Id { get; }
+        public IReadOnlyList<long> ParentIds => parentIds;
+        public int BirthGeneration { get; }
     }
 }

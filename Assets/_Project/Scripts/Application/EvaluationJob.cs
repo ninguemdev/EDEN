@@ -20,15 +20,30 @@ namespace Eden.Application
 
         public IsolatedEpisode(EvaluationPlan plan, Func<IBrain> createBrain, ulong episodeSeed, int candidate,
             int seedIndex, int generation, EvaluationMode mode)
+            : this(plan, createBrain, episodeSeed, candidate, seedIndex, generation, mode, null, null)
+        {
+        }
+
+        internal IsolatedEpisode(EvaluationPlan plan, Func<IBrain> createBrain, ulong episodeSeed, int candidate,
+            int seedIndex, int generation, EvaluationMode mode, SimulationSnapshot savedWorld,
+            IReadOnlyList<BrainSlotState> savedBrains)
         {
             this.plan = plan ?? throw new ArgumentNullException(nameof(plan));
             if (createBrain == null)
                 throw new ArgumentNullException(nameof(createBrain));
 
             var config = plan.EpisodeConfig(episodeSeed);
-            Simulation = new WorldSimulation(WorldFactory.CreateInitial(config));
+            Simulation = savedWorld == null
+                ? new WorldSimulation(WorldFactory.CreateInitial(config))
+                : WorldSimulation.Restore(config, savedWorld);
+            if (Simulation.World.Creatures.Count != 1 || Simulation.World.Creatures[0].Id != new CreatureId(1) ||
+                Tick >= plan.EpisodeTicks)
+                throw new ArgumentException("A running episode has its single creature alive and ticks left.",
+                    nameof(savedWorld));
             Creature = Simulation.World.Creatures[0];
             Controller = new BrainController(config, _ => createBrain());
+            if (savedBrains != null)
+                Controller.Restore(savedBrains);
             EpisodeSeed = episodeSeed;
             Candidate = candidate;
             SeedIndex = seedIndex;
@@ -46,8 +61,8 @@ namespace Eden.Application
         public int Candidate { get; }
         public int SeedIndex { get; }
 
-        /// <summary>Ticks simulated so far.</summary>
-        public long Tick { get; private set; }
+        /// <summary>Ticks simulated so far (the episode world starts at tick 0).</summary>
+        public long Tick => Simulation.World.Tick;
 
         public bool IsFinished => Tick >= plan.EpisodeTicks || Simulation.IsExtinct;
 
@@ -58,7 +73,6 @@ namespace Eden.Application
             while (ran < maxTicks && !IsFinished)
             {
                 Simulation.Step(Controller);
-                Tick++;
                 ran++;
             }
 
@@ -153,6 +167,60 @@ namespace Eden.Application
             return ran;
         }
 
+        /// <summary>
+        /// Saved progress between ticks: the finished episodes in run order and the episode being simulated. Only a
+        /// running job has progress to save.
+        /// </summary>
+        public EvaluationProgress Capture()
+        {
+            if (Current == null)
+                throw new InvalidOperationException("A complete evaluation has no progress to save; keep its result.");
+            var completed = new List<EpisodeResult>(episodes);
+            for (var s = 0; s < Current.SeedIndex; s++)
+                completed.Add(perSeed[s]);
+            return new EvaluationProgress(completed, Current.Simulation.Capture(), Current.Controller.Capture());
+        }
+
+        /// <summary>
+        /// Continues a new job (nothing simulated yet) from saved <paramref name="progress"/> of the same evaluation:
+        /// every result must be the one this job would have produced at its position (mode, generation, candidate,
+        /// seed), and the running episode is rebuilt from its saved world and brain state. On any problem the job is
+        /// left unchanged and an <see cref="ArgumentException"/> explains why.
+        /// </summary>
+        public void Resume(EvaluationProgress progress)
+        {
+            if (progress == null)
+                throw new ArgumentNullException(nameof(progress));
+            if (CompletedEpisodes != 0 || Current == null || Current.Tick != 0)
+                throw new InvalidOperationException("Only a job that has not simulated anything can be resumed.");
+
+            var completed = progress.Completed;
+            if (completed.Count >= TotalEpisodes)
+                throw new ArgumentException($"{completed.Count} finished episodes leave none of {TotalEpisodes} running.",
+                    nameof(progress));
+            var maxEnergy = plan.EpisodeConfig(seeds[0]).MaxEnergy;
+            for (var i = 0; i < completed.Count; i++)
+                CheckResult(completed[i], i / seeds.Length, i % seeds.Length, maxEnergy);
+
+            var candidate = completed.Count / seeds.Length;
+            var seedIndex = completed.Count % seeds.Length;
+            var running = new IsolatedEpisode(plan, candidates[candidate], seeds[seedIndex], candidate, seedIndex,
+                Generation, Mode, progress.CurrentWorld, progress.CurrentBrains);
+
+            for (var i = 0; i < completed.Count; i++)
+            {
+                perSeed[i % seeds.Length] = completed[i];
+                if (i % seeds.Length != seeds.Length - 1)
+                    continue;
+                var results = (EpisodeResult[])perSeed.Clone();
+                episodes.AddRange(results);
+                aggregates[i / seeds.Length] = new CandidateEvaluation(i / seeds.Length, results, ticksPerSecond);
+            }
+
+            CompletedEpisodes = completed.Count;
+            Current = running;
+        }
+
         /// <summary>Runs every remaining episode and returns the evaluation.</summary>
         public GenerationEvaluation RunToEnd()
         {
@@ -187,7 +255,51 @@ namespace Eden.Application
             result = new GenerationEvaluation(Generation, Mode, (ulong[])seeds.Clone(), episodes, aggregates);
         }
 
+        private void CheckResult(EpisodeResult result, int candidate, int seedIndex, float maxEnergy)
+        {
+            if (result.Mode != Mode || result.Generation != Generation || result.Candidate != candidate ||
+                result.SeedIndex != seedIndex || result.EpisodeSeed != seeds[seedIndex] ||
+                result.EpisodeTicks != plan.EpisodeTicks)
+                throw new ArgumentException($"Saved episode {candidate}×{seedIndex} does not belong to this evaluation.",
+                    nameof(result));
+            if (!(result.FoodEnergy >= 0f) || float.IsInfinity(result.FoodEnergy) || result.SurvivedTicks < 1 ||
+                result.SurvivedTicks > plan.EpisodeTicks || !(result.FinalEnergy >= 0f && result.FinalEnergy <= maxEnergy) ||
+                result.Survived && (result.FinalEnergy <= 0f || result.SurvivedTicks != plan.EpisodeTicks))
+                throw new ArgumentException($"Saved episode {candidate}×{seedIndex} has impossible values.", nameof(result));
+        }
+
         private IsolatedEpisode CreateEpisode(int candidate, int seedIndex) =>
             new IsolatedEpisode(plan, candidates[candidate], seeds[seedIndex], candidate, seedIndex, Generation, Mode);
+    }
+
+    /// <summary>Progress of an <see cref="EvaluationJob"/> saved between ticks.</summary>
+    public sealed class EvaluationProgress
+    {
+        public EvaluationProgress(IReadOnlyList<EpisodeResult> completed, SimulationSnapshot currentWorld,
+            IReadOnlyList<BrainSlotState> currentBrains)
+        {
+            if (completed == null)
+                throw new ArgumentNullException(nameof(completed));
+            var copy = new EpisodeResult[completed.Count];
+            for (var i = 0; i < copy.Length; i++)
+                copy[i] = completed[i];
+            Completed = copy;
+            CurrentWorld = currentWorld ?? throw new ArgumentNullException(nameof(currentWorld));
+            if (currentBrains == null)
+                throw new ArgumentNullException(nameof(currentBrains));
+            var brains = new BrainSlotState[currentBrains.Count];
+            for (var i = 0; i < brains.Length; i++)
+                brains[i] = currentBrains[i];
+            CurrentBrains = brains;
+        }
+
+        /// <summary>Finished episodes in run order (candidate-major, seed-minor), before aggregation.</summary>
+        public IReadOnlyList<EpisodeResult> Completed { get; }
+
+        /// <summary>World of the episode being simulated.</summary>
+        public SimulationSnapshot CurrentWorld { get; }
+
+        /// <summary>Brain state of that episode's creature (empty before its first decision).</summary>
+        public IReadOnlyList<BrainSlotState> CurrentBrains { get; }
     }
 }

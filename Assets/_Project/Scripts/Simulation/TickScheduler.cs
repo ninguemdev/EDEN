@@ -60,6 +60,39 @@ namespace Eden.Simulation
             }
         }
 
+        /// <summary>
+        /// Rebuilds a saved agenda: <paramref name="pending"/> in run order (as <see cref="SnapshotPending"/> gives it),
+        /// every event due after <paramref name="lastDrainedTick"/>, with unique sequences below
+        /// <paramref name="nextSequence"/>. Invalid input is rejected without building anything.
+        /// </summary>
+        public static TickScheduler<T> Restore(IReadOnlyList<ScheduledEvent<T>> pending, long nextSequence,
+            long lastDrainedTick)
+        {
+            if (pending == null)
+                throw new ArgumentNullException(nameof(pending));
+            if (lastDrainedTick < -1)
+                throw new ArgumentOutOfRangeException(nameof(lastDrainedTick), "Must be -1 or a processed tick.");
+            if (nextSequence < 0)
+                throw new ArgumentOutOfRangeException(nameof(nextSequence), "Must not be negative.");
+
+            var sequences = new HashSet<long>();
+            for (var i = 0; i < pending.Count; i++)
+            {
+                var item = pending[i];
+                if (item.DueTick <= lastDrainedTick)
+                    throw new ArgumentException($"Event {i} is due at tick {item.DueTick}, already processed.", nameof(pending));
+                if (item.Sequence < 0 || item.Sequence >= nextSequence || !sequences.Add(item.Sequence))
+                    throw new ArgumentException($"Event {i} has an invalid or repeated sequence {item.Sequence}.", nameof(pending));
+                if (i > 0 && !RunsBefore(pending[i - 1], item))
+                    throw new ArgumentException($"Event {i} is out of run order.", nameof(pending));
+            }
+
+            var scheduler = new TickScheduler<T> { NextSequence = nextSequence, LastDrainedTick = lastDrainedTick };
+            for (var i = pending.Count - 1; i >= 0; i--)
+                scheduler.queue.Add(pending[i]);
+            return scheduler;
+        }
+
         /// <summary>Copy of the pending events in the order they will run.</summary>
         public ScheduledEvent<T>[] SnapshotPending()
         {
@@ -68,6 +101,9 @@ namespace Eden.Simulation
                 pending[i] = queue[queue.Count - 1 - i];
             return pending;
         }
+
+        private static bool RunsBefore(ScheduledEvent<T> first, ScheduledEvent<T> second) =>
+            first.DueTick < second.DueTick || (first.DueTick == second.DueTick && first.Sequence < second.Sequence);
 
         // A new event has the highest sequence, so it runs after every event already due at the same tick.
         private int FirstIndexDueAtOrBefore(long dueTick)
