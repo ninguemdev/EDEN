@@ -14,8 +14,8 @@ using static Eden.Tests.EditMode.ResumeChecks;
 namespace Eden.Tests.EditMode
 {
     /// <summary>
-    /// Experiment exports (JSON definition and summary, units) and runs resumed from checkpoint files compared with
-    /// uninterrupted ones.
+    /// Experiment exports (JSON definition and summary, units), runs resumed from checkpoint files compared with
+    /// uninterrupted ones, and the preset comparison.
     /// </summary>
     public class ExportTests
     {
@@ -187,6 +187,72 @@ namespace Eden.Tests.EditMode
 
             Assert.That(restored.World.Tick, Is.EqualTo(world.World.Tick));
             Assert.That(restored.ComputeFingerprint(), Is.EqualTo(world.ComputeFingerprint()));
+        }
+
+        [Test]
+        public void Presets_RunTheSameBattery_AndTheReportStatesTheirBudget()
+        {
+            var template = Small(3);
+            template.EpisodeSeconds = 5f;
+            var battery = new BatterySettings { Runs = 2, Generations = 2, ValidationInterval = 1 };
+            var presets = new[] { ExperimentPreset.Minimal, ExperimentPreset.Standard };
+            Assert.That(() => new PresetComparison(template, battery, new[] { presets[0], presets[0] }),
+                Throws.ArgumentException);
+
+            var comparison = new PresetComparison(template, battery, presets);
+            var result = comparison.Run();
+
+            for (var p = 0; p < presets.Length; p++)
+            {
+                var outcome = result.Outcomes[p];
+                var population = presets[p].Population;
+                Assert.That(outcome.Preset, Is.SameAs(presets[p]));
+                Assert.That(outcome.TrainingEpisodes, Is.EqualTo(2L * 2 * population * 2));
+                Assert.That(outcome.ValidationEpisodes, Is.EqualTo(2L * 2 * population * 3));
+            }
+
+            var minimal = PresetComparisonReport.Header(comparison, presets[0], "0.1.0", CreatedAt).SettingsJson().ToCompactString();
+            var standard = PresetComparisonReport.Header(comparison, presets[1], "0.1.0", CreatedAt).SettingsJson().ToCompactString();
+            Assert.That(minimal, Does.Contain("\"populationSize\":32"));
+            Assert.That(minimal.Replace("\"populationSize\":32", "\"populationSize\":64"), Is.EqualTo(standard),
+                "presets differ only in the population");
+
+            var alone = new EvolutionBattery(comparison.Settings(presets[1]), battery).Run();
+            for (var r = 0; r < battery.Runs; r++)
+            {
+                Assert.That(Bits(result.Outcomes[1].Result.Runs[r].Final.Validation.Median),
+                    Is.EqualTo(Bits(alone.Runs[r].Final.Validation.Median)), "the comparison is the plain battery");
+            }
+
+            var culture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = new CultureInfo("pt-BR");
+                PresetComparisonReport.Write(Path.Combine(root, "presets"), comparison, result, "0.1.0", CreatedAt);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = culture;
+            }
+
+            var rows = File.ReadAllLines(Path.Combine(root, "presets", "presets.csv"));
+            Assert.That(rows, Has.Length.EqualTo(3));
+            Assert.That(rows[0], Is.EqualTo(PresetComparisonReport.PresetsHeader));
+            Assert.That(rows.Select(r => r.Split(',').Length), Is.All.EqualTo(rows[0].Split(',').Length), "invariant numbers");
+            Assert.That(rows[1], Does.StartWith("minimal,32,2,2,256,384,"));
+
+            var json = JsonText.Parse(File.ReadAllText(Path.Combine(root, "presets", "comparison.json")));
+            Assert.That(json["format"].String(), Is.EqualTo(PresetComparisonReport.Format));
+            Assert.That(json["preliminary"].Boolean(), Is.True);
+            Assert.That(json["presets"].Count, Is.EqualTo(2));
+            Assert.That(json["presets"][0]["configHash"].String(), Is.Not.EqualTo(json["presets"][1]["configHash"].String()));
+            Assert.That(json["best"].String(), Is.EqualTo(result.Best.Preset.Name));
+
+            var text = File.ReadAllText(Path.Combine(root, "presets", "comparison.txt"));
+            StringAssert.Contains("PRELIMINAR", text);
+            StringAssert.Contains("não é o mesmo orçamento", text);
+            StringAssert.Contains("Conclusão: ", text);
+            Assert.That(File.Exists(Path.Combine(root, "presets", "standard", "report.txt")), Is.True);
         }
 
         private static EvolutionCsvLog Log(string directory, EvolutionSession session, ResumeOrigin resumedFrom)
