@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Text;
 using Eden.Application;
@@ -25,7 +26,19 @@ namespace Eden.Presentation
             AppendSpeed(text, clock);
             if (simulation.CorrectedInputValues > 0)
                 text.AppendLine($"Entradas de sensor corrigidas (fora do contrato): {simulation.CorrectedInputValues}");
-            text.AppendLine($"População {world.Creatures.Count} de {config.InitialPopulation}  ·  Comida {world.Food.Count}");
+            if (config.Reproduction)
+            {
+                var generation = 0;
+                for (var i = 0; i < world.Creatures.Count; i++)
+                    generation = Math.Max(generation, world.Creatures[i].Generation);
+                text.AppendLine($"População {world.Creatures.Count} (teto {config.PopulationCap})  ·  Comida {world.Food.Count}");
+                text.AppendLine($"Reprodução local ligada: {world.NextCreatureId - 1 - config.InitialPopulation} nascimentos, " +
+                                $"geração genealógica máxima {generation}; sem reposição se todos morrerem");
+            }
+            else
+            {
+                text.AppendLine($"População {world.Creatures.Count} de {config.InitialPopulation}  ·  Comida {world.Food.Count}");
+            }
             text.AppendLine($"Preset {PresetLabel(preset)}  ·  Seed {config.Seed}");
             text.AppendLine(evolvedSource == null
                 ? "Cérebro: " + BrainLabel(brainName)
@@ -138,6 +151,7 @@ namespace Eden.Presentation
             text.AppendLine($"Idade {creature.AgeTicks * (double)config.TickDuration:0.0} s de {config.MaxAgeSeconds:0} s");
             text.AppendLine($"Comida ingerida {creature.FoodEnergyEaten:0} de energia");
             text.AppendLine($"Posição ({creature.Position.X:0.0}; {creature.Position.Y:0.0}) — só inspeção");
+            AppendGenealogy(text, creature, config);
             text.AppendLine();
             AppendBody(text, creature, config);
             text.AppendLine();
@@ -153,6 +167,23 @@ namespace Eden.Presentation
             text.AppendLine("Ação mantida");
             text.Append($"propulsão {action.Thrust:0.00}  giro {action.Turn:0.00}  lateral {action.Strafe:0.00}");
             return text.ToString();
+        }
+
+        private static void AppendGenealogy(StringBuilder text, CreatureState creature, SimulationConfig config)
+        {
+            if (creature.Parent.HasValue)
+                text.AppendLine($"Nasceu no mundo: filha de {creature.Parent.Value}, geração {creature.Generation}");
+            else if (config.Reproduction)
+                text.AppendLine("Fundadora (geração 0)");
+            if (!config.Reproduction)
+                return;
+            var ticks = Math.Max(config.MaturityTicks - creature.AgeTicks, creature.ReproductionCooldownTicks);
+            var needed = config.ReproductionEnergyFraction * creature.Body.MaxEnergy;
+            text.AppendLine(ticks > 0
+                ? $"Reprodução: possível em {ticks * (double)config.TickDuration:0.0} s (maturidade/intervalo)"
+                : creature.Energy < needed
+                    ? $"Reprodução: precisa de {needed:0} de energia"
+                    : "Reprodução: pronta");
         }
 
         // Each trait with its factor of the reference, then what the body spends per second at rest and at full push.

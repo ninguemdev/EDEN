@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 using Eden.Domain;
 using Eden.Presentation;
@@ -265,6 +266,43 @@ namespace Eden.Tests.PlayMode
             Assert.That(seedField.value, Is.EqualTo(123));
             seedField.value = -4;
             Assert.That(seedField.value, Is.Zero, "seeds are not negative");
+        }
+
+        [UnityTest]
+        public IEnumerator SharedWorld_WithReproduction_ChildrenGetGenomesBrainsAndSurviveASaveAndLoad()
+        {
+            var rules = runner.WorldTemplate;
+            rules.Reproduction = true;
+            rules.MaturitySeconds = 2f;
+            rules.ReproductionEnergyFraction = 0.3f;
+            UseTemporaryCheckpoint();
+            yield return StartFromControls(LabMode.SharedWorld, preset: 0, seed: 4, brain: LabBrainKind.Neural);
+            yield return Press("pause-button");
+            Assert.That(runner.Simulation.World.Config.Reproduction, Is.True);
+            yield return Step(45);
+
+            var world = runner.Simulation.World;
+            var child = world.Creatures.FirstOrDefault(c => c.Parent.HasValue);
+            Assert.That(child, Is.Not.Null, "founders give birth once mature");
+            Assert.That(child.Generation, Is.EqualTo(1));
+            Assert.That(runner.SharedGenomes.GenomeOf(child.Id), Is.Not.Null);
+            yield return Step(2);
+            Assert.That(runner.TryGetHeldAction(child.Id, out _), Is.True, "the child got its own brain");
+            runner.Select(child.Id);
+            yield return null;
+            StringAssert.Contains($"filha de {child.Parent.Value}", runner.Hud.InspectorText);
+            StringAssert.Contains("Reprodução local ligada", runner.Hud.RunText);
+
+            yield return Press("save-button");
+            yield return Step(30);
+            var later = runner.Simulation.ComputeFingerprint();
+            var born = runner.SharedGenomes.BornCount;
+            yield return Press("load-button");
+            StringAssert.DoesNotContain("recusado", runner.Hud.CheckpointText);
+            Assert.That(runner.Simulation.World.Config.Reproduction, Is.True);
+            yield return Step(30);
+            Assert.That(runner.Simulation.ComputeFingerprint(), Is.EqualTo(later), "the loaded run continues identically");
+            Assert.That(runner.SharedGenomes.BornCount, Is.EqualTo(born));
         }
 
         [UnityTest]
