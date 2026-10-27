@@ -25,11 +25,20 @@ namespace Eden.Persistence
     /// genealogy are written only when reproduction is on or they are set, so config schema 4 files read the same way.
     /// Plasticity (schema 5, genome schema 3) likewise: the experiment option, a genome's coefficients and a brain's
     /// lifetime weight changes are written only when used, so a genome schema 2 file reads as fixed networks.
+    /// NEAT (schema 6): the algorithm and its parameters, NEAT genomes (their connections instead of topology and
+    /// weights), the innovation counters, the species and the species of the last trained generation are written only
+    /// for a NEAT experiment, and only such a file says schema 6, so a build without NEAT refuses it as newer while MLP
+    /// files stay schema 5, byte for byte.
     /// </summary>
     public static class CheckpointCodec
     {
         public const string Format = "eden-checkpoint";
-        public const int SchemaVersion = 5;
+
+        /// <summary>Newest schema this build reads and writes (for NEAT experiments).</summary>
+        public const int SchemaVersion = 6;
+
+        /// <summary>Schema of every checkpoint without NEAT, unchanged since plasticity.</summary>
+        public const int SchemaWithoutNeat = 5;
 
         /// <summary>Limits checked before allocating; generous for the lab, small enough to refuse absurd files.</summary>
         public const int MaxLineageEntries = 8000000;
@@ -47,20 +56,17 @@ namespace Eden.Persistence
         {
             if (checkpoint == null)
                 throw new ArgumentNullException(nameof(checkpoint));
-            if (checkpoint.Evolution != null && checkpoint.Evolution.Settings.Algorithm != EvolutionAlgorithm.Mlp)
-                throw new CheckpointException("Saving a NEAT experiment is not supported yet; this build saves MLP " +
-                                              "experiments only.");
-
+            var schema = checkpoint.Evolution?.Neat != null ? SchemaVersion : SchemaWithoutNeat;
             var config = EncodeConfig(checkpoint);
             var state = EncodeState(checkpoint);
             var configHash = Hash(config.ToCompactString());
             var stateHash = Hash(state.ToCompactString());
             var utc = savedUtc.ToUniversalTime();
-            info = new CheckpointInfo(SchemaVersion, appVersion, runtime, utc, configHash, stateHash);
+            info = new CheckpointInfo(schema, appVersion, runtime, utc, configHash, stateHash);
 
             var root = JsonValue.NewObject()
                 .Add("format", JsonValue.Of(Format))
-                .Add("schemaVersion", JsonValue.Of(SchemaVersion))
+                .Add("schemaVersion", JsonValue.Of(schema))
                 .Add("app", JsonValue.NewObject()
                     .Add("version", JsonValue.Of(info.AppVersion))
                     .Add("runtime", JsonValue.Of(info.Runtime)))
@@ -186,6 +192,31 @@ namespace Eden.Persistence
         internal static string AlgorithmName(EvolutionAlgorithm algorithm) =>
             algorithm == EvolutionAlgorithm.Neat ? NeatNetwork.Kind : Genome.MlpNetwork;
 
+        private static NeatSettings DecodeNeat(JsonValue saved) =>
+            new NeatSettings
+            {
+                InitialWeightLimit = saved["initialWeightLimit"].Float(),
+                WeightMutationProbability = saved["weightMutationProbability"].Float(),
+                WeightPerturbProbability = saved["weightPerturbProbability"].Float(),
+                WeightSigma = saved["weightSigma"].Float(),
+                AddNodeProbability = saved["addNodeProbability"].Float(),
+                AddConnectionProbability = saved["addConnectionProbability"].Float(),
+                ToggleProbability = saved["toggleProbability"].Float(),
+                AddConnectionAttempts = saved["addConnectionAttempts"].Int(),
+                DisabledInheritProbability = saved["disabledInheritProbability"].Float(),
+                ExcessCoefficient = saved["excessCoefficient"].Float(),
+                DisjointCoefficient = saved["disjointCoefficient"].Float(),
+                WeightDifferenceCoefficient = saved["weightDifferenceCoefficient"].Float(),
+                NormalizationThreshold = saved["normalizationThreshold"].Int(),
+                CompatibilityThreshold = saved["compatibilityThreshold"].Float(),
+                StagnationGenerations = saved["stagnationGenerations"].Int(),
+                ProtectedSpecies = saved["protectedSpecies"].Int(),
+                ChampionMinimumSize = saved["championMinimumSize"].Int(),
+                SurvivalFraction = saved["survivalFraction"].Float(),
+                CrossoverProbability = saved["crossoverProbability"].Float(),
+                InterspeciesProbability = saved["interspeciesProbability"].Float()
+            };
+
         // Every NEAT parameter, so experiments that differ in any of them have different hashes.
         private static JsonValue EncodeNeat(NeatSettings neat) =>
             JsonValue.NewObject()
@@ -264,9 +295,20 @@ namespace Eden.Persistence
                 ExpressedBodyGenes = DecodeGeneSet(saved.TryGet("expressedBodyGenes")),
                 Plasticity = DecodePlasticityOption(saved.TryGet("plasticity"))
             };
-            // Both validate every value and report all problems together.
+            var algorithm = saved.TryGet("algorithm");
+            if (algorithm != null)
+            {
+                if (algorithm.String() != NeatNetwork.Kind)
+                    throw new CheckpointException($"{algorithm.Path}: unknown evolution algorithm \"{algorithm.String()}\".");
+                settings.Algorithm = EvolutionAlgorithm.Neat;
+                settings.Neat = DecodeNeat(saved["neat"]);
+            }
+
+            // They validate every value and report all problems together.
             new EvaluationPlan(settings);
             new ReproductionRules(settings);
+            if (settings.Algorithm == EvolutionAlgorithm.Neat)
+                new NeatRules(settings.Neat);
             return settings;
         }
 
@@ -563,7 +605,7 @@ namespace Eden.Persistence
                     .Add("individuals", Ids(evolution.LastTrainingIndividuals))
                     .Add("episodes", EncodeEpisodes(evolution.LastTrainingEpisodes));
 
-            return JsonValue.NewObject()
+            var encoded = JsonValue.NewObject()
                 .Add("generation", JsonValue.Of(evolution.Generation))
                 .Add("phase", JsonValue.Of(PhaseName(evolution.Phase)))
                 .Add("totalTicks", JsonValue.Of(evolution.TotalTicks))
@@ -578,6 +620,90 @@ namespace Eden.Persistence
                     .Add("completed", EncodeEpisodes(evolution.Job.Completed))
                     .Add("world", EncodeWorld(evolution.Job.CurrentWorld))
                     .Add("brains", EncodeBrains(evolution.Job.CurrentBrains)));
+            if (evolution.Neat != null)
+                encoded.Add("neat", EncodeNeatState(evolution.Neat));
+            return encoded;
+        }
+
+        private static JsonValue EncodeNeatState(NeatEvolutionState neat)
+        {
+            var species = JsonValue.NewArray();
+            foreach (var state in neat.Species)
+            {
+                species.Add(EncodeNeatGenome(state.Representative, JsonValue.NewObject()
+                    .Add("id", JsonValue.Of(state.Id))
+                    .Add("created", JsonValue.Of(state.CreatedGeneration))
+                    .Add("bestFitness", JsonValue.OfAnyFloat(state.BestFitness))
+                    .Add("lastImproved", JsonValue.Of(state.LastImprovedGeneration))));
+            }
+
+            JsonValue lastSpecies;
+            if (neat.LastTrainingSpecies == null)
+            {
+                lastSpecies = JsonValue.Null();
+            }
+            else
+            {
+                lastSpecies = JsonValue.NewArray();
+                foreach (var id in neat.LastTrainingSpecies)
+                    lastSpecies.Add(JsonValue.Of(id));
+            }
+
+            return JsonValue.NewObject()
+                .Add("innovations", JsonValue.NewObject()
+                    .Add("contract", JsonValue.Of(neat.Innovations.Contract))
+                    .Add("generation", JsonValue.Of(neat.Innovations.Generation))
+                    .Add("nextInnovation", JsonValue.Of(neat.Innovations.NextInnovation))
+                    .Add("nextNodeId", JsonValue.Of(neat.Innovations.NextNodeId)))
+                .Add("nextSpeciesId", JsonValue.Of(neat.NextSpeciesId))
+                .Add("species", species)
+                .Add("lastTrainingSpecies", lastSpecies);
+        }
+
+        private static NeatEvolutionState DecodeNeatState(JsonValue saved, int populationSize)
+        {
+            var innovations = saved["innovations"];
+            var history = new InnovationHistoryState(innovations["contract"].String(), innovations["generation"].Int(0),
+                innovations["nextInnovation"].Int(0), innovations["nextNodeId"].Int(0));
+            var values = saved["species"].ArrayOf(populationSize);
+            var species = new NeatSpeciesState[values.Count];
+            for (var i = 0; i < species.Length; i++)
+            {
+                var value = values[i];
+                species[i] = new NeatSpeciesState(value["id"].Int(1), DecodeNeatGenome(value), value["created"].Int(0),
+                    value["bestFitness"].AnyFloat(), value["lastImproved"].Int(0));
+            }
+
+            int[] lastSpecies = null;
+            var last = saved["lastTrainingSpecies"];
+            if (!last.IsNull)
+            {
+                var ids = last.ArrayOf(populationSize);
+                lastSpecies = new int[ids.Count];
+                for (var i = 0; i < lastSpecies.Length; i++)
+                    lastSpecies[i] = ids[i].Int(1);
+            }
+
+            return new NeatEvolutionState(history, species, saved["nextSpeciesId"].Int(1), lastSpecies);
+        }
+
+        // A NEAT genome inside a checkpoint: the network kind, its connections and body genes when not neutral; the
+        // contract is the legacy one, the only one NEAT evolutions use so far.
+        private static JsonValue EncodeNeatGenome(Genome genome, JsonValue saved)
+        {
+            saved.Add("network", JsonValue.Of(NeatNetwork.Kind)).Add("connections", GenomeCodec.EncodeConnections(genome.Neat));
+            if (!genome.Body.IsNeutral)
+                saved.Add("body", EncodeBodyGenes(genome.Body));
+            return saved;
+        }
+
+        private static Genome DecodeNeatGenome(JsonValue saved)
+        {
+            var network = saved["network"];
+            if (network.String() != NeatNetwork.Kind)
+                throw new CheckpointException($"{network.Path}: expected a {NeatNetwork.Kind} genome.");
+            return new Genome(new NeatNetwork(NeuralContract.Legacy, GenomeCodec.DecodeConnections(saved["connections"])),
+                DecodeBodyGenes(saved.TryGet("body")));
         }
 
         private static EvolutionSnapshot DecodeEvolution(JsonValue saved, EvolutionSettings settings, int interval)
@@ -638,17 +764,17 @@ namespace Eden.Persistence
             var progress = new EvaluationProgress(DecodeEpisodes(job["completed"], plan),
                 DecodeWorld(job["world"], 1, settings.World.InitialFood, plan.EpisodeConfig(0)),
                 DecodeBrains(job["brains"]));
+            var neat = settings.Algorithm == EvolutionAlgorithm.Neat
+                ? DecodeNeatState(saved["neat"], settings.PopulationSize)
+                : null;
             return new EvolutionSnapshot(settings, interval, saved["generation"].Int(0), Members(saved["population"], individuals),
                 lineage, lastIndividuals, lastEpisodes, baselines.IsNull ? null : DecodeEpisodes(baselines, plan),
-                summaries, points, saved["totalTicks"].Long(0), ParsePhase(saved["phase"]), progress);
+                summaries, points, saved["totalTicks"].Long(0), ParsePhase(saved["phase"]), progress, neat);
         }
 
         private static JsonValue EncodeIndividual(Individual individual)
         {
             var genome = individual.Genome;
-            var weights = JsonValue.NewArray();
-            for (var w = 0; w < genome.WeightCount; w++)
-                weights.Add(JsonValue.Of(genome.GetWeight(w)));
             var parents = JsonValue.NewArray();
             foreach (var parent in individual.ParentIds)
                 parents.Add(JsonValue.Of(parent));
@@ -656,8 +782,14 @@ namespace Eden.Persistence
                 .Add("id", JsonValue.Of(individual.Id))
                 .Add("parents", parents)
                 .Add("birthGeneration", JsonValue.Of(individual.BirthGeneration))
-                .Add("mutatedWeights", JsonValue.Of(individual.MutatedWeights))
-                .Add("topology", JsonValue.NewArray()
+                .Add("mutatedWeights", JsonValue.Of(individual.MutatedWeights));
+            if (genome.Neat != null)
+                return EncodeNeatGenome(genome, saved);
+
+            var weights = JsonValue.NewArray();
+            for (var w = 0; w < genome.WeightCount; w++)
+                weights.Add(JsonValue.Of(genome.GetWeight(w)));
+            saved.Add("topology", JsonValue.NewArray()
                     .Add(JsonValue.Of(genome.Topology.Inputs))
                     .Add(JsonValue.Of(genome.Topology.Hidden))
                     .Add(JsonValue.Of(genome.Topology.Outputs)))
@@ -706,9 +838,19 @@ namespace Eden.Persistence
             return new BodyGenes(values[0].Float(), values[1].Float(), values[2].Float(), values[3].Float());
         }
 
-        // Only the MVP network is accepted, so its size is known before the weights are read.
+        // Only the MVP network is accepted, so its size is known before the weights are read; a NEAT genome names its kind.
         private static Individual DecodeIndividual(JsonValue saved)
         {
+            if (saved.TryGet("network") != null)
+            {
+                var neatParents = saved["parents"].ArrayOf(2);
+                var ids = new long[neatParents.Count];
+                for (var p = 0; p < ids.Length; p++)
+                    ids[p] = neatParents[p].Long(1);
+                return new Individual(saved["id"].Long(1), ids, saved["birthGeneration"].Int(0), DecodeNeatGenome(saved),
+                    saved["mutatedWeights"].Int(0, NeatNetwork.MaxConnections));
+            }
+
             var topology = saved["topology"].ArrayOf(3);
             var expected = NetworkTopology.Mlp12x16x3;
             if (topology.Count != 3 || topology[0].Int() != expected.Inputs || topology[1].Int() != expected.Hidden ||

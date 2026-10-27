@@ -17,7 +17,8 @@ namespace Eden.Application
             IReadOnlyList<Individual> population, IReadOnlyList<LineageEntry> lineage,
             IReadOnlyList<Individual> lastTrainingIndividuals, IReadOnlyList<EpisodeResult> lastTrainingEpisodes,
             IReadOnlyList<EpisodeResult> baselineEpisodes, IReadOnlyList<GenerationSummary> training,
-            IReadOnlyList<ValidationPoint> validation, long totalTicks, EvolutionPhase phase, EvaluationProgress job)
+            IReadOnlyList<ValidationPoint> validation, long totalTicks, EvolutionPhase phase, EvaluationProgress job,
+            NeatEvolutionState neat = null)
         {
             if (settings == null)
                 throw new ArgumentNullException(nameof(settings));
@@ -34,6 +35,7 @@ namespace Eden.Application
             TotalTicks = totalTicks;
             Phase = phase;
             Job = job ?? throw new ArgumentNullException(nameof(job));
+            Neat = neat;
         }
 
         /// <summary>The settings the evolution was created with (the snapshot keeps its own copy).</summary>
@@ -68,6 +70,39 @@ namespace Eden.Application
 
         /// <summary>The evaluation of <see cref="Phase"/> in progress.</summary>
         public EvaluationProgress Job { get; }
+
+        /// <summary>Historical markings and species of a NEAT evolution; null for the MLP.</summary>
+        public NeatEvolutionState Neat { get; }
+
+        private static T[] Copy<T>(IReadOnlyList<T> items)
+        {
+            var copy = new T[items.Count];
+            for (var i = 0; i < copy.Length; i++)
+                copy[i] = items[i];
+            return copy;
+        }
+    }
+
+    /// <summary>
+    /// What a NEAT evolution keeps between generations besides its genomes: the counters of its historical markings,
+    /// its species (representatives, best fitness, last improvement) with the next species id, and the species of each
+    /// individual of the last trained generation (null in generation 0).
+    /// </summary>
+    public sealed class NeatEvolutionState
+    {
+        public NeatEvolutionState(InnovationHistoryState innovations, IReadOnlyList<NeatSpeciesState> species,
+            int nextSpeciesId, IReadOnlyList<int> lastTrainingSpecies)
+        {
+            Innovations = innovations;
+            Species = Copy(species ?? throw new ArgumentNullException(nameof(species)));
+            NextSpeciesId = nextSpeciesId;
+            LastTrainingSpecies = lastTrainingSpecies == null ? null : Copy(lastTrainingSpecies);
+        }
+
+        public InnovationHistoryState Innovations { get; }
+        public IReadOnlyList<NeatSpeciesState> Species { get; }
+        public int NextSpeciesId { get; }
+        public IReadOnlyList<int> LastTrainingSpecies { get; }
 
         private static T[] Copy<T>(IReadOnlyList<T> items)
         {

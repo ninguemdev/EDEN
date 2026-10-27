@@ -126,6 +126,12 @@ namespace Eden.Evolution
             return split;
         }
 
+        /// <summary>A hidden node id no structure shares (e.g. for an imported genome); numbering goes on after it.</summary>
+        public int NewNodeId() => TakeNodeId();
+
+        /// <summary>An innovation no structure shares (e.g. for an imported genome); numbering goes on after it.</summary>
+        public int NewInnovation() => TakeInnovation();
+
         public InnovationHistoryState Capture() =>
             new InnovationHistoryState(Contract.Id, Generation, NextInnovation, NextNodeId);
 

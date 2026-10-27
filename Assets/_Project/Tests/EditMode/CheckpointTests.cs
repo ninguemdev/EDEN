@@ -119,7 +119,7 @@ namespace Eden.Tests.EditMode
             AssertRefused(text.Substring(0, text.Length / 2), "Invalid JSON");
             AssertRefused("not json", "Invalid JSON");
             AssertRefused("{\"format\": \"something-else\"}", "Not an EDEN checkpoint");
-            AssertRefused(text.Replace("\"schemaVersion\": 5,", "\"schemaVersion\": 6,"), "newer");
+            AssertRefused(text.Replace("\"schemaVersion\": 5,", "\"schemaVersion\": 7,"), "newer");
             AssertRefused(text.Replace(Pcg32.AlgorithmName, "xorshift128"), "random");
             AssertRefused(ChangeFirstWeight(text, "0.5"), "State hash mismatch");
             AssertRefused(text.Replace("\"maxSpeed\": 5,", "\"maxSpeed\": 6,"), "Config hash mismatch");

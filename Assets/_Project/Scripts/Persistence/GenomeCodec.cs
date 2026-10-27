@@ -200,7 +200,14 @@ namespace Eden.Persistence
             var plasticity = root.TryGet("plasticity");
             if (plasticity != null)
                 throw new CheckpointException($"{plasticity.Path}: NEAT networks have no lifetime plasticity.");
-            var saved = root["connections"].ArrayOf(NeatNetwork.MaxConnections);
+            return new Genome(new NeatNetwork(contract, DecodeConnections(root["connections"])),
+                DecodeBodyGenes(root.TryGet("body")));
+        }
+
+        /// <summary>Connection genes as written by <see cref="EncodeConnections"/>, checked for size and order.</summary>
+        internal static NeatConnection[] DecodeConnections(JsonValue values)
+        {
+            var saved = values.ArrayOf(NeatNetwork.MaxConnections);
             var connections = new NeatConnection[saved.Count];
             for (var c = 0; c < connections.Length; c++)
             {
@@ -213,10 +220,11 @@ namespace Eden.Persistence
                     throw new CheckpointException($"{gene.Path}: connections are written in increasing innovation order.");
             }
 
-            return new Genome(new NeatNetwork(contract, connections), DecodeBodyGenes(root.TryGet("body")));
+            return connections;
         }
 
-        private static JsonValue EncodeConnections(NeatNetwork network)
+        /// <summary>Connection genes as <c>[innovation, from, to, weight, enabled]</c>, in innovation order.</summary>
+        internal static JsonValue EncodeConnections(NeatNetwork network)
         {
             var values = JsonValue.NewArray();
             foreach (var gene in network.Connections)
