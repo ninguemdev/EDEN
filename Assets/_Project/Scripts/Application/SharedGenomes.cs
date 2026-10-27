@@ -11,7 +11,9 @@ namespace Eden.Application
     /// from the founder source; every child gets a mutated copy of its parent's genome, drawn from its own stream
     /// (<see cref="RandomStream.Birth"/> + child id), so a birth never shifts any other draw. Mutation uses the config's
     /// birth probability and sigma and touches only the <see cref="ExpressedBodyGenes"/>, which are also the only body
-    /// genes the child expresses. Genomes of dead children are dropped with <see cref="Forget"/>.
+    /// genes the child expresses, and the plasticity coefficients when <see cref="MutatePlasticity"/>. A child inherits
+    /// the parent's genome only: what the parent learned during its life is never part of it. Genomes of dead children
+    /// are dropped with <see cref="Forget"/>.
     /// </summary>
     public sealed class SharedGenomes : IHeredity
     {
@@ -19,15 +21,20 @@ namespace Eden.Application
         private readonly Func<CreatureId, Genome> founders;
         private readonly SortedDictionary<int, Genome> born = new SortedDictionary<int, Genome>();
 
-        public SharedGenomes(SimulationConfig config, Func<CreatureId, Genome> founders, BodyGeneSet expressedBodyGenes)
+        public SharedGenomes(SimulationConfig config, Func<CreatureId, Genome> founders, BodyGeneSet expressedBodyGenes,
+            bool mutatePlasticity = false)
         {
             this.config = config ?? throw new ArgumentNullException(nameof(config));
             this.founders = founders ?? throw new ArgumentNullException(nameof(founders));
             BodyGenes.RequireSet(expressedBodyGenes);
             ExpressedBodyGenes = expressedBodyGenes;
+            MutatePlasticity = mutatePlasticity;
         }
 
         public BodyGeneSet ExpressedBodyGenes { get; }
+
+        /// <summary>Whether children's plasticity coefficients mutate (an evolution with plasticity).</summary>
+        public bool MutatePlasticity { get; }
 
         /// <summary>Children whose genome is kept (alive, or not forgotten yet).</summary>
         public int BornCount => born.Count;
@@ -49,7 +56,7 @@ namespace Eden.Application
                 throw new InvalidOperationException($"{child} is not a new child.");
             var random = new GaussianSampler(SeedDerivation.CreateCreatureStream(config.Seed, RandomStream.Birth, child));
             var genome = Reproduction.Mutate(GenomeOf(parent.Id), config.BirthMutationProbability, config.BirthMutationSigma,
-                ExpressedBodyGenes, random, out _);
+                ExpressedBodyGenes, MutatePlasticity, random, out _);
             born.Add(child.Value, genome);
             return genome.Body.Masked(ExpressedBodyGenes);
         }

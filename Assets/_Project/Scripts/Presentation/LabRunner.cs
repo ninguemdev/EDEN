@@ -882,7 +882,7 @@ namespace Eden.Presentation
             {
                 case LabBrainKind.Evolved:
                     return new SharedGenomes(config, id => individuals[id.Value - 1].Genome,
-                        evolution.Evolution.Plan.ExpressedBodyGenes);
+                        evolution.Evolution.Plan.ExpressedBodyGenes, evolution.Evolution.Plan.Plasticity);
                 case LabBrainKind.Neural:
                     return new SharedGenomes(config, id => InitialGenomes.RandomFor(config, id), BodyGeneSet.None);
                 default:
