@@ -232,6 +232,105 @@ namespace Eden.Tests.EditMode
                 "all tied: elites by index");
         }
 
+        [Test]
+        public void Seed_ClonesTheBestOfThePoolUnchanged_RankedFirst()
+        {
+            var pool = InitialGenomes.Population(21, 5);
+            var fitness = new float[] { 3f, 1f, 4f, 0f, 2f };
+            var rules = Rules(8, elites: 4); // EliteCount is irrelevant to Seed: the pool decides how many clone.
+
+            var seeded = Reproduction.Seed(rules, pool, fitness, new GaussianSampler(new Pcg32(5, 3)));
+
+            Assert.That(seeded, Has.Length.EqualTo(8));
+            var ranking = Reproduction.Rank(fitness);
+            for (var i = 0; i < pool.Length; i++)
+                Assert.That(seeded[i].HasSameContent(pool[ranking[i]]), Is.True, $"elite slot {i}");
+        }
+
+        [Test]
+        public void Seed_ClampsEliteCountToThePopulationSize_WhenThePoolIsLarger()
+        {
+            var pool = InitialGenomes.Population(22, 10);
+            var fitness = Enumerable.Range(0, 10).Select(i => (float)i).ToArray();
+
+            var seeded = Reproduction.Seed(Rules(4, elites: 1), pool, fitness, new GaussianSampler(new Pcg32(6, 3)));
+
+            Assert.That(seeded, Has.Length.EqualTo(4));
+            var ranking = Reproduction.Rank(fitness);
+            for (var i = 0; i < 4; i++)
+                Assert.That(seeded[i].HasSameContent(pool[ranking[i]]), Is.True, "best 4 of the pool, unmutated");
+        }
+
+        [Test]
+        public void Seed_FillsTheRestByTournamentSelectionWithinThePoolOnly()
+        {
+            var pool = InitialGenomes.Population(23, 3);
+            var fitness = new[] { 1f, 2f, 3f };
+
+            // Probability 0 never mutates, so every non-elite child must be an exact copy of a pool member: proof
+            // that the tournament draws parents from the pool alone, never from outside it. The pool (3) is smaller
+            // than the population (9), so the first 3 slots are the cloned elites and the other 6 are tournament picks.
+            var zeroProbability = Reproduction.Seed(Rules(9, elites: 1, probability: 0f), pool, fitness,
+                new GaussianSampler(new Pcg32(7, 3)));
+            Assert.That(zeroProbability, Has.Length.EqualTo(9));
+            foreach (var child in zeroProbability.Skip(3))
+                Assert.That(pool.Any(p => child.HasSameContent(p)), Is.True, "probability 0 copies a pool member exactly");
+        }
+
+        [Test]
+        public void Seed_IsDeterministicForTheSameInputs()
+        {
+            var pool = InitialGenomes.Population(24, 4);
+            var fitness = new[] { 0.5f, 1.5f, 2.5f, 3.5f };
+            var rules = Rules(10, elites: 1, probability: 0.3f);
+
+            var a = Reproduction.Seed(rules, pool, fitness, new GaussianSampler(new Pcg32(42, 7)));
+            var b = Reproduction.Seed(rules, pool, fitness, new GaussianSampler(new Pcg32(42, 7)));
+
+            Assert.That(a.Length, Is.EqualTo(b.Length));
+            for (var i = 0; i < a.Length; i++)
+                Assert.That(a[i].HasSameContent(b[i]), Is.True, $"genome {i}");
+        }
+
+        [Test]
+        public void FromSeedPool_BuildsGeneration0AsParentlessFoundersFromThePool()
+        {
+            var settings = SmallExperiment(60);
+            var pool = InitialGenomes.Population(25, 3);
+            var poolFitness = new[] { 1f, 2f, 3f };
+
+            var evolution = GenerationalEvolution.FromSeedPool(settings, pool, poolFitness);
+
+            Assert.That(evolution.Generation, Is.Zero);
+            Assert.That(evolution.Population.Count, Is.EqualTo(8));
+            foreach (var individual in evolution.Individuals)
+            {
+                Assert.That(individual.ParentIds, Is.Empty);
+                Assert.That(individual.BirthGeneration, Is.Zero);
+            }
+
+            // The run continues normally: one more generation, bred the same way any other generation is.
+            var report = evolution.Advance();
+            Assert.That(report.Summary.Generation, Is.Zero);
+            Assert.That(evolution.Generation, Is.EqualTo(1));
+            Assert.That(evolution.Population.Count, Is.EqualTo(8));
+        }
+
+        [Test]
+        public void FromSeedPool_IsDeterministicPerExperimentSeed()
+        {
+            var settings = SmallExperiment(61);
+            var pool = InitialGenomes.Population(26, 3);
+            var poolFitness = new[] { 1f, 2f, 3f };
+
+            var first = GenerationalEvolution.FromSeedPool(settings, pool, poolFitness);
+            var second = GenerationalEvolution.FromSeedPool(settings, pool, poolFitness);
+
+            Assert.That(first.Population.Count, Is.EqualTo(second.Population.Count));
+            for (var i = 0; i < first.Population.Count; i++)
+                Assert.That(first.Population[i].HasSameContent(second.Population[i]), Is.True, $"genome {i}");
+        }
+
         private const int NeuralWeights = 259;
 
         private static ReproductionRules Rules(int size, int elites, float probability = 0.05f, float sigma = 0.10f) =>

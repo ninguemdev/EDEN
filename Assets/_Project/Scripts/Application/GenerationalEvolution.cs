@@ -27,6 +27,25 @@ namespace Eden.Application
             population = GenomesOf(individuals);
         }
 
+        /// <summary>
+        /// A new evolution whose generation 0 is built from an imported pool (<see cref="Reproduction.Seed"/>) instead of
+        /// random weights: the best of the pool cloned, plus mutated children of the pool filling the rest of the
+        /// population. Every pool genome needs a matching fitness, in the same order; one exported without a known
+        /// fitness of its own should be given 0, so it never outranks a pool genome with a real score by accident.
+        /// </summary>
+        public static GenerationalEvolution FromSeedPool(EvolutionSettings settings, IReadOnlyList<Genome> pool,
+            IReadOnlyList<float> poolFitness)
+        {
+            var evolution = new GenerationalEvolution(settings ?? throw new ArgumentNullException(nameof(settings)),
+                new Lineage());
+            var random = new GaussianSampler(
+                SeedDerivation.CreateStream(evolution.Rules.ExperimentSeed, RandomStream.SeededGeneration));
+            var seeded = Reproduction.Seed(evolution.Rules, pool, poolFitness, random);
+            evolution.individuals = evolution.Lineage.Founders(seeded);
+            evolution.population = GenomesOf(evolution.individuals);
+            return evolution;
+        }
+
         private GenerationalEvolution(EvolutionSettings settings, Lineage lineage)
         {
             this.settings = settings.WithExperimentSeed(settings.ExperimentSeed);

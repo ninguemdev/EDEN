@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Eden.Brains;
+using Eden.Domain;
 using Eden.Evolution;
 
 namespace Eden.Application
@@ -38,6 +39,16 @@ namespace Eden.Application
             : this(new GenerationalEvolution(settings), validationInterval)
         {
             BeginTraining();
+        }
+
+        /// <summary>A new session whose evolution starts from an imported pool; see <see cref="GenerationalEvolution.FromSeedPool"/>.</summary>
+        public static EvolutionSession FromSeedPool(EvolutionSettings settings, IReadOnlyList<Genome> pool,
+            IReadOnlyList<float> poolFitness, int validationInterval = DefaultValidationInterval)
+        {
+            var session = new EvolutionSession(GenerationalEvolution.FromSeedPool(settings, pool, poolFitness),
+                validationInterval);
+            session.BeginTraining();
+            return session;
         }
 
         private EvolutionSession(GenerationalEvolution evolution, int validationInterval)

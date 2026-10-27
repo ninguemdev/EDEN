@@ -138,6 +138,12 @@ namespace Eden.Presentation
         /// <summary>Outcome of the last save or load, as shown in the HUD; null before the first one.</summary>
         public string CheckpointStatus { get; private set; }
 
+        /// <summary>Directory "Exportar genoma" writes to (persistentDataPath/Genomes by default), one file per click.</summary>
+        public string GenomeExportDirectory { get; set; }
+
+        /// <summary>Outcome of the last genome export, as shown in the HUD; null before the first one.</summary>
+        public string GenomeExportStatus { get; private set; }
+
         /// <summary>Last captured network state of the selected neural creature (diagram data).</summary>
         public NeuralSnapshot Network => networkSnapshot;
 
@@ -324,6 +330,69 @@ namespace Eden.Presentation
             return true;
         }
 
+        /// <summary>
+        /// Writes the selected creature's genome to <see cref="GenomeExportDirectory"/> (what "Exportar genoma" does),
+        /// one file per click. Its fitness is included when a value for that exact individual is already on hand (a
+        /// shared-world creature from the evolution's last trained generation); otherwise the file omits it, and it
+        /// counts as 0 if the file is later used to seed a pool. Does nothing (and returns false) without a selected
+        /// creature whose genome is known.
+        /// </summary>
+        public bool ExportGenome()
+        {
+            var record = ResolveExportableGenome();
+            if (record == null)
+                return false;
+            try
+            {
+                var individualId = record.Source?.IndividualId ?? Selected.Value.Value;
+                var path = Path.Combine(GenomeExportDirectory,
+                    $"genome-{individualId}-{DateTime.UtcNow:yyyyMMdd-HHmmssfff}.json");
+                GenomeFile.Save(path, record, UnityEngine.Application.version, DateTime.UtcNow);
+                ShowGenomeExportStatus(LabText.GenomeExported(path));
+                return true;
+            }
+            catch (CheckpointException error)
+            {
+                Debug.LogWarning($"EDEN: genome not exported ({error.Message})");
+                ShowGenomeExportStatus(LabText.GenomeExportFailed(error.Message));
+                return false;
+            }
+        }
+
+        // What the selected creature's genome is, if it has one: the episode's candidate in Isolated Evolution, or a
+        // shared-world creature with a neural brain (founder or born). Null otherwise, including no selection.
+        private GenomeRecord ResolveExportableGenome()
+        {
+            if (!Selected.HasValue)
+                return null;
+
+            if (mode == LabMode.IsolatedEvolution)
+            {
+                var individual = Evolution?.CurrentIndividual;
+                return individual == null
+                    ? null
+                    : new GenomeRecord(individual.Genome, null,
+                        new GenomeSource(Evolution.Plan.ExperimentSeed, Evolution.Job.Generation, individual.Id));
+            }
+
+            if (sharedGenomes == null)
+                return null;
+
+            var genome = sharedGenomes.GenomeOf(Selected.Value);
+            var index = Selected.Value.Value - 1;
+            var training = Evolution?.LastTraining;
+            var fitness = training != null && index >= 0 && index < training.Evaluation.Candidates.Count
+                ? (float?)training.Evaluation.Candidates[index].MeanFitness
+                : null;
+            var individualId = sharedIndividuals != null && index >= 0 && index < sharedIndividuals.Count
+                ? sharedIndividuals[index].Id
+                : Selected.Value.Value;
+            var source = Evolution == null
+                ? (GenomeSource?)null
+                : new GenomeSource(Evolution.Plan.ExperimentSeed, sharedGeneration, individualId);
+            return new GenomeRecord(genome, fitness, source);
+        }
+
         /// <summary>Switches the brain kind of the shared world and restarts it with the same seed.</summary>
         public void UseBrain(LabBrainKind kind)
         {
@@ -464,6 +533,7 @@ namespace Eden.Presentation
         private void Awake()
         {
             CheckpointPath ??= Path.Combine(UnityEngine.Application.persistentDataPath, "Checkpoints", "lab.json");
+            GenomeExportDirectory ??= Path.Combine(UnityEngine.Application.persistentDataPath, "Genomes");
             var arguments = Environment.GetCommandLineArgs();
             var selectAtStart = ApplyCommandLine(arguments, out var maxSpeed);
             benchmark = LabBenchmark.FromCommandLine(arguments);
@@ -475,6 +545,7 @@ namespace Eden.Presentation
                 hud.ResumeEvolutionClicked += ResumeEvolution;
                 hud.SaveClicked += () => SaveCheckpoint();
                 hud.LoadClicked += () => LoadCheckpoint();
+                hud.ExportGenomeClicked += () => ExportGenome();
                 hud.PauseClicked += TogglePause;
                 hud.StepClicked += RequestStep;
                 hud.SlowerClicked += () => ScaleSpeed(0.5f);
@@ -660,13 +731,41 @@ namespace Eden.Presentation
             sharedGenomes = null;
             var evolutionSettings = Preset.Evolution((ulong)seed);
             evolutionSettings.ExpressedBodyGenes = evolvingBody ? BodyGeneSet.All : BodyGeneSet.None;
-            Evolution = new EvolutionSession(evolutionSettings);
+            Evolution = CreateEvolution(evolutionSettings);
             BrainName = MlpBrain.BrainName;
             if (writeMetrics)
                 OpenEvolutionLog();
             var episode = Evolution.Job.Current;
             Simulation = episode.Simulation;
             controller = episode.Controller;
+        }
+
+        // A non-empty seed-pool directory in the experiment panel starts generation 0 from it instead of random
+        // weights; a bad directory falls back to random and reports why, rather than leaving the lab unable to start.
+        private EvolutionSession CreateEvolution(EvolutionSettings evolutionSettings)
+        {
+            var directory = hud?.SeedGenomesDirectory;
+            if (string.IsNullOrEmpty(directory))
+                return new EvolutionSession(evolutionSettings);
+            try
+            {
+                var pool = GenomeFile.LoadPool(directory);
+                var genomes = new Genome[pool.Length];
+                var fitness = new float[pool.Length];
+                for (var i = 0; i < pool.Length; i++)
+                {
+                    genomes[i] = pool[i].Genome;
+                    fitness[i] = pool[i].Fitness ?? 0f;
+                }
+
+                return EvolutionSession.FromSeedPool(evolutionSettings, genomes, fitness);
+            }
+            catch (CheckpointException error)
+            {
+                Debug.LogWarning($"EDEN: genome pool not used ({error.Message})");
+                ShowGenomeExportStatus(LabText.GenomePoolFailed(error.Message));
+                return new EvolutionSession(evolutionSettings);
+            }
         }
 
         // Evolution mode: follows the episode being evaluated; a selection moves on to the new episode's creature.
@@ -763,6 +862,7 @@ namespace Eden.Presentation
                 : LabText.Run(Simulation, Clock, BrainName, Preset, metrics, RunDirectory, SharedSource()));
             hud.ShowEvolution(evolving || sharedIndividuals != null ? Evolution : null);
             hud.ShowInspector(Selected.HasValue ? DescribeSelected(Selected.Value) : null);
+            hud.SetExportAvailable(ResolveExportableGenome() != null);
         }
 
         private string SharedSource() =>
@@ -913,6 +1013,12 @@ namespace Eden.Presentation
             CheckpointStatus = text;
             hud?.ShowCheckpointStatus(text);
             RefreshHud();
+        }
+
+        private void ShowGenomeExportStatus(string text)
+        {
+            GenomeExportStatus = text;
+            hud?.ShowExportStatus(text);
         }
 
         // Names written in checkpoints; the same words as the command line.

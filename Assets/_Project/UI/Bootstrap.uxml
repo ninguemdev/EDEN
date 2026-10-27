@@ -1,46 +1,53 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements">
     <Style src="Lab.uss" />
     <ui:VisualElement name="bootstrap-root" picking-mode="Ignore" style="flex-grow: 1; flex-direction: row; justify-content: space-between; align-items: flex-start; padding: 16px;">
-        <ui:VisualElement name="run-panel" picking-mode="Ignore" class="lab-panel" style="width: 400px; padding: 12px 14px; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; background-color: rgba(8, 16, 20, 0.82);">
-            <ui:Label name="title" text="EDEN" style="font-size: 34px; -unity-font-style: bold; color: rgb(226, 240, 233); letter-spacing: 10px;" />
-            <ui:Label name="subtitle" text="Evolutionary Digital Ecosystem Network" style="font-size: 13px; color: rgb(140, 178, 164); margin-bottom: 6px;" />
-            <ui:VisualElement name="experiment-panel" class="lab-controls">
-                <ui:DropdownField name="mode-field" label="Modo" class="lab-field" />
-                <ui:DropdownField name="preset-field" label="Preset" class="lab-field" />
-                <ui:DropdownField name="brain-field" label="Cérebro" class="lab-field" />
-                <ui:DropdownField name="body-field" label="Corpo" class="lab-field" />
-                <ui:IntegerField name="seed-field" label="Seed" value="1" class="lab-field" />
-                <ui:VisualElement class="lab-row">
-                    <ui:Button name="start-button" text="Iniciar" class="lab-button lab-button--primary" />
-                    <ui:Button name="resume-evolution-button" text="Voltar à evolução" class="lab-button" style="display: none;" />
+        <ui:VisualElement name="run-panel" picking-mode="Ignore" class="lab-panel" style="width: 400px; max-height: 100%; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; background-color: rgba(8, 16, 20, 0.82); overflow: hidden;">
+            <ui:ScrollView name="run-panel-scroll" mode="Vertical" style="flex-grow: 1; height: 100%; padding: 12px 14px;">
+                <ui:Label name="title" text="EDEN" style="font-size: 34px; -unity-font-style: bold; color: rgb(226, 240, 233); letter-spacing: 10px;" />
+                <ui:Label name="subtitle" text="Evolutionary Digital Ecosystem Network" style="font-size: 13px; color: rgb(140, 178, 164); margin-bottom: 6px;" />
+                <ui:VisualElement name="experiment-panel" class="lab-controls">
+                    <ui:DropdownField name="mode-field" label="Modo" class="lab-field" />
+                    <ui:DropdownField name="preset-field" label="Preset" class="lab-field" />
+                    <ui:DropdownField name="brain-field" label="Cérebro" class="lab-field" />
+                    <ui:DropdownField name="body-field" label="Corpo" class="lab-field" />
+                    <ui:IntegerField name="seed-field" label="Seed" value="1" class="lab-field" />
+                    <ui:TextField name="seed-genomes-field" label="Pool de genomas" class="lab-field" />
+                    <ui:VisualElement class="lab-row">
+                        <ui:Button name="start-button" text="Iniciar" class="lab-button lab-button--primary" />
+                        <ui:Button name="resume-evolution-button" text="Voltar à evolução" class="lab-button" style="display: none;" />
+                    </ui:VisualElement>
+                    <ui:VisualElement class="lab-row">
+                        <ui:Button name="pause-button" text="Pausar" class="lab-button" />
+                        <ui:Button name="step-button" text="+1 tick" class="lab-button" />
+                        <ui:Button name="slower-button" text="½×" class="lab-button" />
+                        <ui:Button name="faster-button" text="2×" class="lab-button" />
+                        <ui:Button name="max-button" text="Máx." class="lab-button" />
+                    </ui:VisualElement>
+                    <ui:VisualElement class="lab-row">
+                        <ui:Button name="save-button" text="Salvar" class="lab-button" />
+                        <ui:Button name="load-button" text="Carregar" class="lab-button" />
+                    </ui:VisualElement>
+                    <ui:Label name="checkpoint-status" text="" style="display: none; font-size: 12px; color: rgb(160, 190, 180); white-space: normal; margin-top: 2px;" />
                 </ui:VisualElement>
-                <ui:VisualElement class="lab-row">
-                    <ui:Button name="pause-button" text="Pausar" class="lab-button" />
-                    <ui:Button name="step-button" text="+1 tick" class="lab-button" />
-                    <ui:Button name="slower-button" text="½×" class="lab-button" />
-                    <ui:Button name="faster-button" text="2×" class="lab-button" />
-                    <ui:Button name="max-button" text="Máx." class="lab-button" />
+                <ui:Label name="run-stats" text="" style="font-size: 14px; color: rgb(214, 226, 220); white-space: normal; margin-top: 8px;" />
+                <ui:VisualElement name="chart-panel" picking-mode="Ignore" style="display: none; margin-top: 8px;">
+                    <ui:Label name="chart-title" text="Fitness por geração (comida ingerida / s simulado)" style="font-size: 13px; -unity-font-style: bold; color: rgb(226, 240, 233);" />
+                    <ui:Label name="chart-legend" text="" style="font-size: 11px; color: rgb(160, 190, 180); white-space: normal; margin-bottom: 2px;" />
+                    <ui:VisualElement name="generation-chart-host" picking-mode="Ignore" style="height: 280px;" />
                 </ui:VisualElement>
-                <ui:VisualElement class="lab-row">
-                    <ui:Button name="save-button" text="Salvar" class="lab-button" />
-                    <ui:Button name="load-button" text="Carregar" class="lab-button" />
-                </ui:VisualElement>
-                <ui:Label name="checkpoint-status" text="" style="display: none; font-size: 12px; color: rgb(160, 190, 180); white-space: normal; margin-top: 2px;" />
-            </ui:VisualElement>
-            <ui:Label name="run-stats" text="" style="font-size: 14px; color: rgb(214, 226, 220); white-space: normal; margin-top: 8px;" />
-            <ui:VisualElement name="chart-panel" picking-mode="Ignore" style="display: none; margin-top: 8px;">
-                <ui:Label name="chart-title" text="Fitness por geração (comida ingerida / s simulado)" style="font-size: 13px; -unity-font-style: bold; color: rgb(226, 240, 233);" />
-                <ui:Label name="chart-legend" text="" style="font-size: 11px; color: rgb(160, 190, 180); white-space: normal; margin-bottom: 2px;" />
-                <ui:VisualElement name="generation-chart-host" picking-mode="Ignore" style="height: 140px;" />
-            </ui:VisualElement>
+            </ui:ScrollView>
         </ui:VisualElement>
-        <ui:VisualElement name="inspector-panel" picking-mode="Ignore" style="display: none; width: 420px; padding: 14px; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; background-color: rgba(8, 16, 20, 0.82);">
-            <ui:Label name="inspector" text="" style="font-size: 15px; color: rgb(214, 226, 220); white-space: normal;" />
-            <ui:VisualElement name="network-panel" picking-mode="Ignore" style="display: none; margin-top: 10px;">
-                <ui:Label name="network-title" text="Rede neural (feed-forward: sem memória nem aprendizado)" style="font-size: 14px; -unity-font-style: bold; color: rgb(226, 240, 233); white-space: normal;" />
-                <ui:Label name="network-legend" text="Neurônios: ativação (verde +, vermelho −). Linhas: peso × sinal." style="font-size: 12px; color: rgb(140, 178, 164); white-space: normal; margin-bottom: 4px;" />
-                <ui:VisualElement name="network-graph-host" picking-mode="Ignore" style="height: 340px;" />
-            </ui:VisualElement>
+        <ui:VisualElement name="inspector-panel" picking-mode="Ignore" style="display: none; width: 420px; max-height: 100%; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; background-color: rgba(8, 16, 20, 0.82); overflow: hidden;">
+            <ui:ScrollView name="inspector-panel-scroll" mode="Vertical" style="flex-grow: 1; height: 100%; padding: 14px;">
+                <ui:Label name="inspector" text="" style="font-size: 15px; color: rgb(214, 226, 220); white-space: normal;" />
+                <ui:Button name="export-genome-button" text="Exportar genoma" class="lab-button" style="display: none; margin-top: 8px;" />
+                <ui:Label name="export-status" text="" style="display: none; font-size: 12px; color: rgb(160, 190, 180); white-space: normal; margin-top: 4px;" />
+                <ui:VisualElement name="network-panel" picking-mode="Ignore" style="display: none; margin-top: 10px;">
+                    <ui:Label name="network-title" text="Rede neural (feed-forward: sem memória nem aprendizado)" style="font-size: 14px; -unity-font-style: bold; color: rgb(226, 240, 233); white-space: normal;" />
+                    <ui:Label name="network-legend" text="Neurônios: ativação (verde +, vermelho −). Linhas: peso × sinal." style="font-size: 12px; color: rgb(140, 178, 164); white-space: normal; margin-bottom: 4px;" />
+                    <ui:VisualElement name="network-graph-host" picking-mode="Ignore" style="height: 340px;" />
+                </ui:VisualElement>
+            </ui:ScrollView>
         </ui:VisualElement>
     </ui:VisualElement>
     <ui:Label name="help" picking-mode="Ignore" text="Espaço pausar · . um tick · - / = velocidade · M máx. · clique ou [ ] selecionar · Esc limpar · R reiniciar · B trocar cérebro · F5 salvar · F9 carregar" style="position: absolute; left: 16px; bottom: 12px; font-size: 14px; color: rgb(140, 178, 164);" />
