@@ -105,10 +105,12 @@ namespace Eden.Evolution
         }
 
         /// <summary>
-        /// New node and connections for splitting the connection with <paramref name="innovation"/> in this generation:
-        /// the same ones as an earlier split of that connection in this generation, or new ones.
+        /// New node and connections for splitting the connection with <paramref name="innovation"/>, from
+        /// <paramref name="from"/> to <paramref name="to"/>, in this generation: the same ones as an earlier split of
+        /// that connection in this generation, or new ones. The two new connections count as structures of this
+        /// generation, so adding one of them as a plain connection later in the generation gets the same number.
         /// </summary>
-        public NodeSplit Split(int innovation)
+        public NodeSplit Split(int innovation, int from, int to)
         {
             if (innovation < 0)
                 throw new ArgumentOutOfRangeException(nameof(innovation));
@@ -119,6 +121,8 @@ namespace Eden.Evolution
             var outInnovation = TakeInnovation();
             split = new NodeSplit(node, inInnovation, outInnovation);
             splitsThisGeneration.Add(innovation, split);
+            connectionsThisGeneration[(long)from << 32 | (uint)node] = inInnovation;
+            connectionsThisGeneration[(long)node << 32 | (uint)to] = outInnovation;
             return split;
         }
 

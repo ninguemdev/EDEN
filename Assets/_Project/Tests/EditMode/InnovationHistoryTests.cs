@@ -25,21 +25,24 @@ namespace Eden.Tests.EditMode
         public void SameStructureInOneGeneration_GetsTheSameNumbers()
         {
             var history = new InnovationHistory(Contract);
-            var split = history.Split(4);
+            var split = history.Split(4, 1, FirstOutput + 1);
             Assert.That(split.NodeId, Is.EqualTo(FirstHidden));
             Assert.That(split.InInnovation, Is.EqualTo(39));
             Assert.That(split.OutInnovation, Is.EqualTo(40));
 
-            var again = history.Split(4);
+            var again = history.Split(4, 1, FirstOutput + 1);
             Assert.That(again.NodeId, Is.EqualTo(split.NodeId), "another genome splitting the same connection");
             Assert.That(again.InInnovation, Is.EqualTo(split.InInnovation));
             Assert.That(again.OutInnovation, Is.EqualTo(split.OutInnovation));
 
+            Assert.That(history.ConnectionInnovation(1, split.NodeId), Is.EqualTo(split.InInnovation),
+                "the split connections are structures of this generation");
+            Assert.That(history.ConnectionInnovation(split.NodeId, FirstOutput + 1), Is.EqualTo(split.OutInnovation));
             var connection = history.ConnectionInnovation(2, split.NodeId);
             Assert.That(connection, Is.EqualTo(41));
             Assert.That(history.ConnectionInnovation(2, split.NodeId), Is.EqualTo(41));
             Assert.That(history.ConnectionInnovation(3, split.NodeId), Is.EqualTo(42), "a different pair is new");
-            Assert.That(history.Split(5).NodeId, Is.EqualTo(FirstHidden + 1), "a different connection is new");
+            Assert.That(history.Split(5, 1, FirstOutput + 2).NodeId, Is.EqualTo(FirstHidden + 1), "a different connection is new");
         }
 
         [Test]
@@ -55,11 +58,11 @@ namespace Eden.Tests.EditMode
         public void ANewGeneration_GivesRediscoveredStructuresNewNumbers()
         {
             var history = new InnovationHistory(Contract);
-            var first = history.Split(7);
+            var first = history.Split(7, 2, FirstOutput + 1);
             var connection = history.ConnectionInnovation(1, first.NodeId);
 
             history.BeginGeneration(1);
-            var later = history.Split(7);
+            var later = history.Split(7, 2, FirstOutput + 1);
             Assert.That(later.NodeId, Is.Not.EqualTo(first.NodeId));
             Assert.That(later.InInnovation, Is.GreaterThan(connection));
             Assert.That(history.ConnectionInnovation(1, first.NodeId), Is.Not.EqualTo(connection));
@@ -70,7 +73,7 @@ namespace Eden.Tests.EditMode
         public void CaptureAndRestore_ContinueTheSameNumbering()
         {
             var history = new InnovationHistory(Contract);
-            history.Split(3);
+            history.Split(3, 1, FirstOutput);
             history.BeginGeneration(2);
             history.ConnectionInnovation(1, FirstHidden);
 
@@ -80,7 +83,7 @@ namespace Eden.Tests.EditMode
             Assert.That(restored.NextNodeId, Is.EqualTo(history.NextNodeId));
             restored.BeginGeneration(3);
             history.BeginGeneration(3);
-            Assert.That(restored.Split(9).NodeId, Is.EqualTo(history.Split(9).NodeId));
+            Assert.That(restored.Split(9, 3, FirstOutput).NodeId, Is.EqualTo(history.Split(9, 3, FirstOutput).NodeId));
             Assert.That(restored.ConnectionInnovation(2, FirstHidden), Is.EqualTo(history.ConnectionInnovation(2, FirstHidden)));
 
             Assert.That(() => InnovationHistory.Restore(new InnovationHistoryState("unknown", 0, 39, FirstHidden)),
