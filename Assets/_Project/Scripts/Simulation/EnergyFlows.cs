@@ -15,6 +15,12 @@ namespace Eden.Simulation
         /// <summary>Metabolism, movement and sensor costs actually paid (a creature cannot pay more than it holds).</summary>
         public double Spent;
 
+        /// <summary>Part of the costs charged that was eye upkeep (diagnostic; charged, before a creature runs dry).</summary>
+        public double EyeCosts;
+
+        /// <summary>Part of the costs charged that was turning, for creatures with eyes (diagnostic, like <see cref="EyeCosts"/>).</summary>
+        public double TurnCosts;
+
         /// <summary>Food energy above a creature's capacity, which is lost.</summary>
         public double Overflow;
 
@@ -34,6 +40,8 @@ namespace Eden.Simulation
         {
             Food += other.Food;
             Spent += other.Spent;
+            EyeCosts += other.EyeCosts;
+            TurnCosts += other.TurnCosts;
             Overflow += other.Overflow;
             Transferred += other.Transferred;
             BirthCosts += other.BirthCosts;

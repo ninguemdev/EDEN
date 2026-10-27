@@ -52,6 +52,7 @@ namespace Eden.Domain
             RequireRange(errors, nameof(s.SensorCostExponent), s.SensorCostExponent, 0f, MaxCostExponent);
             RequireRange(errors, nameof(s.EfficiencyPowerExponent), s.EfficiencyPowerExponent, 0f, MaxCostExponent);
             RequireRange(errors, nameof(s.FoodShiftSeconds), s.FoodShiftSeconds, 0f, MaxDurationSeconds);
+            RequireRange(errors, nameof(s.TurnCostFraction), s.TurnCostFraction, 0f, MaxCostExponent);
             RequireRange(errors, nameof(s.PopulationCap), s.PopulationCap, 1, MaxPopulation);
             if (s.Reproduction && s.PopulationCap < s.InitialPopulation)
                 errors.Add($"{nameof(s.PopulationCap)} ({s.PopulationCap}) must not be below {nameof(s.InitialPopulation)} " +
@@ -93,6 +94,7 @@ namespace Eden.Domain
             SensorCostExponent = s.SensorCostExponent;
             EfficiencyPowerExponent = s.EfficiencyPowerExponent;
             FoodShiftSeconds = s.FoodShiftSeconds;
+            TurnCostFraction = s.TurnCostFraction;
             Reproduction = s.Reproduction;
             PopulationCap = s.PopulationCap;
             MaturitySeconds = s.MaturitySeconds;
@@ -164,6 +166,9 @@ namespace Eden.Domain
 
         /// <summary>Time food moves from the left to the right half of the arena; 0 when it never does.</summary>
         public float FoodShiftSeconds { get; }
+
+        /// <summary>Turning cost of creatures with eyes as a fraction of their movement cost (see the settings).</summary>
+        public float TurnCostFraction { get; }
 
         /// <summary>Tick at the start of which food moves; 0 when it never does.</summary>
         public long FoodShiftTicks { get; }
