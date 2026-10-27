@@ -86,6 +86,12 @@ namespace Eden.Persistence
                 var eye = Eye.Frontal;
                 lines.Add("senses=eyes;founders 1 frontal eye, aperture " + eye.Aperture.ToString(culture) + " rad, range " +
                           eye.Range.ToString(culture) + "x sensor range;no wall radar, no circular food sense");
+                var neatEyes = settings.Neat;
+                lines.Add(Plan.EvolvingEyes
+                    ? "eyes=evolving;probability " + neatEyes.EyeMutationProbability.ToString(culture) + ";orientation_sigma " +
+                      neatEyes.EyeOrientationSigma.ToString(culture) + ";aperture_sigma " +
+                      neatEyes.EyeApertureSigma.ToString(culture) + ";range_sigma " + neatEyes.EyeRangeSigma.ToString(culture)
+                    : "eyes=fixed");
             }
 
             if (IsNeat)

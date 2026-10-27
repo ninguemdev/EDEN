@@ -333,6 +333,8 @@ namespace Eden.Simulation
                 var x = Clamp(parent.Position.X + MathF.Cos(angle) * config.BirthDistance, config.ArenaWidth);
                 var y = Clamp(parent.Position.Y + MathF.Sin(angle) * config.BirthDistance, config.ArenaHeight);
                 var child = World.AddOffspring(parent, new Float2(x, y), heading, transfer, genes);
+                if (Heredity != null)
+                    child.Eyes = Heredity.EyesOf(childId);
                 births.Add(new CreatureBirth(child.Id, parent.Id, tick));
                 alive++;
             }

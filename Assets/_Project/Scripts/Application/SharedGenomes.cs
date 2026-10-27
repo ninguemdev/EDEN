@@ -21,10 +21,13 @@ namespace Eden.Application
         private readonly SimulationConfig config;
         private readonly Func<CreatureId, Genome> founders;
         private readonly SortedDictionary<int, Genome> born = new SortedDictionary<int, Genome>();
+        private readonly EyeMutation eyeRules;
 
+        /// <param name="eyeRules">How children's eyes mutate (NEAT genomes with evolving eyes); the default keeps them.</param>
         public SharedGenomes(SimulationConfig config, Func<CreatureId, Genome> founders, BodyGeneSet expressedBodyGenes,
-            bool mutatePlasticity = false)
+            bool mutatePlasticity = false, EyeMutation eyeRules = default)
         {
+            this.eyeRules = eyeRules;
             this.config = config ?? throw new ArgumentNullException(nameof(config));
             this.founders = founders ?? throw new ArgumentNullException(nameof(founders));
             BodyGenes.RequireSet(expressedBodyGenes);
@@ -61,10 +64,12 @@ namespace Eden.Application
                 ? Reproduction.Mutate(parentGenome, config.BirthMutationProbability, config.BirthMutationSigma,
                     ExpressedBodyGenes, MutatePlasticity, random, out _)
                 : NeatMutation.MutateWeights(parentGenome, config.BirthMutationProbability, config.BirthMutationSigma,
-                    ExpressedBodyGenes, random, out _);
+                    ExpressedBodyGenes, random, out _, eyeRules);
             born.Add(child.Value, genome);
             return genome.Body.Masked(ExpressedBodyGenes);
         }
+
+        public EyeSet EyesOf(CreatureId creature) => GenomeOf(creature).Eyes;
 
         /// <summary>Drops the genomes of children that died, e.g. with <see cref="WorldSimulation.LastDeaths"/>.</summary>
         public void Forget(IReadOnlyList<CreatureDeath> deaths)

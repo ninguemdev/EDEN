@@ -36,6 +36,18 @@ namespace Eden.Evolution
         /// <summary>Random (source, target) pairs tried before giving up on adding a connection (proposed 20).</summary>
         public int AddConnectionAttempts = 20;
 
+        /// <summary>With evolving eyes, chance that each trait of each eye mutates (proposed 0.1).</summary>
+        public float EyeMutationProbability = 0.1f;
+
+        /// <summary>Standard deviation of an eye's orientation change, radians (proposed 0.25, about 14°).</summary>
+        public float EyeOrientationSigma = 0.25f;
+
+        /// <summary>Standard deviation of an eye's aperture change, radians (proposed 0.2, about 11°).</summary>
+        public float EyeApertureSigma = 0.2f;
+
+        /// <summary>Standard deviation of an eye's range factor change (proposed 0.1).</summary>
+        public float EyeRangeSigma = 0.1f;
+
         /// <summary>
         /// In crossover, chance that a matching connection disabled in either parent stays disabled in the child
         /// (proposed 0.75).
@@ -106,6 +118,10 @@ namespace Eden.Evolution
                 errors.Add($"{nameof(settings.AddConnectionAttempts)} must be in [1, {MaxAddConnectionAttempts}] " +
                            $"(was {settings.AddConnectionAttempts})");
             Probability(settings.DisabledInheritProbability, nameof(settings.DisabledInheritProbability), errors);
+            Probability(settings.EyeMutationProbability, nameof(settings.EyeMutationProbability), errors);
+            Coefficient(settings.EyeOrientationSigma, nameof(settings.EyeOrientationSigma), errors);
+            Coefficient(settings.EyeApertureSigma, nameof(settings.EyeApertureSigma), errors);
+            Coefficient(settings.EyeRangeSigma, nameof(settings.EyeRangeSigma), errors);
             Coefficient(settings.ExcessCoefficient, nameof(settings.ExcessCoefficient), errors);
             Coefficient(settings.DisjointCoefficient, nameof(settings.DisjointCoefficient), errors);
             Coefficient(settings.WeightDifferenceCoefficient, nameof(settings.WeightDifferenceCoefficient), errors);
@@ -138,6 +154,8 @@ namespace Eden.Evolution
             ToggleProbability = settings.ToggleProbability;
             AddConnectionAttempts = settings.AddConnectionAttempts;
             DisabledInheritProbability = settings.DisabledInheritProbability;
+            EyeMutation = new EyeMutation(settings.EyeMutationProbability, settings.EyeOrientationSigma,
+                settings.EyeApertureSigma, settings.EyeRangeSigma);
             ExcessCoefficient = settings.ExcessCoefficient;
             DisjointCoefficient = settings.DisjointCoefficient;
             WeightDifferenceCoefficient = settings.WeightDifferenceCoefficient;
@@ -160,6 +178,9 @@ namespace Eden.Evolution
         public float ToggleProbability { get; }
         public int AddConnectionAttempts { get; }
         public float DisabledInheritProbability { get; }
+
+        /// <summary>How eyes mutate when an experiment lets them evolve.</summary>
+        public EyeMutation EyeMutation { get; }
         public float ExcessCoefficient { get; }
         public float DisjointCoefficient { get; }
         public float WeightDifferenceCoefficient { get; }
@@ -185,15 +206,42 @@ namespace Eden.Evolution
         }
     }
 
-    /// <summary>Body genes that mutate with a NEAT child, and how (the experiment's chance and noise).</summary>
+    /// <summary>How eyes mutate: chance per trait and noise of each; the default never mutates and draws nothing.</summary>
+    public readonly struct EyeMutation
+    {
+        public EyeMutation(float probability, float orientationSigma, float apertureSigma, float rangeSigma)
+        {
+            Probability = probability;
+            OrientationSigma = orientationSigma;
+            ApertureSigma = apertureSigma;
+            RangeSigma = rangeSigma;
+        }
+
+        public float Probability { get; }
+        public float OrientationSigma { get; }
+        public float ApertureSigma { get; }
+        public float RangeSigma { get; }
+
+        /// <summary>False for the default (fixed eyes): no draws at all.</summary>
+        public bool IsEnabled => Probability > 0f;
+    }
+
+    /// <summary>
+    /// Body genes and eyes that mutate with a NEAT child, and how (the experiment's chance and noise for the genes, the
+    /// eye rules for evolving eyes).
+    /// </summary>
     public readonly struct BodyMutation
     {
-        public BodyMutation(BodyGeneSet genes, float probability, float sigma)
+        public BodyMutation(BodyGeneSet genes, float probability, float sigma, EyeMutation eyes = default)
         {
             Genes = genes;
             Probability = probability;
             Sigma = sigma;
+            Eyes = eyes;
         }
+
+        /// <summary>How eyes mutate; the default keeps them fixed.</summary>
+        public EyeMutation Eyes { get; }
 
         /// <summary>Genes that mutate; <see cref="BodyGeneSet.None"/> (the default) copies the body and draws nothing.</summary>
         public BodyGeneSet Genes { get; }
@@ -243,7 +291,8 @@ namespace Eden.Evolution
     /// <item>a coin for a toggle; when it hits, one draw picks a connection (innovation order) and flips it.</item>
     /// </list>
     /// Structural steps see the result of the previous ones. Then the body genes of <see cref="BodyMutation.Genes"/>
-    /// mutate as <see cref="Reproduction.MutateBody"/> does; by default the body is copied and draws nothing.
+    /// mutate as <see cref="Reproduction.MutateBody"/> does, and then the eyes as <see cref="Reproduction.MutateEyes"/>
+    /// does; by default both are copied and draw nothing.
     /// </summary>
     public static class NeatMutation
     {
@@ -305,7 +354,8 @@ namespace Eden.Evolution
 
             count = new NeatMutationCount(perturbed, replaced, nodes, added, toggled);
             var bodyGenes = Reproduction.MutateBody(parent.Body, body.Genes, body.Probability, body.Sigma, random);
-            return new Genome(new NeatNetwork(network.Contract, genes), bodyGenes, parent.Eyes);
+            var eyes = parent.Eyes == null ? null : Reproduction.MutateEyes(parent.Eyes, body.Eyes, random);
+            return new Genome(new NeatNetwork(network.Contract, genes), bodyGenes, eyes);
         }
 
         /// <summary>
@@ -316,7 +366,7 @@ namespace Eden.Evolution
         /// <see cref="Reproduction.MutateBody"/> does. <paramref name="mutated"/> counts weights.
         /// </summary>
         public static Genome MutateWeights(Genome parent, float probability, float sigma, BodyGeneSet bodyGenes,
-            GaussianSampler random, out int mutated)
+            GaussianSampler random, out int mutated, EyeMutation eyeRules = default)
         {
             if (parent == null)
                 throw new ArgumentNullException(nameof(parent));
@@ -338,7 +388,8 @@ namespace Eden.Evolution
             }
 
             var body = Reproduction.MutateBody(parent.Body, bodyGenes, probability, sigma, random);
-            return new Genome(new NeatNetwork(network.Contract, genes), body, parent.Eyes);
+            var eyes = parent.Eyes == null ? null : Reproduction.MutateEyes(parent.Eyes, eyeRules, random);
+            return new Genome(new NeatNetwork(network.Contract, genes), body, eyes);
         }
 
         // Splits one enabled connection, drawn in innovation order; false when none is enabled (no draw).
