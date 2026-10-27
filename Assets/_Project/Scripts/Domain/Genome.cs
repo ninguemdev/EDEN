@@ -97,11 +97,26 @@ namespace Eden.Domain
         {
         }
 
-        /// <summary>NEAT genome; its network is fixed during a life (no plasticity coefficients).</summary>
+        /// <summary>NEAT genome of the legacy senses (no eyes); its network is fixed during a life.</summary>
         public Genome(NeatNetwork network, BodyGenes body)
+            : this(network, body, null)
+        {
+        }
+
+        /// <summary>
+        /// NEAT genome; its network is fixed during a life (no plasticity coefficients). A network of
+        /// <see cref="NeuralContract.Eyes"/> needs <paramref name="eyes"/> (possibly without any eye); one of the legacy
+        /// contract has none.
+        /// </summary>
+        public Genome(NeatNetwork network, BodyGenes body, EyeSet eyes)
         {
             neat = network ?? throw new ArgumentNullException(nameof(network));
+            if ((network.Contract == NeuralContract.Eyes) != (eyes != null))
+                throw new ArgumentException(eyes == null
+                    ? $"A network of {NeuralContract.EyesId} needs its eyes."
+                    : $"Only a network of {NeuralContract.EyesId} has eyes.", nameof(eyes));
             Body = body;
+            Eyes = eyes;
             Plasticity = PlasticityGenes.Fixed;
         }
 
@@ -130,6 +145,9 @@ namespace Eden.Domain
 
         public BodyGenes Body { get; }
 
+        /// <summary>The eyes of a genome of <see cref="NeuralContract.Eyes"/>; null for the legacy senses.</summary>
+        public EyeSet Eyes { get; }
+
         /// <summary>Lifetime plasticity coefficients; <see cref="PlasticityGenes.Fixed"/> for a fixed network.</summary>
         public PlasticityGenes Plasticity { get; }
 
@@ -150,7 +168,7 @@ namespace Eden.Domain
 
         /// <summary>Same network and plasticity with other body genes.</summary>
         public Genome WithBody(BodyGenes body) =>
-            neat == null ? new Genome(topology, weights, body, Plasticity) : new Genome(neat, body);
+            neat == null ? new Genome(topology, weights, body, Plasticity) : new Genome(neat, body, Eyes);
 
         /// <summary>
         /// Same weights and body genes with other plasticity coefficients. Only the MLP has a plastic rule; a NEAT genome
@@ -168,7 +186,7 @@ namespace Eden.Domain
         public bool HasSameContent(Genome other)
         {
             if (other == null || Network != other.Network || !Body.Equals(other.Body) ||
-                !Plasticity.Equals(other.Plasticity))
+                !Plasticity.Equals(other.Plasticity) || !Equals(Eyes, other.Eyes))
                 return false;
             if (neat != null)
                 return neat.HasSameContent(other.neat);

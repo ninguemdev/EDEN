@@ -53,6 +53,12 @@ namespace Eden.Evolution
         /// <summary>NEAT parameters; used only with <see cref="EvolutionAlgorithm.Neat"/>.</summary>
         public NeatSettings Neat = new NeatSettings();
 
+        /// <summary>
+        /// How creatures sense: the legacy circular food sense and wall radar (the default and the only senses of the
+        /// MLP control) or eyes (<see cref="NeuralContract.Eyes"/>, NEAT only; founders have one frontal eye).
+        /// </summary>
+        public Senses Senses = Senses.Legacy;
+
         /// <summary>Genomes per generation (proposed 64).</summary>
         public int PopulationSize = 64;
 
@@ -87,6 +93,16 @@ namespace Eden.Evolution
 
         /// <summary>NEAT: minimal networks that grow, crossover aligned by innovation and species.</summary>
         Neat = 1
+    }
+
+    /// <summary>How creatures sense their world. Persisted: never renumber.</summary>
+    public enum Senses
+    {
+        /// <summary>Food nearest within a circle and four wall distances (<see cref="NeuralContract.Legacy"/>).</summary>
+        Legacy = 0,
+
+        /// <summary>Only what eyes' cones and ranges reach (<see cref="NeuralContract.Eyes"/>).</summary>
+        Eyes = 1
     }
 
     /// <summary>Kind of evaluation a result belongs to. Persisted in reports: never renumber.</summary>
@@ -146,6 +162,10 @@ namespace Eden.Evolution
                 errors.Add("NEAT networks have no lifetime plasticity");
             if (settings.Algorithm == EvolutionAlgorithm.Neat && settings.Neat == null)
                 errors.Add("NEAT needs its settings");
+            if (settings.Senses != Senses.Legacy && settings.Senses != Senses.Eyes)
+                errors.Add($"{nameof(settings.Senses)} is unknown ({(int)settings.Senses})");
+            if (settings.Senses == Senses.Eyes && settings.Algorithm != EvolutionAlgorithm.Neat)
+                errors.Add("eyes need NEAT; the MLP control keeps the legacy senses");
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid evolution settings: " + string.Join("; ", errors));
 
@@ -156,6 +176,7 @@ namespace Eden.Evolution
 
             ExperimentSeed = settings.ExperimentSeed;
             Algorithm = settings.Algorithm;
+            Senses = settings.Senses;
             ExpressedBodyGenes = settings.ExpressedBodyGenes;
             Plasticity = settings.Plasticity;
             EpisodeSeconds = settings.EpisodeSeconds;
@@ -172,6 +193,11 @@ namespace Eden.Evolution
         public ulong ExperimentSeed { get; }
 
         public EvolutionAlgorithm Algorithm { get; }
+
+        public Senses Senses { get; }
+
+        /// <summary>What the brains read and write: <see cref="NeuralContract.Eyes"/> with eyes, else the legacy contract.</summary>
+        public NeuralContract Contract => Senses == Senses.Eyes ? NeuralContract.Eyes : NeuralContract.Legacy;
 
         /// <summary>Body genes that shape the episode creature; <see cref="BodyGeneSet.None"/> is the fixed body.</summary>
         public BodyGeneSet ExpressedBodyGenes { get; }

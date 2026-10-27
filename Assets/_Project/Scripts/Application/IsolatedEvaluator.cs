@@ -39,10 +39,12 @@ namespace Eden.Application
             Job(candidates, seeds, generation, mode, bodies).RunToEnd();
 
         public EvaluationJob TrainingJob(IReadOnlyList<Genome> genomes, int generation) =>
-            Job(BrainsOf(genomes), plan.TrainingSeeds(generation), generation, EvaluationMode.Training, BodiesOf(genomes));
+            new EvaluationJob(plan, BrainsOf(genomes), plan.TrainingSeeds(generation), generation, EvaluationMode.Training,
+                BodiesOf(genomes), EyesOf(genomes));
 
         public EvaluationJob ValidationJob(IReadOnlyList<Genome> genomes, int generation) =>
-            Job(BrainsOf(genomes), plan.ValidationSeeds(), generation, EvaluationMode.Validation, BodiesOf(genomes));
+            new EvaluationJob(plan, BrainsOf(genomes), plan.ValidationSeeds(), generation, EvaluationMode.Validation,
+                BodiesOf(genomes), EyesOf(genomes));
 
         public EvaluationJob Job(IReadOnlyList<Func<IBrain>> candidates, IReadOnlyList<ulong> seeds, int generation,
             EvaluationMode mode, IReadOnlyList<BodyGenes> bodies = null)
@@ -72,6 +74,21 @@ namespace Eden.Application
             }
 
             return candidates;
+        }
+
+        // Called after BrainsOf, which has already checked the list; null when no genome has eyes.
+        private static EyeSet[] EyesOf(IReadOnlyList<Genome> genomes)
+        {
+            EyeSet[] eyes = null;
+            for (var i = 0; i < genomes.Count; i++)
+            {
+                if (genomes[i].Eyes == null)
+                    continue;
+                eyes ??= new EyeSet[genomes.Count];
+                eyes[i] = genomes[i].Eyes;
+            }
+
+            return eyes;
         }
 
         // Called after BrainsOf, which has already checked the list.

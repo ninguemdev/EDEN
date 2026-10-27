@@ -135,6 +135,23 @@ namespace Eden.Presentation
             laidOutRect = rect;
         }
 
+        private static readonly string[] EyeLabels =
+            { "presente", "comida vis.", "comida sen", "comida cos", "comida prox.", "barreira vis.", "barreira sen",
+              "barreira cos", "barreira prox." };
+
+        // Legacy inputs by name; with eyes, the body inputs and each eye slot's "present" input, so 41 inputs stay
+        // readable in the panel (the others are unlabelled dots below their eye's label).
+        private static string InputLabel(NeuralContract contract, int index)
+        {
+            if (contract == NeuralContract.Legacy)
+                return NetworkGraph.InputNames[index];
+            if (index < NeuralContract.EyesBodyInputs)
+                return NetworkGraph.InputNames[index];
+            var slot = (index - NeuralContract.EyesBodyInputs) / EyeChannels.Count;
+            var channel = (index - NeuralContract.EyesBodyInputs) % EyeChannels.Count;
+            return channel == (int)EyeChannel.Present ? $"olho {slot}: " + EyeLabels[channel] : null;
+        }
+
         private void PlaceLabels(float right)
         {
             foreach (var label in labels)
@@ -147,10 +164,12 @@ namespace Eden.Presentation
                 if (kind == NeatNodeKind.Bias)
                     text = "bias";
                 else if (kind == NeatNodeKind.Input)
-                    text = NetworkGraph.InputNames[snapshot.NodeId(s) - NeatNetwork.InputNodeId(0)];
+                    text = InputLabel(snapshot.Contract, snapshot.NodeId(s) - NeatNetwork.InputNodeId(0));
                 else if (kind == NeatNodeKind.Output)
                     text = NetworkGraph.OutputNames[snapshot.NodeId(s) - NeatNetwork.OutputNodeId(snapshot.Contract, 0)];
                 else
+                    continue;
+                if (text == null)
                     continue;
 
                 var label = new Label(text) { pickingMode = PickingMode.Ignore };

@@ -19,14 +19,15 @@ namespace Eden.Application
         private readonly EvaluationMode mode;
         private readonly int generation;
 
+        /// <param name="eyes">The candidate's eyes (genomes of the eye senses); null for the legacy senses.</param>
         public IsolatedEpisode(EvaluationPlan plan, Func<IBrain> createBrain, ulong episodeSeed, int candidate,
-            int seedIndex, int generation, EvaluationMode mode, BodyGenes body = default)
-            : this(plan, createBrain, episodeSeed, candidate, seedIndex, generation, mode, body, null, null)
+            int seedIndex, int generation, EvaluationMode mode, BodyGenes body = default, EyeSet eyes = null)
+            : this(plan, createBrain, episodeSeed, candidate, seedIndex, generation, mode, body, eyes, null, null)
         {
         }
 
         internal IsolatedEpisode(EvaluationPlan plan, Func<IBrain> createBrain, ulong episodeSeed, int candidate,
-            int seedIndex, int generation, EvaluationMode mode, BodyGenes body, SimulationSnapshot savedWorld,
+            int seedIndex, int generation, EvaluationMode mode, BodyGenes body, EyeSet eyes, SimulationSnapshot savedWorld,
             IReadOnlyList<BrainSlotState> savedBrains)
         {
             this.plan = plan ?? throw new ArgumentNullException(nameof(plan));
@@ -35,9 +36,16 @@ namespace Eden.Application
 
             var config = plan.EpisodeConfig(episodeSeed);
             var expressed = plan.ExpressedGenes(body);
-            Simulation = savedWorld == null
-                ? new WorldSimulation(WorldFactory.CreateInitial(config, _ => expressed))
-                : WorldSimulation.Restore(config, savedWorld);
+            if (savedWorld == null)
+            {
+                Simulation = new WorldSimulation(WorldFactory.CreateInitial(config, _ => expressed));
+                Simulation.World.Creatures[0].Eyes = eyes;
+            }
+            else
+            {
+                Simulation = WorldSimulation.Restore(config, savedWorld);
+            }
+
             if (Simulation.World.Creatures.Count != 1 || Simulation.World.Creatures[0].Id != new CreatureId(1) ||
                 Tick >= plan.EpisodeTicks)
                 throw new ArgumentException("A running episode has its single creature alive and ticks left.",
@@ -45,6 +53,8 @@ namespace Eden.Application
             if (!Simulation.World.Creatures[0].Genes.Equals(expressed))
                 throw new ArgumentException($"The saved creature has body genes {Simulation.World.Creatures[0].Genes}; " +
                                             $"the candidate expresses {expressed}.", nameof(savedWorld));
+            if (!Equals(Simulation.World.Creatures[0].Eyes, eyes))
+                throw new ArgumentException("The saved creature does not have the candidate's eyes.", nameof(savedWorld));
             Creature = Simulation.World.Creatures[0];
             Controller = new BrainController(config, _ => createBrain());
             if (savedBrains != null)
@@ -103,6 +113,7 @@ namespace Eden.Application
         private readonly EvaluationPlan plan;
         private readonly IReadOnlyList<Func<IBrain>> candidates;
         private readonly BodyGenes[] bodies;
+        private readonly EyeSet[] eyes;
         private readonly ulong[] seeds;
         private readonly List<EpisodeResult> episodes;
         private readonly CandidateEvaluation[] aggregates;
@@ -111,8 +122,9 @@ namespace Eden.Application
         private GenerationEvaluation result;
 
         /// <param name="bodies">Body genes of each candidate, in candidate order; null gives every candidate neutral genes.</param>
+        /// <param name="eyes">Eyes of each candidate, in candidate order (null entries: legacy senses); null for none.</param>
         public EvaluationJob(EvaluationPlan plan, IReadOnlyList<Func<IBrain>> candidates, IReadOnlyList<ulong> seeds,
-            int generation, EvaluationMode mode, IReadOnlyList<BodyGenes> bodies = null)
+            int generation, EvaluationMode mode, IReadOnlyList<BodyGenes> bodies = null, IReadOnlyList<EyeSet> eyes = null)
         {
             this.plan = plan ?? throw new ArgumentNullException(nameof(plan));
             this.candidates = candidates ?? throw new ArgumentNullException(nameof(candidates));
@@ -130,9 +142,16 @@ namespace Eden.Application
                 throw new ArgumentException($"Expected body genes for {candidates.Count} candidates, got {bodies.Count}.",
                     nameof(bodies));
 
+            if (eyes != null && eyes.Count != candidates.Count)
+                throw new ArgumentException($"Expected eyes for {candidates.Count} candidates, got {eyes.Count}.",
+                    nameof(eyes));
+
             this.bodies = new BodyGenes[candidates.Count];
             for (var c = 0; bodies != null && c < bodies.Count; c++)
                 this.bodies[c] = bodies[c];
+            this.eyes = new EyeSet[candidates.Count];
+            for (var c = 0; eyes != null && c < eyes.Count; c++)
+                this.eyes[c] = eyes[c];
             this.seeds = new ulong[seeds.Count];
             for (var s = 0; s < seeds.Count; s++)
                 this.seeds[s] = seeds[s];
@@ -219,7 +238,7 @@ namespace Eden.Application
             var candidate = completed.Count / seeds.Length;
             var seedIndex = completed.Count % seeds.Length;
             var running = new IsolatedEpisode(plan, candidates[candidate], seeds[seedIndex], candidate, seedIndex,
-                Generation, Mode, bodies[candidate], progress.CurrentWorld, progress.CurrentBrains);
+                Generation, Mode, bodies[candidate], eyes[candidate], progress.CurrentWorld, progress.CurrentBrains);
 
             for (var i = 0; i < completed.Count; i++)
             {
@@ -284,7 +303,7 @@ namespace Eden.Application
 
         private IsolatedEpisode CreateEpisode(int candidate, int seedIndex) =>
             new IsolatedEpisode(plan, candidates[candidate], seeds[seedIndex], candidate, seedIndex, Generation, Mode,
-                bodies[candidate]);
+                bodies[candidate], eyes[candidate]);
     }
 
     /// <summary>Progress of an <see cref="EvaluationJob"/> saved between ticks.</summary>

@@ -65,7 +65,7 @@ namespace Eden.Persistence
                 "evaluation_mode=isolated",
                 "fitness_unit=" + ExperimentJson.FitnessUnit,
                 "fitness_profile=" + Fitness.Profile,
-                "neural_contract=" + NeuralContract.LegacyId,
+                "neural_contract=" + Plan.Contract.Id,
                 "network=" + (IsNeat ? NeatNetwork.Kind : NetworkTopology.Mlp12x16x3.ToString()),
                 "evolution_algorithm=" + ExperimentJson.EvolutionAlgorithmOf(Plan.Algorithm),
                 "seed_scheme=" + EvaluationPlan.SeedSchemeVersion.ToString(culture),
@@ -81,6 +81,13 @@ namespace Eden.Persistence
                 "episode_food=" + world.InitialFood.ToString(culture),
                 "population=" + Rules.PopulationSize.ToString(culture)
             };
+            if (Plan.Senses == Senses.Eyes)
+            {
+                var eye = Eye.Frontal;
+                lines.Add("senses=eyes;founders 1 frontal eye, aperture " + eye.Aperture.ToString(culture) + " rad, range " +
+                          eye.Range.ToString(culture) + "x sensor range;no wall radar, no circular food sense");
+            }
+
             if (IsNeat)
             {
                 // NEAT selects by species: elites and tournaments do not apply; the chance and noise below mutate only

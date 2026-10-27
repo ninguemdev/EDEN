@@ -85,7 +85,7 @@ namespace Eden.Domain
                 {
                     Velocity = saved.Velocity, AgeTicks = saved.AgeTicks, FoodEnergyEaten = saved.FoodEnergyEaten,
                     Parent = saved.Parent, Generation = saved.Generation,
-                    ReproductionCooldownTicks = saved.ReproductionCooldownTicks
+                    ReproductionCooldownTicks = saved.ReproductionCooldownTicks, Eyes = saved.Eyes
                 });
             }
 
@@ -128,8 +128,9 @@ namespace Eden.Domain
         }
 
         /// <summary>
-        /// Adds a child of <paramref name="parent"/>: next id, the parent as its only parent, one generation after it and
-        /// no cooldown. Energy and placement are the caller's rules (see the simulation's birth phase).
+        /// Adds a child of <paramref name="parent"/>: next id, the parent as its only parent, one generation after it, no
+        /// cooldown and the parent's eyes (eyes do not mutate at birth yet). Energy and placement are the caller's rules
+        /// (see the simulation's birth phase).
         /// </summary>
         public CreatureState AddOffspring(CreatureState parent, Float2 position, float heading, float energy,
             BodyGenes genes)
@@ -139,6 +140,7 @@ namespace Eden.Domain
             var child = AddCreature(position, heading, energy, genes);
             child.Parent = parent.Id;
             child.Generation = parent.Generation + 1;
+            child.Eyes = parent.Eyes;
             return child;
         }
 

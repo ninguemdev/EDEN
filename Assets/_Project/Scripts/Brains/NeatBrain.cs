@@ -5,8 +5,10 @@ using Eden.Domain;
 namespace Eden.Brains
 {
     /// <summary>
-    /// Feed-forward NEAT network built from a <see cref="Genome"/>'s <see cref="NeatNetwork"/> on the legacy contract:
-    /// the bias node reads 1, input node 1 + i reads observation input i, and every hidden and output node is tanh of
+    /// Feed-forward NEAT network built from a <see cref="Genome"/>'s <see cref="NeatNetwork"/>: the bias node reads 1,
+    /// input node 1 + i reads input i of the genome's contract (the <see cref="Observation"/> values for
+    /// <see cref="NeuralContract.Legacy"/>, its <see cref="Observation.EyeInputs"/> for <see cref="NeuralContract.Eyes"/>,
+    /// both under the <see cref="ObservationLimits"/> policy), and every hidden and output node is tanh of
     /// the sum of its enabled incoming connections, added in innovation order. Disabled connections carry nothing; a node
     /// without enabled inputs reads tanh(0) = 0, so an unconnected output gives the neutral action of a zero network:
     /// thrust 0.5, turn 0, strafe 0. Outputs map to actions like the MLP's (<see cref="MlpBrain.ToAction"/>). The
@@ -24,8 +26,9 @@ namespace Eden.Brains
         private readonly int[] incomingSource;
         private readonly float[] incomingWeight;
         private readonly int[] outputSlots;
-        private readonly float[] input = new float[Observation.Size];
+        private readonly float[] input;
         private readonly float[] output;
+        private readonly bool eyes;
 
         public NeatBrain(Genome genome)
         {
@@ -34,12 +37,13 @@ namespace Eden.Brains
             var network = genome.Neat ??
                           throw new ArgumentException($"NeatBrain needs a NEAT genome, got a {genome.Network} one.",
                               nameof(genome));
-            if (network.Contract != NeuralContract.Legacy)
-                throw new ArgumentException($"NeatBrain reads the {NeuralContract.LegacyId} observation, not " +
-                                            $"{network.Contract.Id}.", nameof(genome));
+            if (network.Contract != NeuralContract.Legacy && network.Contract != NeuralContract.Eyes)
+                throw new ArgumentException($"NeatBrain cannot read contract {network.Contract.Id}.", nameof(genome));
 
             Genome = genome;
             var contract = network.Contract;
+            eyes = contract == NeuralContract.Eyes;
+            input = new float[contract.InputCount];
             var hidden = network.HiddenNodes;
             var first = NeatNetwork.FirstHiddenNodeId(contract);
             // Slots: bias, inputs and outputs at their node ids, then hidden nodes in id order.
@@ -118,7 +122,13 @@ namespace Eden.Brains
 
         private void Forward(in Observation observation, float[] nodeValues)
         {
-            ObservationLimits.Sanitize(observation, out _).CopyTo(input, 0);
+            var sanitized = ObservationLimits.Sanitize(observation, out _);
+            if (!eyes)
+                sanitized.CopyTo(input, 0);
+            else if (sanitized.EyeInputs != null)
+                Array.Copy(sanitized.EyeInputs, input, input.Length);
+            else
+                throw new InvalidOperationException("A brain of the eye senses needs a creature with eyes.");
             nodeValues[NeatNetwork.BiasNodeId] = 1f;
             for (var i = 0; i < input.Length; i++)
                 nodeValues[NeatNetwork.InputNodeId(i)] = input[i];

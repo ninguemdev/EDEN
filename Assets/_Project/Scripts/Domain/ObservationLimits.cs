@@ -47,8 +47,9 @@ namespace Eden.Domain
             var visible = observation.FoodVisible;
             if (visible != 0f && visible != 1f)
                 return false;
-            return visible == 1f ||
-                   (observation.FoodSin == 0f && observation.FoodCos == 0f && observation.FoodProximity == 0f);
+            if (visible == 0f && (observation.FoodSin != 0f || observation.FoodCos != 0f || observation.FoodProximity != 0f))
+                return false;
+            return observation.EyeInputs == null || CountEyeCorrections(observation.EyeInputs, false) == 0;
         }
 
         /// <summary>Applies the policy; <paramref name="corrections"/> counts the values that had to change.</summary>
@@ -71,6 +72,8 @@ namespace Eden.Domain
                 foodProximity = 0f;
             }
 
+            if (observation.EyeInputs != null)
+                corrections += CountEyeCorrections(observation.EyeInputs, true);
             return new Observation(
                 Fix(observation.Energy, 0, ref corrections),
                 Fix(observation.Age, 1, ref corrections),
@@ -80,7 +83,96 @@ namespace Eden.Domain
                 Fix(observation.WallFront, 8, ref corrections),
                 Fix(observation.WallRight, 9, ref corrections),
                 Fix(observation.WallBack, 10, ref corrections),
-                Fix(observation.WallLeft, 11, ref corrections));
+                Fix(observation.WallLeft, 11, ref corrections),
+                observation.EyeInputs);
+        }
+
+        /// <summary>
+        /// The same policy for the inputs of <see cref="NeuralContract.Eyes"/>: body channels in their legacy ranges;
+        /// per eye, the present and visible flags exactly 0 or 1, sines and cosines in [-1, 1], proximities in [0, 1];
+        /// an absent eye reads all 0, and a target not seen zeroes its direction and proximity. With
+        /// <paramref name="fix"/> the values are corrected in place; the count is returned either way.
+        /// </summary>
+        public static int CountEyeCorrections(float[] inputs, bool fix)
+        {
+            if (inputs == null)
+                throw new ArgumentNullException(nameof(inputs));
+            if (inputs.Length != NeuralContract.Eyes.InputCount)
+                throw new ArgumentException($"Expected {NeuralContract.Eyes.InputCount} eye inputs, got {inputs.Length}.",
+                    nameof(inputs));
+
+            var corrections = 0;
+            for (var i = 0; i < NeuralContract.EyesBodyInputs; i++)
+                corrections += Limit(inputs, i, Minimums[i], Maximums[i], fix);
+            for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+            {
+                var start = NeuralContract.EyeInputIndex(slot, EyeChannel.Present);
+                corrections += Flag(inputs, start, fix);
+                corrections += Group(inputs, start + (int)EyeChannel.FoodVisible, fix);
+                corrections += Group(inputs, start + (int)EyeChannel.BarrierVisible, fix);
+                if (Read(inputs, start, fix) == 0f)
+                    corrections += Zero(inputs, start + 1, EyeChannels.Count - 1, fix);
+            }
+
+            return corrections;
+        }
+
+        // A visibility flag followed by sine, cosine and proximity; not seen zeroes the three.
+        private static int Group(float[] inputs, int flagIndex, bool fix)
+        {
+            var corrections = Flag(inputs, flagIndex, fix);
+            corrections += Limit(inputs, flagIndex + 1, -1f, 1f, fix) + Limit(inputs, flagIndex + 2, -1f, 1f, fix) +
+                           Limit(inputs, flagIndex + 3, 0f, 1f, fix);
+            if (Read(inputs, flagIndex, fix) == 0f)
+                corrections += Zero(inputs, flagIndex + 1, 3, fix);
+            return corrections;
+        }
+
+        // While only counting, a flag that is not 0 or 1 reads as its corrected value for the masks that follow.
+        private static float Read(float[] inputs, int index, bool fix) =>
+            fix ? inputs[index] : float.IsNaN(inputs[index]) ? 0f : inputs[index] >= 0.5f ? 1f : 0f;
+
+        private static int Flag(float[] inputs, int index, bool fix)
+        {
+            var value = inputs[index];
+            var flag = !float.IsNaN(value) && value >= 0.5f ? 1f : 0f;
+            if (flag == value)
+                return 0;
+            if (fix)
+                inputs[index] = flag;
+            return 1;
+        }
+
+        private static int Limit(float[] inputs, int index, float min, float max, bool fix)
+        {
+            var value = inputs[index];
+            float corrected;
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                corrected = 0f;
+            else if (value < min)
+                corrected = min;
+            else if (value > max)
+                corrected = max;
+            else
+                return 0;
+            if (fix)
+                inputs[index] = corrected;
+            return 1;
+        }
+
+        private static int Zero(float[] inputs, int start, int count, bool fix)
+        {
+            var corrections = 0;
+            for (var i = start; i < start + count; i++)
+            {
+                if (inputs[i] == 0f)
+                    continue;
+                corrections++;
+                if (fix)
+                    inputs[i] = 0f;
+            }
+
+            return corrections;
         }
 
         private static float Fix(float value, int index, ref int corrections)
