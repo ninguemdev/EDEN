@@ -44,6 +44,15 @@ namespace Eden.Evolution
         /// </summary>
         public bool Plasticity;
 
+        /// <summary>
+        /// How generations are bred: the fixed-topology MLP (the default and legacy control) or NEAT. NEAT networks have no
+        /// lifetime plasticity.
+        /// </summary>
+        public EvolutionAlgorithm Algorithm = EvolutionAlgorithm.Mlp;
+
+        /// <summary>NEAT parameters; used only with <see cref="EvolutionAlgorithm.Neat"/>.</summary>
+        public NeatSettings Neat = new NeatSettings();
+
         /// <summary>Genomes per generation (proposed 64).</summary>
         public int PopulationSize = 64;
 
@@ -65,8 +74,19 @@ namespace Eden.Evolution
             var copy = (EvolutionSettings)MemberwiseClone();
             copy.ExperimentSeed = experimentSeed;
             copy.World = World?.Clone();
+            copy.Neat = Neat?.Clone();
             return copy;
         }
+    }
+
+    /// <summary>Algorithm that breeds the generations. Persisted: never renumber.</summary>
+    public enum EvolutionAlgorithm
+    {
+        /// <summary>Fixed-topology MLP: elites, tournaments and Gaussian weight mutation (the legacy control).</summary>
+        Mlp = 0,
+
+        /// <summary>NEAT: minimal networks that grow, crossover aligned by innovation and species.</summary>
+        Neat = 1
     }
 
     /// <summary>Kind of evaluation a result belongs to. Persisted in reports: never renumber.</summary>
@@ -120,6 +140,12 @@ namespace Eden.Evolution
                            $"(was {settings.ValidationSeedCount})");
             if (!BodyGenes.IsValidSet(settings.ExpressedBodyGenes))
                 errors.Add($"{nameof(settings.ExpressedBodyGenes)} has unknown genes ({(int)settings.ExpressedBodyGenes})");
+            if (settings.Algorithm != EvolutionAlgorithm.Mlp && settings.Algorithm != EvolutionAlgorithm.Neat)
+                errors.Add($"{nameof(settings.Algorithm)} is unknown ({(int)settings.Algorithm})");
+            if (settings.Algorithm == EvolutionAlgorithm.Neat && settings.Plasticity)
+                errors.Add("NEAT networks have no lifetime plasticity");
+            if (settings.Algorithm == EvolutionAlgorithm.Neat && settings.Neat == null)
+                errors.Add("NEAT needs its settings");
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid evolution settings: " + string.Join("; ", errors));
 
@@ -129,6 +155,7 @@ namespace Eden.Evolution
             var validated = new SimulationConfig(world);
 
             ExperimentSeed = settings.ExperimentSeed;
+            Algorithm = settings.Algorithm;
             ExpressedBodyGenes = settings.ExpressedBodyGenes;
             Plasticity = settings.Plasticity;
             EpisodeSeconds = settings.EpisodeSeconds;
@@ -143,6 +170,8 @@ namespace Eden.Evolution
         }
 
         public ulong ExperimentSeed { get; }
+
+        public EvolutionAlgorithm Algorithm { get; }
 
         /// <summary>Body genes that shape the episode creature; <see cref="BodyGeneSet.None"/> is the fixed body.</summary>
         public BodyGeneSet ExpressedBodyGenes { get; }

@@ -5,8 +5,8 @@ using Eden.Domain;
 namespace Eden.Evolution
 {
     /// <summary>
-    /// A genome with its identity: a unique id, its parents (one parent while reproduction is asexual, none for the
-    /// first generation), the generation it was born in and how many of its weights mutated. An elite is the same
+    /// A genome with its identity: a unique id, its parents (none for the first generation, one for a mutated copy,
+    /// two for a NEAT crossover child, the fitter first), the generation it was born in and how many of its weights mutated. An elite is the same
     /// individual in a later generation: it keeps its id and birth generation.
     /// </summary>
     public sealed class Individual
@@ -107,7 +107,8 @@ namespace Eden.Evolution
 
         /// <summary>
         /// Individuals of <paramref name="generation"/> from the offspring of <paramref name="parents"/>: elites stay the
-        /// same individuals, every other child is new and records its parent's id.
+        /// same individuals, every other child is new and records its parent's id (both, fitter first, after a crossover
+        /// of two different parents).
         /// </summary>
         public Individual[] Descend(IReadOnlyList<Individual> parents, IReadOnlyList<Offspring> offspring, int generation)
         {
@@ -125,9 +126,15 @@ namespace Eden.Evolution
                 var parent = parents[child.ParentIndex];
                 if (!entries.ContainsKey(parent.Id))
                     throw new ArgumentException($"Parent {parent.Id} does not belong to this lineage.", nameof(parents));
-                next[i] = child.IsElite
-                    ? parent
-                    : Register(new[] { parent.Id }, generation, child.Genome, child.MutatedWeights);
+                if (child.IsElite)
+                {
+                    next[i] = parent;
+                    continue;
+                }
+
+                var second = child.SecondParentIndex >= 0 ? parents[child.SecondParentIndex] : null;
+                var parentIds = second == null || second.Id == parent.Id ? new[] { parent.Id } : new[] { parent.Id, second.Id };
+                next[i] = Register(parentIds, generation, child.Genome, child.MutatedWeights);
             }
 
             return next;

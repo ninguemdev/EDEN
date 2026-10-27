@@ -13,12 +13,23 @@ namespace Eden.Evolution
             Summary = new GenerationSummary(evaluation, individuals);
         }
 
+        /// <summary>Report of a NEAT training generation, with the species of every individual.</summary>
+        public GenerationReport(GenerationEvaluation evaluation, IReadOnlyList<Individual> individuals,
+            IReadOnlyList<int> species)
+            : this(evaluation, individuals)
+        {
+            Neat = new NeatGenerationSummary(individuals, species);
+        }
+
         public GenerationEvaluation Evaluation { get; }
 
         /// <summary>Evaluated individuals, in candidate order.</summary>
         public IReadOnlyList<Individual> Individuals { get; }
 
         public GenerationSummary Summary { get; }
+
+        /// <summary>Species and network sizes of a NEAT training generation; null otherwise.</summary>
+        public NeatGenerationSummary Neat { get; }
     }
 
     /// <summary>
@@ -144,8 +155,17 @@ namespace Eden.Evolution
         /// <summary>Mean number of mutated weights of the individuals born in this generation.</summary>
         public float MeanMutatedWeights { get; private set; }
 
+        // Weight diversity compares weights by position, which only means something for the fixed-topology MLP; NEAT
+        // generations leave it undefined (NaN, an empty field in the CSV) and report species instead.
         private void ComputeDiversity(IReadOnlyList<Individual> individuals)
         {
+            if (individuals[0].Genome.Neat != null)
+            {
+                WeightStdDev = float.NaN;
+                MeanDistanceToCentroid = float.NaN;
+                return;
+            }
+
             var count = individuals.Count;
             var weightCount = individuals[0].Genome.WeightCount;
             var mean = new double[weightCount];

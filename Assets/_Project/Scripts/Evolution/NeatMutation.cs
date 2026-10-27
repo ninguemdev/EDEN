@@ -185,6 +185,23 @@ namespace Eden.Evolution
         }
     }
 
+    /// <summary>Body genes that mutate with a NEAT child, and how (the experiment's chance and noise).</summary>
+    public readonly struct BodyMutation
+    {
+        public BodyMutation(BodyGeneSet genes, float probability, float sigma)
+        {
+            Genes = genes;
+            Probability = probability;
+            Sigma = sigma;
+        }
+
+        /// <summary>Genes that mutate; <see cref="BodyGeneSet.None"/> (the default) copies the body and draws nothing.</summary>
+        public BodyGeneSet Genes { get; }
+
+        public float Probability { get; }
+        public float Sigma { get; }
+    }
+
     /// <summary>What one NEAT mutation changed.</summary>
     public readonly struct NeatMutationCount
     {
@@ -225,12 +242,13 @@ namespace Eden.Evolution
     /// one is new and keeps the network free of cycles; it gets a uniform weight and its number from the history;</item>
     /// <item>a coin for a toggle; when it hits, one draw picks a connection (innovation order) and flips it.</item>
     /// </list>
-    /// Structural steps see the result of the previous ones. Body genes are copied unchanged.
+    /// Structural steps see the result of the previous ones. Then the body genes of <see cref="BodyMutation.Genes"/>
+    /// mutate as <see cref="Reproduction.MutateBody"/> does; by default the body is copied and draws nothing.
     /// </summary>
     public static class NeatMutation
     {
         public static Genome Mutate(Genome parent, NeatRules rules, InnovationHistory history, GaussianSampler random,
-            out NeatMutationCount count)
+            out NeatMutationCount count, BodyMutation body = default)
         {
             if (parent == null)
                 throw new ArgumentNullException(nameof(parent));
@@ -286,7 +304,8 @@ namespace Eden.Evolution
             }
 
             count = new NeatMutationCount(perturbed, replaced, nodes, added, toggled);
-            return new Genome(new NeatNetwork(network.Contract, genes), parent.Body);
+            var bodyGenes = Reproduction.MutateBody(parent.Body, body.Genes, body.Probability, body.Sigma, random);
+            return new Genome(new NeatNetwork(network.Contract, genes), bodyGenes);
         }
 
         // Splits one enabled connection, drawn in innovation order; false when none is enabled (no draw).

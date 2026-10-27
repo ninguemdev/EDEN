@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using Eden.Domain;
 using Eden.Evolution;
@@ -27,6 +28,25 @@ namespace Eden.Persistence
         /// mutation, without crossover or species (not NEAT).
         /// </summary>
         public const string EvolutionAlgorithm = "fixed-topology-ga-v1";
+
+        /// <summary>NEAT selection: species, fitness sharing, crossover aligned by innovation, structural mutation.</summary>
+        public const string NeatEvolutionAlgorithm = "neat-v1";
+
+        public static string EvolutionAlgorithmOf(Evolution.EvolutionAlgorithm algorithm) =>
+            algorithm == Evolution.EvolutionAlgorithm.Neat ? NeatEvolutionAlgorithm : EvolutionAlgorithm;
+
+        /// <summary>Unit of each column of the two NEAT CSV files, written only by NEAT experiments.</summary>
+        public static readonly IReadOnlyDictionary<string, IReadOnlyList<KeyValuePair<string, string>>> NeatColumns =
+            new Dictionary<string, IReadOnlyList<KeyValuePair<string, string>>>
+            {
+                ["neat-generations.csv"] = Units(
+                    ("generation", Generation), ("species", Count), ("largest_species", Count),
+                    ("mean_hidden_nodes", Count), ("max_hidden_nodes", Count), ("mean_connections", Count),
+                    ("mean_enabled_connections", Count)),
+                ["neat-individuals.csv"] = Units(
+                    ("generation", Generation), ("candidate", Index), ("individual_id", Id), ("species", Id),
+                    ("hidden_nodes", Count), ("connections", Count), ("enabled_connections", Count))
+            };
 
         private const string Energy = "energy";
         private const string Seconds = "simulated_second";
@@ -73,7 +93,8 @@ namespace Eden.Persistence
             foreach (var seed in header.Plan.ValidationSeeds())
                 validationSeeds.Add(JsonValue.Of(seed));
             var files = JsonValue.NewObject();
-            foreach (var file in Columns)
+            var neat = header.IsNeat;
+            foreach (var file in neat ? Columns.Concat(NeatColumns) : Columns)
             {
                 var columns = JsonValue.NewObject();
                 foreach (var column in file.Value)
@@ -99,12 +120,14 @@ namespace Eden.Persistence
                 .Add("fitnessUnit", JsonValue.Of(FitnessUnit))
                 .Add("fitnessProfile", JsonValue.Of(Fitness.Profile))
                 .Add("neuralContract", JsonValue.Of(NeuralContract.LegacyId))
-                .Add("network", JsonValue.Of(Genome.MlpNetwork))
-                .Add("topology", JsonValue.NewArray()
-                    .Add(JsonValue.Of(NetworkTopology.Mlp12x16x3.Inputs))
-                    .Add(JsonValue.Of(NetworkTopology.Mlp12x16x3.Hidden))
-                    .Add(JsonValue.Of(NetworkTopology.Mlp12x16x3.Outputs)))
-                .Add("evolutionAlgorithm", JsonValue.Of(EvolutionAlgorithm))
+                .Add("network", JsonValue.Of(neat ? NeatNetwork.Kind : Genome.MlpNetwork))
+                .Add("topology", neat
+                    ? JsonValue.Null()
+                    : JsonValue.NewArray()
+                        .Add(JsonValue.Of(NetworkTopology.Mlp12x16x3.Inputs))
+                        .Add(JsonValue.Of(NetworkTopology.Mlp12x16x3.Hidden))
+                        .Add(JsonValue.Of(NetworkTopology.Mlp12x16x3.Outputs)))
+                .Add("evolutionAlgorithm", JsonValue.Of(EvolutionAlgorithmOf(header.Plan.Algorithm)))
                 .Add("columns", files)
                 .Add("resumedFrom", header.ResumedFrom == null ? JsonValue.Null() : header.ResumedFrom.ToJson());
             return JsonText.Write(root);

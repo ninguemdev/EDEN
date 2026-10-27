@@ -34,6 +34,24 @@ namespace Eden.Application
         /// As above; with <paramref name="plasticity"/> the plasticity coefficients are drawn after the body genes (two
         /// draws, uniform within their limits), otherwise every network is fixed. Earlier draws never depend on them.
         /// </summary>
+        /// <summary>
+        /// First generation of a NEAT experiment: minimal networks of the legacy contract, weights uniform within
+        /// ±<paramref name="weightLimit"/>, drawn from the same stream as MLP genome i, then the body genes as above.
+        /// </summary>
+        public static Genome[] NeatPopulation(ulong experimentSeed, int count, BodyGeneSet expressed, float weightLimit)
+        {
+            BodyGenes.RequireSet(expressed);
+            var genomes = new Genome[count];
+            for (var i = 0; i < count; i++)
+            {
+                var random = SeedDerivation.CreateIndexedStream(experimentSeed, RandomStream.Genome, (ulong)i + 1);
+                var network = NeatNetwork.CreateMinimal(NeuralContract.Legacy, random, weightLimit);
+                genomes[i] = new Genome(network, BodyGenes.CreateRandom(random).Masked(expressed));
+            }
+
+            return genomes;
+        }
+
         public static Genome[] Population(ulong experimentSeed, int count, BodyGeneSet expressed, bool plasticity)
         {
             BodyGenes.RequireSet(expressed);

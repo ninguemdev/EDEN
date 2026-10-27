@@ -12,7 +12,8 @@ namespace Eden.Persistence
     /// <see cref="ExperimentHeader"/>), <c>generations.csv</c> (one summary row per generation), <c>individuals.csv</c>
     /// (one row per evaluated individual and evaluation mode, with id, parents and birth generation),
     /// <c>episodes.csv</c> (one row per individual × seed, before aggregation) and <c>summary.json</c>, rewritten after
-    /// every generation. Rows of the three CSV files join on generation, evaluation mode and candidate. Numbers use the
+    /// every generation. NEAT experiments also write <c>neat-generations.csv</c> (species and network sizes per training
+    /// generation) and <c>neat-individuals.csv</c> (species and size of every trained individual). Rows of the three CSV files join on generation, evaluation mode and candidate. Numbers use the
     /// invariant culture; non-finite values are written as empty fields.
     /// </summary>
     public sealed class EvolutionCsvLog : IDisposable
@@ -26,7 +27,15 @@ namespace Eden.Persistence
             "generation,evaluation_mode,candidate,individual_id,parent_ids,birth_generation,elite,mutated_weights,valid," +
             "mean_fitness,mean_food_energy,survival_rate,mean_survived_seconds,mean_final_energy";
 
+        public const string NeatGenerationsHeader =
+            "generation,species,largest_species,mean_hidden_nodes,max_hidden_nodes,mean_connections,mean_enabled_connections";
+
+        public const string NeatIndividualsHeader =
+            "generation,candidate,individual_id,species,hidden_nodes,connections,enabled_connections";
+
         private readonly ExportTally tally = new ExportTally();
+        private CsvFile neatGenerations;
+        private CsvFile neatIndividuals;
         private CsvFile generations;
         private CsvFile individuals;
         private CsvFile episodes;
@@ -47,6 +56,10 @@ namespace Eden.Persistence
             generations = new CsvFile(Path.Combine(directory, "generations.csv"), GenerationsHeader);
             individuals = new CsvFile(Path.Combine(directory, "individuals.csv"), IndividualsHeader);
             episodes = new CsvFile(Path.Combine(directory, "episodes.csv"), EvaluationCsv.Header);
+            if (!header.IsNeat)
+                return;
+            neatGenerations = new CsvFile(Path.Combine(directory, "neat-generations.csv"), NeatGenerationsHeader);
+            neatIndividuals = new CsvFile(Path.Combine(directory, "neat-individuals.csv"), NeatIndividualsHeader);
         }
 
         public string DirectoryPath { get; }
@@ -65,6 +78,13 @@ namespace Eden.Persistence
                 individuals.Append(FormatIndividual(report, c));
             foreach (var episode in report.Evaluation.Episodes)
                 episodes.Append(EvaluationCsv.FormatRow(episode));
+            if (report.Neat != null && neatGenerations != null)
+            {
+                neatGenerations.Append(FormatNeatGeneration(report));
+                for (var c = 0; c < report.Individuals.Count; c++)
+                    neatIndividuals.Append(FormatNeatIndividual(report, c));
+            }
+
             GenerationCount++;
             tally.Add(report);
             WriteSummary();
@@ -123,14 +143,46 @@ namespace Eden.Persistence
                 Number(result.MeanFinalEnergy));
         }
 
+        public static string FormatNeatGeneration(GenerationReport report)
+        {
+            var culture = CultureInfo.InvariantCulture;
+            var neat = report.Neat;
+            return string.Join(",",
+                report.Evaluation.Generation.ToString(culture),
+                neat.SpeciesCount.ToString(culture),
+                neat.LargestSpecies.ToString(culture),
+                Number(neat.MeanHiddenNodes),
+                neat.MaxHiddenNodes.ToString(culture),
+                Number(neat.MeanConnections),
+                Number(neat.MeanEnabledConnections));
+        }
+
+        public static string FormatNeatIndividual(GenerationReport report, int candidate)
+        {
+            var culture = CultureInfo.InvariantCulture;
+            var neat = report.Neat;
+            return string.Join(",",
+                report.Evaluation.Generation.ToString(culture),
+                candidate.ToString(culture),
+                report.Individuals[candidate].Id.ToString(culture),
+                neat.Species[candidate].ToString(culture),
+                neat.HiddenNodesOf(candidate).ToString(culture),
+                neat.ConnectionsOf(candidate).ToString(culture),
+                neat.EnabledConnectionsOf(candidate).ToString(culture));
+        }
+
         public void Dispose()
         {
             generations?.Dispose();
             individuals?.Dispose();
             episodes?.Dispose();
+            neatGenerations?.Dispose();
+            neatIndividuals?.Dispose();
             generations = null;
             individuals = null;
             episodes = null;
+            neatGenerations = null;
+            neatIndividuals = null;
         }
 
         private void WriteSummary() =>

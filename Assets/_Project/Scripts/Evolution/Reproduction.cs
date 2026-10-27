@@ -73,18 +73,22 @@ namespace Eden.Evolution
     /// <summary>A genome of the next generation and where it came from.</summary>
     public readonly struct Offspring
     {
-        public Offspring(Genome genome, int parentIndex, bool isElite, int mutatedWeights)
+        public Offspring(Genome genome, int parentIndex, bool isElite, int mutatedWeights, int secondParentIndex = -1)
         {
             Genome = genome ?? throw new ArgumentNullException(nameof(genome));
             ParentIndex = parentIndex;
             IsElite = isElite;
             MutatedWeights = mutatedWeights;
+            SecondParentIndex = secondParentIndex;
         }
 
         public Genome Genome { get; }
 
-        /// <summary>Index of the single parent in the previous generation.</summary>
+        /// <summary>Index of the single parent in the previous generation (the fitter one after a crossover).</summary>
         public int ParentIndex { get; }
+
+        /// <summary>Index of the other crossover parent (NEAT), or -1 for a child of one parent.</summary>
+        public int SecondParentIndex { get; }
 
         /// <summary>Copied unchanged from the parent; it carries no score and is evaluated again.</summary>
         public bool IsElite { get; }
@@ -252,6 +256,32 @@ namespace Eden.Evolution
             }
 
             return new Genome(parent.Topology, weights, body, coefficients);
+        }
+
+        /// <summary>
+        /// Body genes of <paramref name="genes"/> mutated the way <c>Mutate</c> mutates them for the MLP (in <see cref="BodyGene"/> order: one coin, plus one Gaussian sample when it mutates, limited to
+        /// ±<see cref="BodyGenes.MaxAbsValue"/>); the others are copied and draw nothing. Used by NEAT, whose network
+        /// mutates elsewhere.
+        /// </summary>
+        public static BodyGenes MutateBody(BodyGenes body, BodyGeneSet genes, float probability, float sigma,
+            GaussianSampler random)
+        {
+            if (random == null)
+                throw new ArgumentNullException(nameof(random));
+            BodyGenes.RequireSet(genes);
+            if (genes == BodyGeneSet.None)
+                return body;
+            var values = new float[BodyGenes.Count];
+            for (var g = 0; g < values.Length; g++)
+            {
+                values[g] = body[(BodyGene)g];
+                if (((int)genes & (1 << g)) == 0 || random.Source.NextFloat() >= probability)
+                    continue;
+                var value = values[g] + (float)(sigma * random.NextStandard());
+                values[g] = Math.Min(BodyGenes.MaxAbsValue, Math.Max(-BodyGenes.MaxAbsValue, value));
+            }
+
+            return new BodyGenes(values[0], values[1], values[2], values[3]);
         }
 
         // One coin, plus a Gaussian sample scaled to [0, max] when it mutates; the result stays within [0, max].

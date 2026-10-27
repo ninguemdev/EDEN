@@ -48,6 +48,9 @@ namespace Eden.Persistence
         /// <summary>FNV-1a 64 of the canonical settings text.</summary>
         public ulong ConfigHash { get; }
 
+        /// <summary>Whether the experiment breeds NEAT networks (otherwise the fixed-topology MLP).</summary>
+        public bool IsNeat => Plan.Algorithm == EvolutionAlgorithm.Neat;
+
         /// <summary>Plain key=value lines of <c>experiment.txt</c>.</summary>
         public IReadOnlyList<string> Describe()
         {
@@ -63,8 +66,8 @@ namespace Eden.Persistence
                 "fitness_unit=" + ExperimentJson.FitnessUnit,
                 "fitness_profile=" + Fitness.Profile,
                 "neural_contract=" + NeuralContract.LegacyId,
-                "network=" + NetworkTopology.Mlp12x16x3,
-                "evolution_algorithm=" + ExperimentJson.EvolutionAlgorithm,
+                "network=" + (IsNeat ? NeatNetwork.Kind : NetworkTopology.Mlp12x16x3.ToString()),
+                "evolution_algorithm=" + ExperimentJson.EvolutionAlgorithmOf(Plan.Algorithm),
                 "seed_scheme=" + EvaluationPlan.SeedSchemeVersion.ToString(culture),
                 "training_seeds_per_generation=" + Plan.TrainingSeedsPerGeneration.ToString(culture),
                 "validation_seed=" + Plan.ValidationSeed.ToString(culture),
@@ -76,12 +79,48 @@ namespace Eden.Persistence
                 "ticks_per_second=" + world.TicksPerSecond.ToString(culture),
                 "arena=" + world.ArenaWidth.ToString(culture) + "x" + world.ArenaHeight.ToString(culture),
                 "episode_food=" + world.InitialFood.ToString(culture),
-                "population=" + Rules.PopulationSize.ToString(culture),
-                "elites=" + Rules.EliteCount.ToString(culture),
-                "tournament_size=" + Rules.TournamentSize.ToString(culture),
-                "mutation_probability=" + Rules.MutationProbability.ToString(culture),
-                "mutation_sigma=" + Rules.MutationSigma.ToString(culture),
-                "crossover=off",
+                "population=" + Rules.PopulationSize.ToString(culture)
+            };
+            if (IsNeat)
+            {
+                // NEAT selects by species: elites and tournaments do not apply; the chance and noise below mutate only
+                // the expressed body genes.
+                var neat = settings.Neat;
+                lines.Add("body_mutation_probability=" + Rules.MutationProbability.ToString(culture));
+                lines.Add("body_mutation_sigma=" + Rules.MutationSigma.ToString(culture));
+                lines.Add("crossover=neat_innovation_aligned;probability " + neat.CrossoverProbability.ToString(culture));
+                lines.Add("neat=" + string.Join(";",
+                    "initial_weight_limit " + neat.InitialWeightLimit.ToString(culture),
+                    "weight_mutation " + neat.WeightMutationProbability.ToString(culture),
+                    "weight_perturb " + neat.WeightPerturbProbability.ToString(culture),
+                    "weight_sigma " + neat.WeightSigma.ToString(culture),
+                    "add_node " + neat.AddNodeProbability.ToString(culture),
+                    "add_connection " + neat.AddConnectionProbability.ToString(culture),
+                    "toggle " + neat.ToggleProbability.ToString(culture),
+                    "add_connection_attempts " + neat.AddConnectionAttempts.ToString(culture),
+                    "disabled_inherit " + neat.DisabledInheritProbability.ToString(culture),
+                    "c1 " + neat.ExcessCoefficient.ToString(culture),
+                    "c2 " + neat.DisjointCoefficient.ToString(culture),
+                    "c3 " + neat.WeightDifferenceCoefficient.ToString(culture),
+                    "normalization_threshold " + neat.NormalizationThreshold.ToString(culture),
+                    "compatibility_threshold " + neat.CompatibilityThreshold.ToString(culture),
+                    "stagnation " + neat.StagnationGenerations.ToString(culture),
+                    "protected_species " + neat.ProtectedSpecies.ToString(culture),
+                    "champion_minimum_size " + neat.ChampionMinimumSize.ToString(culture),
+                    "survival_fraction " + neat.SurvivalFraction.ToString(culture),
+                    "interspecies " + neat.InterspeciesProbability.ToString(culture)));
+            }
+            else
+            {
+                lines.Add("elites=" + Rules.EliteCount.ToString(culture));
+                lines.Add("tournament_size=" + Rules.TournamentSize.ToString(culture));
+                lines.Add("mutation_probability=" + Rules.MutationProbability.ToString(culture));
+                lines.Add("mutation_sigma=" + Rules.MutationSigma.ToString(culture));
+                lines.Add("crossover=off");
+            }
+
+            lines.AddRange(new[]
+            {
                 "body_genes=" + BodyGenesText(Plan.ExpressedBodyGenes),
                 "plasticity=" + (Plan.Plasticity ? "hebbian_output_layer" : "off"),
                 "food_shift_seconds=" + world.FoodShiftSeconds.ToString(culture),
@@ -89,7 +128,7 @@ namespace Eden.Persistence
                 ";speed " + world.SpeedCostExponent.ToString(culture) +
                 ";sensor " + world.SensorCostExponent.ToString(culture) +
                 ";efficiency_power " + world.EfficiencyPowerExponent.ToString(culture)
-            };
+            });
             if (Preset != null)
                 lines.Add("preset=" + Preset);
             if (ResumedFrom != null)
