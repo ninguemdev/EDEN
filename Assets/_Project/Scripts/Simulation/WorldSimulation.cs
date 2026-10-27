@@ -21,6 +21,7 @@ namespace Eden.Simulation
         private float[][] eyeInputs = Array.Empty<float[]>();
         private CreatureAction[] actions = Array.Empty<CreatureAction>();
         private float[] foodGains = Array.Empty<float>();
+        private readonly Contacts contacts = new Contacts();
         private EnergyFlows energy;
 
         public WorldSimulation(WorldState world)
@@ -43,6 +44,8 @@ namespace Eden.Simulation
             if (config.Reproduction)
                 births.Capacity = most;
             EnsureCapacity(most);
+            if (config.SolidBodies)
+                contacts.Reserve(most);
         }
 
         /// <summary>
@@ -99,6 +102,9 @@ namespace Eden.Simulation
         /// <summary>Energy flows of the last tick; they explain exactly how the creatures' total energy changed.</summary>
         public EnergyFlows LastEnergy => energy;
 
+        /// <summary>Pairs of solid bodies touching at the end of the last tick; always 0 without solid bodies.</summary>
+        public int LastContacts { get; private set; }
+
         /// <summary>Observation values corrected by <see cref="ObservationLimits.Sanitize"/> in the last tick.</summary>
         public int LastCorrectedInputValues { get; private set; }
 
@@ -112,7 +118,8 @@ namespace Eden.Simulation
 
         /// <summary>
         /// Runs one tick: agenda, observe all (checked against <see cref="ObservationLimits"/>), decide in id order,
-        /// move, eat, energy/age/death, births (when the config allows reproduction), cleanup.
+        /// move (as solid bodies when the config says so, see <see cref="Contacts"/>), eat, energy/age/death, births
+        /// (when the config allows reproduction), cleanup.
         /// </summary>
         public void Step(ICreatureController controller)
         {
@@ -129,6 +136,7 @@ namespace Eden.Simulation
             LastBirthsRefused = 0;
             LastFoodEaten = 0;
             LastFoodRespawned = 0;
+            LastContacts = 0;
             energy = default;
             LastCorrectedInputValues = 0;
 
@@ -152,8 +160,16 @@ namespace Eden.Simulation
             for (var i = 0; i < count; i++)
                 actions[i] = controller.Decide(creatures[i].Id, observations[i]);
             var decided = timings != null ? TickTimings.Now() : 0L;
-            for (var i = 0; i < count; i++)
-                Movement.Apply(creatures[i], actions[i], config);
+            if (config.SolidBodies)
+            {
+                contacts.Move(creatures, actions, count, config);
+                LastContacts = contacts.LastContacts;
+            }
+            else
+            {
+                for (var i = 0; i < count; i++)
+                    Movement.Apply(creatures[i], actions[i], config);
+            }
 
             ResolveFeeding(tick, count);
             ApplyEnergyAndAging(tick, count);

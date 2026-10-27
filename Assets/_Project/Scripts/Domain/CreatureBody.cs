@@ -7,7 +7,7 @@ namespace Eden.Domain
     /// the creature is created and fixed for its whole life. Each gene g gives a factor f = 1 + g·<see cref="BodyGenes.TraitSpan"/>
     /// (efficiency gives the metabolism factor m = 1 − g·TraitSpan), and every benefit comes with a cost:
     /// <list type="bullet">
-    /// <item>size fs: eat radius and energy capacity × fs; metabolism and movement cost × fs^<see cref="SimulationConfig.SizeCostExponent"/>;</item>
+    /// <item>size fs: body radius, eat radius and energy capacity × fs; metabolism and movement cost × fs^<see cref="SimulationConfig.SizeCostExponent"/>;</item>
     /// <item>speed fv: speed cap × fv; movement cost × fv^<see cref="SimulationConfig.SpeedCostExponent"/>;</item>
     /// <item>sensor fr: sensor range × fr; sensor cost × fr^<see cref="SimulationConfig.SensorCostExponent"/>;</item>
     /// <item>efficiency m: metabolism × m; acceleration × m^<see cref="SimulationConfig.EfficiencyPowerExponent"/>.</item>
@@ -16,9 +16,10 @@ namespace Eden.Domain
     /// </summary>
     public readonly struct CreatureBody : IEquatable<CreatureBody>
     {
-        public CreatureBody(float eatRadius, float maxEnergy, float maxSpeed, float maxAcceleration, float sensorRange,
-            float metabolismPerSecond, float movementCostPerSecond, float sensorCostPerSecond)
+        public CreatureBody(float radius, float eatRadius, float maxEnergy, float maxSpeed, float maxAcceleration,
+            float sensorRange, float metabolismPerSecond, float movementCostPerSecond, float sensorCostPerSecond)
         {
+            Radius = radius;
             EatRadius = eatRadius;
             MaxEnergy = maxEnergy;
             MaxSpeed = maxSpeed;
@@ -29,7 +30,10 @@ namespace Eden.Domain
             SensorCostPerSecond = sensorCostPerSecond;
         }
 
-        /// <summary>Body radius: food within this distance of the creature is eaten.</summary>
+        /// <summary>Radius of the solid disc the body is when the run has solid bodies.</summary>
+        public float Radius { get; }
+
+        /// <summary>Food within this distance of the creature is eaten; without solid bodies it is also the body's size.</summary>
         public float EatRadius { get; }
 
         /// <summary>Energy capacity.</summary>
@@ -54,8 +58,9 @@ namespace Eden.Domain
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
-            return new CreatureBody(config.EatRadius, config.MaxEnergy, config.MaxSpeed, config.MaxAcceleration,
-                config.SensorRange, config.MetabolismPerSecond, config.MovementCostPerSecond, config.SensorCostPerSecond);
+            return new CreatureBody(config.BodyRadius, config.EatRadius, config.MaxEnergy, config.MaxSpeed,
+                config.MaxAcceleration, config.SensorRange, config.MetabolismPerSecond, config.MovementCostPerSecond,
+                config.SensorCostPerSecond);
         }
 
         /// <summary>Body of <paramref name="genes"/> (all of them count; mask them first to express only some).</summary>
@@ -69,6 +74,7 @@ namespace Eden.Domain
             var metabolism = Factor(-genes.Efficiency);
             var sizeCost = Power(size, config.SizeCostExponent);
             return new CreatureBody(
+                config.BodyRadius * size,
                 config.EatRadius * size,
                 config.MaxEnergy * size,
                 config.MaxSpeed * speed,
@@ -87,8 +93,8 @@ namespace Eden.Domain
         public static float Factor(float gene) => 1f + gene * BodyGenes.TraitSpan;
 
         public bool Equals(CreatureBody other) =>
-            EatRadius == other.EatRadius && MaxEnergy == other.MaxEnergy && MaxSpeed == other.MaxSpeed &&
-            MaxAcceleration == other.MaxAcceleration && SensorRange == other.SensorRange &&
+            Radius == other.Radius && EatRadius == other.EatRadius && MaxEnergy == other.MaxEnergy &&
+            MaxSpeed == other.MaxSpeed && MaxAcceleration == other.MaxAcceleration && SensorRange == other.SensorRange &&
             MetabolismPerSecond == other.MetabolismPerSecond && MovementCostPerSecond == other.MovementCostPerSecond &&
             SensorCostPerSecond == other.SensorCostPerSecond;
 
@@ -99,8 +105,8 @@ namespace Eden.Domain
               SensorRange.GetHashCode()) * 397 ^ MetabolismPerSecond.GetHashCode()) * 397 ^ MovementCostPerSecond.GetHashCode();
 
         public override string ToString() =>
-            $"(eat radius {EatRadius}, capacity {MaxEnergy}, max speed {MaxSpeed}, acceleration {MaxAcceleration}, " +
-            $"sensor range {SensorRange}, metabolism {MetabolismPerSecond}, movement cost {MovementCostPerSecond}, " +
+            $"(radius {Radius}, eat radius {EatRadius}, capacity {MaxEnergy}, max speed {MaxSpeed}, " +
+            $"acceleration {MaxAcceleration}, sensor range {SensorRange}, metabolism {MetabolismPerSecond}, movement cost {MovementCostPerSecond}, " +
             $"sensor cost {SensorCostPerSecond})";
 
         // A factor of exactly 1 stays 1 for any exponent, so the reference body never depends on how pow rounds.

@@ -145,6 +145,10 @@ namespace Eden.Persistence
                 ";sensor " + world.SensorCostExponent.ToString(culture) +
                 ";efficiency_power " + world.EfficiencyPowerExponent.ToString(culture)
             });
+            if (world.SolidBodies)
+                lines.Add("bodies=solid;radius " + world.BodyRadius.ToString(culture) + ";substeps " +
+                          world.SolidSubsteps.ToString(culture) + ";contact_passes " +
+                          SimulationConfig.ContactPasses.ToString(culture));
             if (Preset != null)
                 lines.Add("preset=" + Preset);
             if (ResumedFrom != null)
