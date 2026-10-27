@@ -1,6 +1,7 @@
 using System;
 using System.Globalization;
 using Eden.Domain;
+using Eden.Evolution;
 
 namespace Eden.Persistence
 {
@@ -21,31 +22,49 @@ namespace Eden.Persistence
 
     /// <summary>
     /// A genome exported on its own, outside any checkpoint: the genome itself, an optional fitness (absent when
-    /// exporting a creature that was never scored on its own, e.g. mid-episode) and optional provenance.
+    /// exporting a creature that was never scored on its own, e.g. mid-episode) with the scoring profile that produced
+    /// it, and optional provenance.
     /// </summary>
     public sealed class GenomeRecord
     {
-        public GenomeRecord(Genome genome, float? fitness = null, GenomeSource? source = null)
+        /// <param name="fitnessProfile">Scoring rule of <paramref name="fitness"/>; ignored without a fitness.</param>
+        public GenomeRecord(Genome genome, float? fitness = null, GenomeSource? source = null,
+            string fitnessProfile = Evolution.Fitness.Profile)
         {
             Genome = genome ?? throw new ArgumentNullException(nameof(genome));
+            if (fitness.HasValue && string.IsNullOrEmpty(fitnessProfile))
+                throw new ArgumentException("A fitness needs the profile that produced it.", nameof(fitnessProfile));
             Fitness = fitness;
+            FitnessProfile = fitness.HasValue ? fitnessProfile : null;
             Source = source;
         }
 
         public Genome Genome { get; }
         public float? Fitness { get; }
+
+        /// <summary>Scoring rule of <see cref="Fitness"/> (e.g. <see cref="Evolution.Fitness.Profile"/>); null without a fitness.</summary>
+        public string FitnessProfile { get; }
+
         public GenomeSource? Source { get; }
+
+        /// <summary>
+        /// The fitness when it was scored by <paramref name="profile"/>, otherwise null: a score from another profile is
+        /// history, not something to rank against this profile's scores.
+        /// </summary>
+        public float? FitnessFor(string profile) => FitnessProfile == profile ? Fitness : null;
     }
 
     /// <summary>
-    /// JSON form of one exported genome (schema version 1), independent of <see cref="CheckpointCodec"/>: a genome file
-    /// is read standalone, with no surrounding checkpoint to imply the network's shape, so unlike a checkpoint's
-    /// internal genome encoding it always writes and checks the topology explicitly.
+    /// JSON form of one exported genome (schema version 2), independent of <see cref="CheckpointCodec"/>: a genome file
+    /// is read standalone, with no surrounding checkpoint to imply what the network is, so unlike a checkpoint's
+    /// internal genome encoding it always writes and checks the kind of network, its neural contract and topology, and
+    /// the profile of its fitness. Schema 1 files (before those fields) are read as MLP genomes of the legacy contract
+    /// scored by <see cref="Fitness.Profile"/> "food-energy-per-second-v1", the only ones that existed.
     /// </summary>
     public static class GenomeCodec
     {
         public const string Format = "eden-genome";
-        public const int SchemaVersion = 1;
+        public const int SchemaVersion = 2;
 
         public static string Encode(GenomeRecord record, string appVersion, DateTime savedUtc)
         {
@@ -62,6 +81,8 @@ namespace Eden.Persistence
                 .Add("app", JsonValue.NewObject().Add("version", JsonValue.Of(appVersion ?? string.Empty)))
                 .Add("savedUtc", JsonValue.Of(savedUtc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)))
                 .Add("genomeSchema", JsonValue.Of(Genome.CurrentSchemaVersion))
+                .Add("network", JsonValue.Of(genome.Network))
+                .Add("contract", JsonValue.Of(genome.Contract.Id))
                 .Add("topology", JsonValue.NewArray()
                     .Add(JsonValue.Of(genome.Topology.Inputs))
                     .Add(JsonValue.Of(genome.Topology.Hidden))
@@ -77,7 +98,10 @@ namespace Eden.Persistence
             }
 
             if (record.Fitness.HasValue)
+            {
                 root.Add("fitness", JsonValue.OfAnyFloat(record.Fitness.Value));
+                root.Add("fitnessProfile", JsonValue.Of(record.FitnessProfile));
+            }
             if (record.Source.HasValue)
             {
                 var source = record.Source.Value;
@@ -103,6 +127,18 @@ namespace Eden.Persistence
                 throw new CheckpointException($"Genome file schema version {schema} is newer than version {SchemaVersion}, " +
                                               "the newest this build reads; open it with a newer EDEN.");
 
+            var network = schema >= 2 ? root["network"].String() : Genome.MlpNetwork;
+            if (network != Genome.MlpNetwork)
+                throw new CheckpointException($"Network kind \"{network}\" is not supported by this build (only " +
+                                              $"\"{Genome.MlpNetwork}\").");
+            var contractId = schema >= 2 ? root["contract"].String() : NeuralContract.LegacyId;
+            if (!NeuralContract.TryFind(contractId, out var contract))
+                throw new CheckpointException($"Neural contract \"{contractId}\" is unknown to this build; open it " +
+                                              "with a newer EDEN.");
+            if (contract != NeuralContract.Legacy)
+                throw new CheckpointException($"An {Genome.MlpNetwork} genome uses contract {NeuralContract.LegacyId}, " +
+                                              $"not {contract.Id}.");
+
             var expected = NetworkTopology.Mlp12x16x3;
             var topology = root["topology"].ArrayOf(3);
             if (topology.Count != 3 || topology[0].Int() != expected.Inputs || topology[1].Int() != expected.Hidden ||
@@ -119,6 +155,12 @@ namespace Eden.Persistence
             var genome = new Genome(expected, weights, DecodeBodyGenes(root.TryGet("body")),
                 DecodePlasticity(root.TryGet("plasticity")));
             float? fitness = root.TryGet("fitness")?.AnyFloat();
+            var savedProfile = root.TryGet("fitnessProfile");
+            if (savedProfile != null && !fitness.HasValue)
+                throw new CheckpointException($"{savedProfile.Path}: a fitness profile without a fitness.");
+            var profile = schema >= 2 ? savedProfile?.String() : Fitness.Profile;
+            if (fitness.HasValue && string.IsNullOrEmpty(profile))
+                throw new CheckpointException("A fitness needs the profile that produced it (fitnessProfile).");
             GenomeSource? source = null;
             var sourceValue = root.TryGet("source");
             if (sourceValue != null)
@@ -127,7 +169,7 @@ namespace Eden.Persistence
                     sourceValue["individualId"].Long(1));
             }
 
-            return new GenomeRecord(genome, fitness, source);
+            return new GenomeRecord(genome, fitness, source, profile);
         }
 
         private static JsonValue EncodeBodyGenes(BodyGenes genes)

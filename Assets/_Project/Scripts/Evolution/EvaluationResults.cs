@@ -12,6 +12,12 @@ namespace Eden.Evolution
     {
         public const float Worst = float.NegativeInfinity;
 
+        /// <summary>
+        /// Versioned name of this scoring rule, recorded next to exported scores: scores of different profiles are not
+        /// comparable and must not rank genomes together.
+        /// </summary>
+        public const string Profile = "food-energy-per-second-v1";
+
         public static float FromFood(float foodEnergy, float episodeSeconds)
         {
             if (float.IsNaN(foodEnergy) || float.IsInfinity(foodEnergy) || foodEnergy < 0f ||
