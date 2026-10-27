@@ -40,6 +40,7 @@ namespace Eden.Evolution
             MutationProbability = settings.MutationProbability;
             MutationSigma = settings.MutationSigma;
             MutableBodyGenes = settings.ExpressedBodyGenes;
+            MutablePlasticity = settings.Plasticity;
         }
 
         public ulong ExperimentSeed { get; }
@@ -51,6 +52,9 @@ namespace Eden.Evolution
 
         /// <summary>Body genes that mutate: the expressed ones. The others stay neutral and draw nothing.</summary>
         public BodyGeneSet MutableBodyGenes { get; }
+
+        /// <summary>Whether plasticity coefficients mutate (only in experiments with plasticity; otherwise no draws).</summary>
+        public bool MutablePlasticity { get; }
 
         /// <summary>
         /// Random stream used to create generation <paramref name="generation"/> (tournaments and mutations):
@@ -126,7 +130,7 @@ namespace Eden.Evolution
             {
                 var parent = Tournament(fitness, rules.TournamentSize, random.Source);
                 var child = Mutate(parents[parent], rules.MutationProbability, rules.MutationSigma, rules.MutableBodyGenes,
-                    random, out var mutated);
+                    rules.MutablePlasticity, random, out var mutated);
                 children[c] = new Offspring(child, parent, false, mutated);
             }
 
@@ -146,6 +150,16 @@ namespace Eden.Evolution
         /// what it drew before body genes existed. <paramref name="mutated"/> counts weights only.
         /// </summary>
         public static Genome Mutate(Genome parent, float probability, float sigma, BodyGeneSet bodyGenes,
+            GaussianSampler random, out int mutated) =>
+            Mutate(parent, probability, sigma, bodyGenes, false, random, out mutated);
+
+        /// <summary>
+        /// As above; with <paramref name="plasticity"/> the learning rate and then the decay also mutate, after the body
+        /// genes, each with chance <paramref name="probability"/> and noise <paramref name="sigma"/> times its range,
+        /// limited to that range. A child inherits base weights and coefficients only: what its parent learned during
+        /// its life lives in the parent's brain state and is never read here.
+        /// </summary>
+        public static Genome Mutate(Genome parent, float probability, float sigma, BodyGeneSet bodyGenes, bool plasticity,
             GaussianSampler random, out int mutated)
         {
             if (parent == null)
@@ -181,7 +195,24 @@ namespace Eden.Evolution
                 body = new BodyGenes(genes[0], genes[1], genes[2], genes[3]);
             }
 
-            return new Genome(parent.Topology, weights, body, parent.Plasticity);
+            var coefficients = parent.Plasticity;
+            if (plasticity)
+            {
+                var rate = MutateWithin(coefficients.LearningRate, PlasticityGenes.MaxLearningRate, probability, sigma, random);
+                var decay = MutateWithin(coefficients.Decay, PlasticityGenes.MaxDecay, probability, sigma, random);
+                coefficients = new PlasticityGenes(rate, decay);
+            }
+
+            return new Genome(parent.Topology, weights, body, coefficients);
+        }
+
+        // One coin, plus a Gaussian sample scaled to [0, max] when it mutates; the result stays within [0, max].
+        private static float MutateWithin(float value, float max, float probability, float sigma, GaussianSampler random)
+        {
+            if (random.Source.NextFloat() >= probability)
+                return value;
+            var mutated = value + (float)(sigma * max * random.NextStandard());
+            return Math.Min(max, Math.Max(0f, mutated));
         }
 
         /// <summary>Parent indices from best to worst.</summary>
