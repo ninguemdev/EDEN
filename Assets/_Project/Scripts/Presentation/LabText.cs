@@ -72,8 +72,13 @@ namespace Eden.Presentation
             var episode = job.Current;
             var text = new StringBuilder();
             text.AppendLine("Evolução por gerações · AVALIAÇÃO ISOLADA");
+            var neat = plan.Algorithm == EvolutionAlgorithm.Neat;
             text.AppendLine($"Cada genoma sozinho no mesmo mundo de cada seed ({plan.EpisodeSeconds:0} s); sem competição. " +
-                            "Seleção artificial por torneio na fitness de treino, não seleção natural.");
+                            (neat
+                                ? "NEAT: redes começam mínimas e ganham nós e conexões; seleção artificial por espécies " +
+                                  "na fitness de treino, não seleção natural."
+                                : "MLP fixa 12-16-3 (controle): seleção artificial por torneio na fitness de treino, " +
+                                  "não seleção natural."));
             text.AppendLine($"Geração {job.Generation}  ·  {PhaseLabel(session.Phase)}: " +
                             $"{CandidateLabel(session)} ({episode.Candidate + 1}/{job.CandidateCount}), " +
                             $"seed {episode.SeedIndex + 1}/{job.SeedCount}");
@@ -87,11 +92,24 @@ namespace Eden.Presentation
                 : "Corpo evolutivo: tamanho, velocidade, sensor e eficiência herdados e mutados, cada um com custo");
 
             var last = session.LastTraining?.Summary;
-            if (last != null)
+            var structure = session.LastTraining?.Neat;
+            if (last != null && structure != null)
+            {
+                text.AppendLine($"Treino g{last.Generation}: melhor {last.Best:0.00}  ·  mediana {last.Median:0.00}  ·  " +
+                                $"sobrevivência {last.MeanSurvivalRate:0%}");
+                text.AppendLine($"NEAT g{last.Generation}: {structure.SpeciesCount} espécie(s), maior com " +
+                                $"{structure.LargestSpecies}  ·  nós ocultos {structure.MeanHiddenNodes:0.0} em média " +
+                                $"(máx. {structure.MaxHiddenNodes})  ·  conexões habilitadas {structure.MeanEnabledConnections:0.0}");
+            }
+            else if (last != null)
+            {
                 text.AppendLine($"Treino g{last.Generation}: melhor {last.Best:0.00}  ·  mediana {last.Median:0.00}  ·  " +
                                 $"sobrevivência {last.MeanSurvivalRate:0%}  ·  diversidade {last.WeightStdDev:0.000}");
+            }
             else
+            {
                 text.AppendLine("Treino: nenhuma geração completa ainda");
+            }
 
             var validation = session.Validation;
             if (validation.Count > 0)
@@ -127,21 +145,43 @@ namespace Eden.Presentation
                        : "fitness = comida ingerida / duração do episódio");
         }
 
-        /// <summary>Lineage of an individual as seen from the generation it is being evaluated in.</summary>
-        public static string Lineage(Individual individual, Lineage lineage, int generation)
+        /// <summary>
+        /// Lineage of an individual as seen from the generation it is being evaluated in; <paramref name="species"/> is
+        /// the NEAT species line, if any.
+        /// </summary>
+        public static string Lineage(Individual individual, Lineage lineage, int generation, string species = null)
         {
             var text = new StringBuilder();
             text.AppendLine("Linhagem");
             text.AppendLine($"Indivíduo #{individual.Id} · nasceu na geração {individual.BirthGeneration}");
             if (individual.ParentIds.Count == 0)
-                text.AppendLine("Fundador: genoma aleatório da geração 0, sem pais");
+                text.AppendLine(individual.Genome.Neat == null
+                    ? "Fundador: genoma aleatório da geração 0, sem pais"
+                    : "Fundador: rede mínima da geração 0 (sem pais)");
+            else if (individual.ParentIds.Count == 2)
+                text.AppendLine($"Pais #{individual.ParentIds[0]} (mais apto) e #{individual.ParentIds[1]}: cruzamento " +
+                                $"NEAT · {individual.MutatedWeights} pesos mutados ao nascer");
             else
                 text.AppendLine($"Pai #{individual.ParentIds[0]} · {individual.MutatedWeights} pesos mutados ao nascer");
+            var network = individual.Genome.Neat;
+            if (network != null)
+                text.AppendLine($"Rede NEAT: {network.HiddenNodes.Count} nós ocultos · {network.Connections.Count} " +
+                                $"conexões ({network.EnabledConnectionCount} habilitadas)");
+            if (species != null)
+                text.AppendLine(species);
             if (individual.BirthGeneration < generation)
                 text.AppendLine($"Elite: passou sem nova mutação para a geração {generation} e é avaliado de novo");
             text.Append("Ancestrais: " + Ancestors(lineage.Ancestry(individual.Id)));
             return text.ToString();
         }
+
+        /// <summary>Species line of a NEAT individual placed at the end of <paramref name="generation"/> (or its parent).</summary>
+        public static string Species(int species, int generation, long? parent) =>
+            parent.HasValue
+                ? $"Espécie do pai #{parent.Value}: {species} (fim da geração {generation}); a sua é definida ao fim desta"
+                : $"Espécie {species} (fim da geração {generation})";
+
+        public static string SpeciesPending() => "Espécie: definida ao fim da geração";
 
         public static string Creature(CreatureState creature, Observation sensed, CreatureAction action,
             string brainName, SimulationConfig config)
@@ -150,7 +190,9 @@ namespace Eden.Presentation
             text.AppendLine($"Criatura {creature.Id}");
             text.AppendLine(brainName == MlpBrain.BrainName
                 ? "Cérebro: rede 12-16-3 com genoma próprio"
-                : "Cérebro: " + BrainLabel(brainName));
+                : brainName == NeatBrain.BrainName
+                    ? "Cérebro: rede NEAT com genoma próprio (topologia evolutiva, sem memória)"
+                    : "Cérebro: " + BrainLabel(brainName));
             text.AppendLine($"Energia {creature.Energy:0.0} / {creature.Body.MaxEnergy:0.#}");
             text.AppendLine($"Idade {creature.AgeTicks * (double)config.TickDuration:0.0} s de {config.MaxAgeSeconds:0} s");
             text.AppendLine($"Comida ingerida {creature.FoodEnergyEaten:0} de energia");
@@ -339,6 +381,7 @@ namespace Eden.Presentation
                 case RandomBrain.BrainName: return "aleatório (ignora os sensores)";
                 case MlpBrain.BrainName:
                     return "rede neural 12-16-3, genoma aleatório por criatura (ainda sem evolução; sem memória nem aprendizado)";
+                case NeatBrain.BrainName: return "rede NEAT (topologia evolutiva, sem memória)";
                 default: return brainName;
             }
         }

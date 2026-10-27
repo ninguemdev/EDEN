@@ -308,6 +308,39 @@ namespace Eden.Evolution
             return new Genome(new NeatNetwork(network.Contract, genes), bodyGenes);
         }
 
+        /// <summary>
+        /// Weights and body only, the way a shared world mutates a child's genome (no structural change, whose numbering
+        /// belongs to a generational evolution): each connection in innovation order with chance
+        /// <paramref name="probability"/> gets Gaussian noise of <paramref name="sigma"/>, limited to
+        /// ±<see cref="NeatNetwork.MaxAbsWeight"/>; then the body genes of <paramref name="bodyGenes"/> as
+        /// <see cref="Reproduction.MutateBody"/> does. <paramref name="mutated"/> counts weights.
+        /// </summary>
+        public static Genome MutateWeights(Genome parent, float probability, float sigma, BodyGeneSet bodyGenes,
+            GaussianSampler random, out int mutated)
+        {
+            if (parent == null)
+                throw new ArgumentNullException(nameof(parent));
+            if (random == null)
+                throw new ArgumentNullException(nameof(random));
+            var network = parent.Neat ??
+                          throw new ArgumentException($"Only NEAT genomes mutate here, got a {parent.Network} one.",
+                              nameof(parent));
+            var genes = new NeatConnection[network.Connections.Count];
+            mutated = 0;
+            for (var i = 0; i < genes.Length; i++)
+            {
+                genes[i] = network.Connections[i];
+                if (random.Source.NextFloat() >= probability)
+                    continue;
+                var value = genes[i].Weight + (float)(sigma * random.NextStandard());
+                genes[i] = genes[i].WithWeight(Math.Min(NeatNetwork.MaxAbsWeight, Math.Max(-NeatNetwork.MaxAbsWeight, value)));
+                mutated++;
+            }
+
+            var body = Reproduction.MutateBody(parent.Body, bodyGenes, probability, sigma, random);
+            return new Genome(new NeatNetwork(network.Contract, genes), body);
+        }
+
         // Splits one enabled connection, drawn in innovation order; false when none is enabled (no draw).
         private static bool AddNode(List<NeatConnection> genes, InnovationHistory history, IRandomSource source)
         {

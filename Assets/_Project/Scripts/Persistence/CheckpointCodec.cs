@@ -467,6 +467,8 @@ namespace Eden.Persistence
         // Weights (only the MVP network) and body genes when they are not neutral, added to <paramref name="saved"/>.
         private static JsonValue EncodeGenome(Genome genome, JsonValue saved)
         {
+            if (genome.Neat != null)
+                return EncodeNeatGenome(genome, saved);
             var weights = JsonValue.NewArray();
             for (var w = 0; w < genome.WeightCount; w++)
                 weights.Add(JsonValue.Of(genome.GetWeight(w)));
@@ -479,6 +481,8 @@ namespace Eden.Persistence
 
         private static Genome DecodeGenome(JsonValue saved)
         {
+            if (saved.TryGet("network") != null)
+                return DecodeNeatGenome(saved);
             var expected = NetworkTopology.Mlp12x16x3;
             var values = saved["weights"].ArrayOf(expected.ParameterCount);
             if (values.Count != expected.ParameterCount)

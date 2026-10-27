@@ -12,8 +12,9 @@ namespace Eden.Application
     /// (<see cref="RandomStream.Birth"/> + child id), so a birth never shifts any other draw. Mutation uses the config's
     /// birth probability and sigma and touches only the <see cref="ExpressedBodyGenes"/>, which are also the only body
     /// genes the child expresses, and the plasticity coefficients when <see cref="MutatePlasticity"/>. A child inherits
-    /// the parent's genome only: what the parent learned during its life is never part of it. Genomes of dead children
-    /// are dropped with <see cref="Forget"/>.
+    /// the parent's genome only: what the parent learned during its life is never part of it. A NEAT parent passes on its
+    /// structure unchanged: only weights and body genes mutate (<see cref="NeatMutation.MutateWeights"/>), since new
+    /// structure is numbered by a generational evolution. Genomes of dead children are dropped with <see cref="Forget"/>.
     /// </summary>
     public sealed class SharedGenomes : IHeredity
     {
@@ -55,8 +56,12 @@ namespace Eden.Application
             if (child.Value <= config.InitialPopulation || born.ContainsKey(child.Value))
                 throw new InvalidOperationException($"{child} is not a new child.");
             var random = new GaussianSampler(SeedDerivation.CreateCreatureStream(config.Seed, RandomStream.Birth, child));
-            var genome = Reproduction.Mutate(GenomeOf(parent.Id), config.BirthMutationProbability, config.BirthMutationSigma,
-                ExpressedBodyGenes, MutatePlasticity, random, out _);
+            var parentGenome = GenomeOf(parent.Id);
+            var genome = parentGenome.Neat == null
+                ? Reproduction.Mutate(parentGenome, config.BirthMutationProbability, config.BirthMutationSigma,
+                    ExpressedBodyGenes, MutatePlasticity, random, out _)
+                : NeatMutation.MutateWeights(parentGenome, config.BirthMutationProbability, config.BirthMutationSigma,
+                    ExpressedBodyGenes, random, out _);
             born.Add(child.Value, genome);
             return genome.Body.Masked(ExpressedBodyGenes);
         }

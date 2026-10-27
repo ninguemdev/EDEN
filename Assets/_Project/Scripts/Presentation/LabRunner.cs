@@ -45,7 +45,8 @@ namespace Eden.Presentation
     /// reaches the simulation. In evolution mode the world shown is the isolated episode being evaluated. The run can
     /// be saved to and loaded from a checkpoint between ticks.
     /// Command line (builds): -eden-mode shared|evolution, -eden-preset minimal|standard|stress,
-    /// -eden-brain heuristic|random|neural, -eden-body fixed|evolving, -eden-reproduction on|off, -eden-seed N,
+    /// -eden-brain heuristic|random|neural, -eden-body fixed|evolving, -eden-algorithm mlp|neat, -eden-reproduction on|off,
+    /// -eden-seed N,
     /// -eden-select ID, -eden-max, and for a measured run
     /// -eden-benchmark SECONDS [-eden-benchmark-warmup SECONDS] [-eden-benchmark-output DIR] (see <see cref="LabBenchmark"/>).
     /// </summary>
@@ -66,11 +67,13 @@ namespace Eden.Presentation
 
         [Tooltip("A new evolution expresses and mutates all body genes; off keeps the fixed reference body (control).")]
         [SerializeField] private bool evolvingBody;
+        [SerializeField] private bool neat;
         [SerializeField] private bool writeMetrics = true;
         [SerializeField] private WorldView worldView;
         [SerializeField] private LabHud hud;
 
         private readonly NeuralSnapshot networkSnapshot = new NeuralSnapshot();
+        private readonly NeatSnapshot neatSnapshot = new NeatSnapshot();
         private readonly Stopwatch budgetWatch = new Stopwatch();
         private BrainController controller;
         private MetricsRecorder metrics;
@@ -94,6 +97,9 @@ namespace Eden.Presentation
 
         /// <summary>Body choice for the next evolution (see <see cref="LabChoice.EvolvingBody"/>).</summary>
         public bool EvolvingBody => evolvingBody;
+
+        /// <summary>Algorithm choice for the next evolution (see <see cref="LabChoice.Neat"/>).</summary>
+        public bool Neat => neat;
 
         /// <summary>
         /// World rules of the lab, as edited in the Inspector (or by -eden-reproduction); a preset sets the population and
@@ -147,6 +153,9 @@ namespace Eden.Presentation
         /// <summary>Last captured network state of the selected neural creature (diagram data).</summary>
         public NeuralSnapshot Network => networkSnapshot;
 
+        /// <summary>Last captured state of the selected creature's NEAT network (diagram data).</summary>
+        public NeatSnapshot NeatNetwork => neatSnapshot;
+
         public bool TryGetHeldAction(CreatureId creature, out CreatureAction action) =>
             controller.TryGetLastAction(creature, out action);
 
@@ -158,6 +167,7 @@ namespace Eden.Presentation
             seed = Math.Max(0, choice.Seed);
             brain = choice.Brain == LabBrainKind.Evolved && Evolution == null ? LabBrainKind.Heuristic : choice.Brain;
             evolvingBody = choice.EvolvingBody;
+            neat = choice.Neat;
             StartRun();
         }
 
@@ -168,6 +178,7 @@ namespace Eden.Presentation
             Selected = null;
             selectedDeath = null;
             networkSnapshot.Clear();
+            neatSnapshot.Clear();
             hud?.ShowNetwork(null);
             if (mode == LabMode.IsolatedEvolution)
                 StartEvolution();
@@ -175,7 +186,7 @@ namespace Eden.Presentation
                 StartSharedWorld();
             ResetClock(Simulation.World.Config.TicksPerSecond);
             worldView.Bind(Simulation.World);
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody), Evolution != null);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat), Evolution != null);
             RefreshHud();
         }
 
@@ -189,7 +200,7 @@ namespace Eden.Presentation
             sharedGenomes = null;
             ClearSelection();
             ShowEpisode();
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody), true);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat), true);
             RefreshHud();
         }
 
@@ -256,6 +267,7 @@ namespace Eden.Presentation
                         throw new CheckpointException("An evolution checkpoint holds the evolution only.");
                     world = session.Job.Current.Simulation;
                     brains = session.Job.Current.Controller;
+                    name = EvolutionBrainName(session);
                 }
                 else
                 {
@@ -297,6 +309,7 @@ namespace Eden.Presentation
             seed = (int)saved.Seed;
             brain = loadedBrain;
             evolvingBody = session != null && session.Evolution.Plan.ExpressedBodyGenes != BodyGeneSet.None;
+            neat = session != null && session.Evolution.Plan.Algorithm == EvolutionAlgorithm.Neat;
             Evolution = session;
             EvolutionDirectory = null;
             MetricsDirectory = null;
@@ -320,12 +333,13 @@ namespace Eden.Presentation
             Selected = null;
             selectedDeath = null;
             networkSnapshot.Clear();
+            neatSnapshot.Clear();
             hud?.ShowNetwork(null);
             ResetClock(world.World.Config.TicksPerSecond);
             if (mode == LabMode.SharedWorld && world.IsExtinct)
                 Clock.Pause();
             worldView.Bind(world.World);
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody), Evolution != null);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat), Evolution != null);
             ShowCheckpointStatus(LabText.CheckpointLoaded(CheckpointPath, world.World.Tick, EvolutionShown, problem));
             return true;
         }
@@ -442,6 +456,7 @@ namespace Eden.Presentation
             selectedDeath = null;
             controller.Watch(creature);
             networkSnapshot.Clear();
+            neatSnapshot.Clear();
             RefreshNetwork();
             RefreshHud();
         }
@@ -452,6 +467,7 @@ namespace Eden.Presentation
             selectedDeath = null;
             controller.Watch(null);
             networkSnapshot.Clear();
+            neatSnapshot.Clear();
             hud?.ShowNetwork(null);
             RefreshHud();
         }
@@ -466,7 +482,7 @@ namespace Eden.Presentation
             if (hud == null)
                 return;
             if (!Selected.HasValue || !controller.TryGetBrain(Selected.Value, out var selectedBrain) ||
-                !(selectedBrain is MlpBrain network))
+                !(selectedBrain is MlpBrain || selectedBrain is NeatBrain))
             {
                 hud.ShowNetwork(null);
                 return;
@@ -478,7 +494,14 @@ namespace Eden.Presentation
                 return;
             }
 
-            networkSnapshot.Capture(Selected.Value, network, observation);
+            if (selectedBrain is NeatBrain neatBrain)
+            {
+                neatSnapshot.Capture(Selected.Value, neatBrain, observation);
+                hud.ShowNeatNetwork(neatSnapshot);
+                return;
+            }
+
+            networkSnapshot.Capture(Selected.Value, (MlpBrain)selectedBrain, observation);
             hud.ShowNetwork(networkSnapshot);
         }
 
@@ -740,8 +763,9 @@ namespace Eden.Presentation
             sharedGenomes = null;
             var evolutionSettings = Preset.Evolution((ulong)seed);
             evolutionSettings.ExpressedBodyGenes = evolvingBody ? BodyGeneSet.All : BodyGeneSet.None;
+            evolutionSettings.Algorithm = neat ? EvolutionAlgorithm.Neat : EvolutionAlgorithm.Mlp;
             Evolution = CreateEvolution(evolutionSettings);
-            BrainName = MlpBrain.BrainName;
+            BrainName = EvolutionBrainName(Evolution);
             if (writeMetrics)
                 OpenEvolutionLog();
             var episode = Evolution.Job.Current;
@@ -791,6 +815,7 @@ namespace Eden.Presentation
             Selected = episode.Creature.Id;
             controller.Watch(Selected);
             networkSnapshot.Clear();
+            neatSnapshot.Clear();
         }
 
         private void ResetClock(int ticksPerSecond)
@@ -913,18 +938,48 @@ namespace Eden.Presentation
         {
             if (mode == LabMode.IsolatedEvolution)
             {
+                var current = Evolution.CurrentIndividual;
                 return "\n\n" + LabText.Episode(Evolution, Simulation.World.Config) +
-                       (Evolution.CurrentIndividual == null ? string.Empty
-                           : "\n\n" + LabText.Lineage(Evolution.CurrentIndividual, Evolution.Evolution.Lineage,
-                               Evolution.Job.Generation));
+                       (current == null ? string.Empty
+                           : "\n\n" + LabText.Lineage(current, Evolution.Evolution.Lineage, Evolution.Job.Generation,
+                               SpeciesOf(current)));
             }
 
             var index = creature.Id.Value - 1;
             if (sharedIndividuals == null || index < 0 || index >= sharedIndividuals.Count)
                 return GenealogyOf(creature.Id);
             return GenealogyOf(creature.Id) + "\n\n" +
-                   LabText.Lineage(sharedIndividuals[index], Evolution.Evolution.Lineage, sharedGeneration);
+                   LabText.Lineage(sharedIndividuals[index], Evolution.Evolution.Lineage, sharedGeneration,
+                       SpeciesOf(sharedIndividuals[index]));
         }
+
+        // NEAT only: the species an individual was placed in at the end of the last trained generation or, for one born
+        // since, its fitter parent's; species are assigned when a generation ends.
+        private string SpeciesOf(Individual individual)
+        {
+            if (individual.Genome.Neat == null)
+                return null;
+            var last = Evolution?.LastTraining;
+            if (last?.Neat == null)
+                return LabText.SpeciesPending();
+            var parent = individual.ParentIds.Count > 0 ? individual.ParentIds[0] : 0L;
+            for (var i = 0; i < last.Individuals.Count; i++)
+            {
+                if (last.Individuals[i].Id == individual.Id)
+                    return LabText.Species(last.Neat.Species[i], last.Evaluation.Generation, null);
+            }
+
+            for (var i = 0; i < last.Individuals.Count; i++)
+            {
+                if (last.Individuals[i].Id == parent)
+                    return LabText.Species(last.Neat.Species[i], last.Evaluation.Generation, parent);
+            }
+
+            return LabText.SpeciesPending();
+        }
+
+        private static string EvolutionBrainName(EvolutionSession session) =>
+            session.Evolution.Plan.Algorithm == EvolutionAlgorithm.Neat ? NeatBrain.BrainName : MlpBrain.BrainName;
 
         private bool TryObserve(CreatureId id, out Observation observation)
         {
@@ -958,6 +1013,9 @@ namespace Eden.Presentation
                         break;
                     case "-eden-body" when value == "fixed" || value == "evolving":
                         evolvingBody = value == "evolving";
+                        break;
+                    case "-eden-algorithm" when value == "mlp" || value == "neat":
+                        neat = value == "neat";
                         break;
                     case "-eden-reproduction" when value == "on" || value == "off":
                         settings.Reproduction = value == "on";
@@ -1006,8 +1064,8 @@ namespace Eden.Presentation
             {
                 case LabBrainKind.Evolved:
                 case LabBrainKind.Neural:
-                    brainName = MlpBrain.BrainName;
-                    return new BrainController(config, id => new MlpBrain(genomes.GenomeOf(id)));
+                    brainName = genomes.GenomeOf(new CreatureId(1)).Neat == null ? MlpBrain.BrainName : NeatBrain.BrainName;
+                    return new BrainController(config, id => GenomeBrains.Create(genomes.GenomeOf(id)));
                 case LabBrainKind.Random:
                     brainName = RandomBrain.BrainName;
                     return BrainController.Shared(config, new RandomBrain());

@@ -25,13 +25,13 @@ namespace Eden.Presentation
         private const int VertexCount = Connections * 4 + Neurons * (CircleSegments + 1);
         private const int IndexCount = Connections * 6 + Neurons * CircleSegments * 3;
 
-        private static readonly string[] InputNames =
+        internal static readonly string[] InputNames =
         {
             "energia", "idade", "vel. frente", "vel. esq.", "comida sen", "comida cos", "comida prox.",
             "comida vis.", "parede F", "parede D", "parede T", "parede E"
         };
 
-        private static readonly string[] OutputNames = { "propulsão", "giro", "lateral" };
+        internal static readonly string[] OutputNames = { "propulsão", "giro", "lateral" };
 
         private static readonly Color32 Positive = new Color32(94, 214, 168, 255);
         private static readonly Color32 Negative = new Color32(232, 96, 76, 255);
@@ -40,7 +40,7 @@ namespace Eden.Presentation
         private readonly Vector2[] inputPositions = new Vector2[NeuralLayout.Inputs];
         private readonly Vector2[] hiddenPositions = new Vector2[NeuralLayout.Hidden];
         private readonly Vector2[] outputPositions = new Vector2[NeuralLayout.Outputs];
-        private readonly Vector2[] circle = new Vector2[CircleSegments];
+        private static readonly Vector2[] Circle = UnitCircle();
         private readonly Label[] inputLabels = new Label[NeuralLayout.Inputs];
         private readonly Label[] outputLabels = new Label[NeuralLayout.Outputs];
         private NeuralSnapshot snapshot;
@@ -51,11 +51,6 @@ namespace Eden.Presentation
             name = "network-graph";
             pickingMode = PickingMode.Ignore;
             style.flexGrow = 1f;
-            for (var k = 0; k < CircleSegments; k++)
-            {
-                var angle = k * Mathf.PI * 2f / CircleSegments;
-                circle[k] = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
-            }
 
             for (var i = 0; i < inputLabels.Length; i++)
                 inputLabels[i] = AddLabel(InputNames[i], TextAnchor.MiddleRight);
@@ -175,7 +170,25 @@ namespace Eden.Presentation
             return color;
         }
 
-        private static void WriteLine(MeshWriteData mesh, ref int next, Vector2 from, Vector2 to, Color32 color)
+        private static Vector2[] UnitCircle()
+        {
+            var points = new Vector2[CircleSegments];
+            for (var k = 0; k < CircleSegments; k++)
+            {
+                var angle = k * Mathf.PI * 2f / CircleSegments;
+                points[k] = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+            }
+
+            return points;
+        }
+
+        /// <summary>Vertices and indices one line and one disc take, for sizing a mesh.</summary>
+        internal const int LineVertices = 4;
+        internal const int LineIndices = 6;
+        internal const int DiscVertices = CircleSegments + 1;
+        internal const int DiscIndices = CircleSegments * 3;
+
+        internal static void WriteLine(MeshWriteData mesh, ref int next, Vector2 from, Vector2 to, Color32 color)
         {
             var direction = (to - from).normalized;
             var normal = new Vector2(-direction.y, direction.x) * (LineWidth / 2f);
@@ -189,18 +202,18 @@ namespace Eden.Presentation
             Triangle(mesh, start, start + 2, start + 3, from + normal, to - normal, from - normal);
         }
 
-        private void WriteDisc(MeshWriteData mesh, ref int next, Vector2 center, float radius, Color32 color)
+        internal static void WriteDisc(MeshWriteData mesh, ref int next, Vector2 center, float radius, Color32 color)
         {
             var start = next;
             mesh.SetNextVertex(MakeVertex(center, color));
             for (var k = 0; k < CircleSegments; k++)
-                mesh.SetNextVertex(MakeVertex(center + circle[k] * radius, color));
+                mesh.SetNextVertex(MakeVertex(center + Circle[k] * radius, color));
             next += CircleSegments + 1;
             for (var k = 0; k < CircleSegments; k++)
             {
                 var a = (k + 1) % CircleSegments;
                 Triangle(mesh, start, start + 1 + k, start + 1 + a,
-                    center, center + circle[k] * radius, center + circle[a] * radius);
+                    center, center + Circle[k] * radius, center + Circle[a] * radius);
             }
         }
 

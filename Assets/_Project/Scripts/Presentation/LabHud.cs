@@ -9,13 +9,15 @@ namespace Eden.Presentation
     /// <summary>What the experiment controls ask for: indices into <see cref="LabHud.ModeChoices"/>, the presets and brains.</summary>
     public readonly struct LabChoice
     {
-        public LabChoice(LabMode mode, int preset, int seed, LabBrainKind brain, bool evolvingBody = false)
+        public LabChoice(LabMode mode, int preset, int seed, LabBrainKind brain, bool evolvingBody = false,
+            bool neat = false)
         {
             Mode = mode;
             Preset = preset;
             Seed = seed;
             Brain = brain;
             EvolvingBody = evolvingBody;
+            Neat = neat;
         }
 
         public LabMode Mode { get; }
@@ -25,6 +27,9 @@ namespace Eden.Presentation
 
         /// <summary>The evolution expresses and mutates all body genes; otherwise every body is the fixed control.</summary>
         public bool EvolvingBody { get; }
+
+        /// <summary>The evolution breeds NEAT networks; otherwise the fixed-topology MLP (the control).</summary>
+        public bool Neat { get; }
     }
 
     /// <summary>
@@ -38,6 +43,13 @@ namespace Eden.Presentation
         public static readonly string[] ModeChoices = { "Mundo compartilhado", "Evolução (avaliação isolada)" };
         public static readonly string[] PresetChoices = { "Mínimo (32)", "Padrão (64)", "Estresse (128)" };
         public static readonly string[] BodyChoices = { "Fixo (controle)", "Evolutivo (4 genes)" };
+        public static readonly string[] AlgorithmChoices = { "MLP fixa (controle)", "NEAT (topologia evolui)" };
+
+        private const string MlpNetworkTitle = "Rede neural (feed-forward: sem memória nem aprendizado)";
+        private const string MlpNetworkLegend = "Neurônios: ativação (verde +, vermelho −). Linhas: peso × sinal.";
+        private const string NeatNetworkTitle = "Rede NEAT (topologia evolutiva; feed-forward, sem memória)";
+        private const string NeatNetworkLegend =
+            "Colunas por profundidade. Nós: valor (verde +, vermelho −). Linhas: peso × sinal; cinza = conexão desabilitada.";
 
         private static readonly string[] BrainChoices =
             { "Heurístico", "Aleatório", "Rede aleatória", "População evoluída" };
@@ -55,6 +67,9 @@ namespace Eden.Presentation
         private DropdownField presetField;
         private DropdownField brainField;
         private DropdownField bodyField;
+        private DropdownField algorithmField;
+        private Label networkTitle;
+        private Label networkLegend;
         private IntegerField seedField;
         private TextField seedGenomesField;
         private Button resumeButton;
@@ -101,6 +116,9 @@ namespace Eden.Presentation
         public bool NetworkVisible { get; private set; }
         public bool ChartVisible { get; private set; }
         public NetworkGraph Graph { get; private set; }
+
+        /// <summary>Diagram of a NEAT network, shown instead of <see cref="Graph"/> for NEAT creatures.</summary>
+        public NeatGraph NeatGraph { get; private set; }
         public GenerationChart Chart { get; private set; }
 
         /// <summary>Root of the UI, for tests that drive the controls like a user.</summary>
@@ -155,15 +173,39 @@ namespace Eden.Presentation
         {
             if (!Bind())
                 return;
-            var visible = snapshot != null;
+            SetNetworkVisible(snapshot != null, false);
+            if (snapshot != null)
+                Graph.Show(snapshot);
+        }
+
+        /// <summary>Shows the NEAT diagram for a snapshot (instead of the MLP one), or hides the panel when null.</summary>
+        public void ShowNeatNetwork(NeatSnapshot snapshot)
+        {
+            if (!Bind())
+                return;
+            SetNetworkVisible(snapshot != null, true);
+            if (snapshot != null)
+                NeatGraph.Show(snapshot);
+        }
+
+        /// <summary>Whether the NEAT diagram (rather than the MLP one) is the one shown.</summary>
+        public bool NeatNetworkShown { get; private set; }
+
+        private void SetNetworkVisible(bool visible, bool neat)
+        {
             if (visible != NetworkVisible)
             {
                 networkPanel.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
                 NetworkVisible = visible;
             }
 
-            if (visible)
-                Graph.Show(snapshot);
+            if (!visible || neat == NeatNetworkShown)
+                return;
+            NeatNetworkShown = neat;
+            Graph.style.display = neat ? DisplayStyle.None : DisplayStyle.Flex;
+            NeatGraph.style.display = neat ? DisplayStyle.Flex : DisplayStyle.None;
+            networkTitle.text = neat ? NeatNetworkTitle : MlpNetworkTitle;
+            networkLegend.text = neat ? NeatNetworkLegend : MlpNetworkLegend;
         }
 
         /// <summary>Plots a session's generations, or hides the chart when null.</summary>
@@ -204,6 +246,7 @@ namespace Eden.Presentation
             presetField.SetValueWithoutNotify(PresetChoices[choice.Preset]);
             brainField.SetValueWithoutNotify(BrainChoices[(int)choice.Brain]);
             bodyField.SetValueWithoutNotify(BodyChoices[choice.EvolvingBody ? 1 : 0]);
+            algorithmField.SetValueWithoutNotify(AlgorithmChoices[choice.Neat ? 1 : 0]);
             seedField.SetValueWithoutNotify(choice.Seed);
             UpdateBrainField();
             resumeButton.style.display = evolutionAvailable && choice.Mode == LabMode.SharedWorld
@@ -226,7 +269,7 @@ namespace Eden.Presentation
                 return default;
             var brain = Math.Max(0, brainField.index);
             return new LabChoice((LabMode)Math.Max(0, modeField.index), Math.Max(0, presetField.index),
-                Math.Max(0, seedField.value), (LabBrainKind)brain, bodyField.index == 1);
+                Math.Max(0, seedField.value), (LabBrainKind)brain, bodyField.index == 1, algorithmField.index == 1);
         }
 
         /// <summary>True while the user types into a text field, so key shortcuts must be ignored.</summary>
@@ -284,6 +327,7 @@ namespace Eden.Presentation
         {
             brainField.SetEnabled(modeField.index == (int)LabMode.SharedWorld);
             bodyField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+            algorithmField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             seedGenomesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
         }
 
@@ -306,9 +350,12 @@ namespace Eden.Presentation
             var checkpointLabel = root.Q<Label>("checkpoint-status");
             var exportStatusLabel = root.Q<Label>("export-status");
             var exportRowElement = root.Q<VisualElement>("export-genome-row");
+            var titleLabel = root.Q<Label>("network-title");
+            var legendLabel = root.Q<Label>("network-legend");
             if (stats == null || inspectorLabel == null || inspectorElement == null || networkElement == null ||
                 host == null || chartElement == null || chartHost == null || legend == null || controlsElement == null ||
-                checkpointLabel == null || exportStatusLabel == null || exportRowElement == null)
+                checkpointLabel == null || exportStatusLabel == null || exportRowElement == null || titleLabel == null ||
+                legendLabel == null)
                 return false;
 
             inspector = inspectorLabel;
@@ -320,6 +367,11 @@ namespace Eden.Presentation
             exportGenomeRow = exportRowElement;
             Graph = new NetworkGraph();
             host.Add(Graph);
+            NeatGraph = new NeatGraph();
+            NeatGraph.style.display = DisplayStyle.None;
+            host.Add(NeatGraph);
+            networkTitle = titleLabel;
+            networkLegend = legendLabel;
             Chart = new GenerationChart();
             chartHost.Add(Chart);
             legend.text = GenerationChart.Legend();
@@ -337,6 +389,9 @@ namespace Eden.Presentation
             bodyField = root.Q<DropdownField>("body-field");
             bodyField.choices = new List<string>(BodyChoices);
             bodyField.index = 0;
+            algorithmField = root.Q<DropdownField>("algorithm-field");
+            algorithmField.choices = new List<string>(AlgorithmChoices);
+            algorithmField.index = 0;
             seedField = root.Q<IntegerField>("seed-field");
             seedField.RegisterValueChangedCallback(change =>
             {

@@ -4,7 +4,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Eden.Brains;
 using Eden.Domain;
+using Eden.Evolution;
 using Eden.Presentation;
 using Eden.Simulation;
 using NUnit.Framework;
@@ -182,6 +184,76 @@ namespace Eden.Tests.PlayMode
             Assert.That(diameter, Is.EqualTo(2f * selected.Body.SensorRange).Within(1e-3f));
             StringAssert.Contains("Corpo (genes", runner.Hud.InspectorText);
             StringAssert.Contains("Gasto/s", runner.Hud.InspectorText);
+        }
+
+        [UnityTest]
+        public IEnumerator Controls_RunANeatEvolution_InspectItsNetwork_SaveLoadAndShowItInTheSharedWorld()
+        {
+            UseTemporaryCheckpoint();
+            var algorithmField = runner.Hud.Root.Q<DropdownField>("algorithm-field");
+            Assert.That(algorithmField.value, Is.EqualTo(LabHud.AlgorithmChoices[0]), "the MLP control is the default");
+            yield return StartFromControls(LabMode.IsolatedEvolution, preset: 0, seed: 5, neat: true);
+            Assert.That(algorithmField.enabledSelf, Is.True, "the algorithm applies to a new evolution");
+            Assert.That(runner.Neat, Is.True);
+            Assert.That(runner.Evolution.Plan.Algorithm, Is.EqualTo(EvolutionAlgorithm.Neat));
+            Assert.That(runner.BrainName, Is.EqualTo(NeatBrain.BrainName));
+            StringAssert.Contains("NEAT: redes começam mínimas", runner.Hud.RunText);
+
+            var session = runner.Evolution;
+            yield return Press("max-button");
+            // Past generation 0 and back to training genomes (not the reference brains of the first validation).
+            yield return WaitUntil(() => session.Training.Count > 0 &&
+                                         session.Phase == Eden.Application.EvolutionPhase.Training,
+                EvolutionTimeoutSeconds);
+            yield return Press("max-button");
+            yield return Press("pause-button");
+            Assert.That(session.CurrentIndividual, Is.Not.Null, "a genome is being evaluated");
+            StringAssert.Contains("espécie(s)", runner.Hud.RunText);
+
+            runner.SelectNeighbor(+1);
+            runner.RefreshNetwork();
+            yield return null;
+            yield return null;
+            var inspector = runner.Hud.InspectorText;
+            StringAssert.Contains("rede NEAT com genoma próprio", inspector);
+            StringAssert.Contains("Rede NEAT:", inspector);
+            StringAssert.Contains("Espécie", inspector);
+            Assert.That(runner.Hud.NetworkVisible, Is.True);
+            Assert.That(runner.Hud.NeatNetworkShown, Is.True, "a NEAT network is not drawn as 12-16-3");
+            Assert.That(runner.Hud.NeatGraph.RepaintCount, Is.GreaterThan(0), "the NEAT diagram was drawn");
+            Assert.That(runner.Evolution.Job.Current.Controller.TryGetBrain(runner.Selected.Value, out var selectedBrain), Is.True);
+            var brain = (NeatBrain)selectedBrain;
+            Assert.That(runner.NeatNetwork.NodeCount, Is.EqualTo(brain.NodeIds.Count), "the diagram shows the real network");
+            Assert.That(runner.NeatNetwork.ConnectionCount, Is.EqualTo(brain.Genome.Neat.Connections.Count));
+
+            yield return Press("save-button");
+            StringAssert.Contains("Checkpoint salvo", runner.Hud.CheckpointText);
+            var atSave = Position();
+            yield return StartFromControls(LabMode.IsolatedEvolution, preset: 0, seed: 6);
+            Assert.That(runner.Evolution.Plan.Algorithm, Is.EqualTo(EvolutionAlgorithm.Mlp));
+            yield return Press("load-button");
+            StringAssert.Contains("Checkpoint carregado", runner.Hud.CheckpointText);
+            Assert.That(runner.Evolution.Plan.Algorithm, Is.EqualTo(EvolutionAlgorithm.Neat));
+            Assert.That(algorithmField.value, Is.EqualTo(LabHud.AlgorithmChoices[1]), "the controls show the loaded choice");
+            Assert.That(Position(), Is.EqualTo(atSave));
+
+            yield return StartFromControls(LabMode.SharedWorld, preset: 0, seed: 9, brain: LabBrainKind.Evolved, neat: true);
+            Assert.That(algorithmField.enabledSelf, Is.False, "the shared world takes the networks of the evolution");
+            Assert.That(runner.BrainName, Is.EqualTo(NeatBrain.BrainName));
+            runner.Select(runner.Simulation.World.Creatures[1].Id);
+            runner.RefreshNetwork();
+            yield return null;
+            Assert.That(runner.Hud.NeatNetworkShown, Is.True);
+            StringAssert.Contains("Rede NEAT:", runner.Hud.InspectorText);
+
+            yield return StartFromControls(LabMode.IsolatedEvolution, preset: 0, seed: 4);
+            if (!runner.Clock.IsPaused)
+                yield return Press("pause-button");
+            yield return Press("step-button");
+            runner.SelectNeighbor(+1);
+            runner.RefreshNetwork();
+            yield return null;
+            Assert.That(runner.Hud.NetworkVisible && !runner.Hud.NeatNetworkShown, Is.True, "the MLP keeps its diagram");
         }
 
         [UnityTest]
@@ -394,7 +466,7 @@ namespace Eden.Tests.PlayMode
         }
 
         private IEnumerator StartFromControls(LabMode mode, int preset, int seed, LabBrainKind brain = LabBrainKind.Heuristic,
-            bool evolvingBody = false)
+            bool evolvingBody = false, bool neat = false)
         {
             var root = runner.Hud.Root;
             Assert.That(root, Is.Not.Null, "the HUD is bound");
@@ -405,6 +477,7 @@ namespace Eden.Tests.PlayMode
             brainField.index = (int)brain;
             root.Q<IntegerField>("seed-field").value = seed;
             root.Q<DropdownField>("body-field").index = evolvingBody ? 1 : 0;
+            root.Q<DropdownField>("algorithm-field").index = neat ? 1 : 0;
             yield return Press("start-button");
         }
 
