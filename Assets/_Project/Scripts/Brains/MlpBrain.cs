@@ -5,10 +5,15 @@ namespace Eden.Brains
 {
     /// <summary>
     /// Fixed-topology multilayer perceptron 12 → 16 → 3 with tanh in both layers (<see cref="NeuralLayout"/>).
-    /// Outputs map to thrust = (tanh + 1) / 2, turn = tanh, strafe = tanh. Feed-forward only: it has no memory
-    /// between decisions and does not learn during a life. Parameters are copied in, so callers can never alter a
-    /// brain through a shared array, and inference reuses buffers, so it does not allocate. Because of those buffers
-    /// an instance is not thread-safe; the simulation evaluates creatures one at a time.
+    /// Outputs map to thrust = (tanh + 1) / 2, turn = tanh, strafe = tanh. With fixed <see cref="PlasticityGenes"/> (the
+    /// default) it is feed-forward only: no memory between decisions and no learning during a life. With a learning
+    /// rate, the hidden → output weights become W_base + ΔW, where ΔW lives in the creature's <see cref="BrainState"/>
+    /// and changes at every decision by a Hebbian rule modulated by the change of the energy input (experiment M7, not
+    /// a guarantee of reinforcement learning): ΔW ← clamp((1 − decay)·ΔW + rate·m·h·y, ±<see cref="PlasticMemory.MaxDelta"/>),
+    /// with m = energy input now − at the previous decision and h, y the hidden and output activations of the previous
+    /// decision. Parameters are copied in, so callers can never alter a brain through a shared array, and inference
+    /// reuses buffers, so it does not allocate. Because of those buffers an instance is not thread-safe; the simulation
+    /// evaluates creatures one at a time.
     /// </summary>
     public sealed class MlpBrain : IBrain
     {
@@ -34,6 +39,7 @@ namespace Eden.Brains
                     nameof(genome));
 
             Genome = genome;
+            Plasticity = genome.Plasticity;
             genome.CopyWeightsTo(parameters);
         }
 
@@ -41,6 +47,8 @@ namespace Eden.Brains
 
         /// <summary>The heritable description this brain was built from.</summary>
         public Genome Genome { get; }
+
+        public PlasticityGenes Plasticity { get; }
 
         public float GetParameter(int index) => parameters[index];
 
@@ -53,11 +61,27 @@ namespace Eden.Brains
             Array.Copy(parameters, destination, parameters.Length);
         }
 
-        /// <summary>Inputs follow the <see cref="ObservationLimits"/> policy, so NaN or out-of-range values never reach the network.</summary>
+        /// <summary>
+        /// Inputs follow the <see cref="ObservationLimits"/> policy, so NaN or out-of-range values never reach the
+        /// network. A plastic brain learns into <paramref name="state"/>; without a state it acts as its fixed network.
+        /// </summary>
         public CreatureAction Evaluate(in Observation observation, BrainState state)
         {
             ObservationLimits.Sanitize(observation, out _).CopyTo(input, 0);
-            Forward(input, hidden, output);
+            if (!Plasticity.IsPlastic || state == null)
+            {
+                Forward(input, hidden, output);
+                return ToAction(output);
+            }
+
+            var memory = state.EnsurePlastic();
+            var energy = input[0];
+            Learn(memory, energy);
+            ForwardPlastic(input, memory.DeltaWeights, hidden, output);
+            Array.Copy(hidden, memory.LastHidden, NeuralLayout.Hidden);
+            Array.Copy(output, memory.LastOutput, NeuralLayout.Outputs);
+            memory.LastEnergy = energy;
+            memory.HasPrevious = true;
             return ToAction(output);
         }
 
@@ -78,6 +102,49 @@ namespace Eden.Brains
 
         public static CreatureAction ToAction(float[] outputActivations) =>
             new CreatureAction((outputActivations[0] + 1f) * 0.5f, outputActivations[1], outputActivations[2]);
+
+        // The first decision of a life only decays (there is nothing to pair a change of energy with yet).
+        private void Learn(PlasticMemory memory, float energy)
+        {
+            var keep = 1f - Plasticity.Decay;
+            var signal = memory.HasPrevious ? Plasticity.LearningRate * (energy - memory.LastEnergy) : 0f;
+            var deltas = memory.DeltaWeights;
+            for (var o = 0; o < NeuralLayout.Outputs; o++)
+            {
+                var post = signal * memory.LastOutput[o];
+                for (var h = 0; h < NeuralLayout.Hidden; h++)
+                {
+                    var index = o * NeuralLayout.Hidden + h;
+                    var value = deltas[index] * keep + post * memory.LastHidden[h];
+                    deltas[index] = value < -PlasticMemory.MaxDelta ? -PlasticMemory.MaxDelta
+                        : value > PlasticMemory.MaxDelta ? PlasticMemory.MaxDelta
+                        : value;
+                }
+            }
+        }
+
+        // Same as Forward with W_base + ΔW for the hidden → output weights; kept apart so the fixed path never changes.
+        private void ForwardPlastic(float[] inputValues, float[] deltas, float[] hiddenValues, float[] outputValues)
+        {
+            for (var h = 0; h < NeuralLayout.Hidden; h++)
+            {
+                var sum = parameters[NeuralLayout.HiddenBias(h)];
+                var row = NeuralLayout.HiddenWeight(h, 0);
+                for (var i = 0; i < NeuralLayout.Inputs; i++)
+                    sum += parameters[row + i] * inputValues[i];
+                hiddenValues[h] = MathF.Tanh(sum);
+            }
+
+            for (var o = 0; o < NeuralLayout.Outputs; o++)
+            {
+                var sum = parameters[NeuralLayout.OutputBias(o)];
+                var row = NeuralLayout.OutputWeight(o, 0);
+                var learned = o * NeuralLayout.Hidden;
+                for (var h = 0; h < NeuralLayout.Hidden; h++)
+                    sum += (parameters[row + h] + deltas[learned + h]) * hiddenValues[h];
+                outputValues[o] = MathF.Tanh(sum);
+            }
+        }
 
         private void Forward(float[] inputValues, float[] hiddenValues, float[] outputValues)
         {

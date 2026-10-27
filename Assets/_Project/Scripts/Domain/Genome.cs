@@ -33,15 +33,16 @@ namespace Eden.Domain
     }
 
     /// <summary>
-    /// Heritable description of a creature: network topology, base weights and <see cref="BodyGenes"/> (plasticity
-    /// coefficients come later). It never holds energy, age, position or any brain state. Immutable: weights are
+    /// Heritable description of a creature: network topology, base weights, <see cref="BodyGenes"/> and
+    /// <see cref="PlasticityGenes"/>. It never holds energy, age, position or any brain state. Immutable: weights are
     /// copied in on construction and copied out by <see cref="CopyWeights"/>, so variants (e.g. mutations) are
-    /// built as new genomes and no two owners can share mutable weight storage. Schema 2 added the body genes; a
-    /// schema 1 genome is the same genome with neutral body genes.
+    /// built as new genomes and no two owners can share mutable weight storage. Schema 2 added the body genes and
+    /// schema 3 the plasticity coefficients; an older genome is the same genome with neutral body genes and a fixed
+    /// network.
     /// </summary>
     public sealed class Genome
     {
-        public const int CurrentSchemaVersion = 2;
+        public const int CurrentSchemaVersion = 3;
 
         /// <summary>Weights are kept within [-MaxAbsWeight, MaxAbsWeight].</summary>
         public const float MaxAbsWeight = 3f;
@@ -54,8 +55,17 @@ namespace Eden.Domain
         {
         }
 
-        /// <remarks><see cref="BodyGenes"/> can only hold values within their limits, so every genome is valid.</remarks>
+        /// <summary>Genome of a fixed network (no plasticity).</summary>
         public Genome(NetworkTopology topology, float[] weights, BodyGenes body)
+            : this(topology, weights, body, PlasticityGenes.Fixed)
+        {
+        }
+
+        /// <remarks>
+        /// <see cref="BodyGenes"/> and <see cref="PlasticityGenes"/> can only hold values within their limits, so every
+        /// genome is valid.
+        /// </remarks>
+        public Genome(NetworkTopology topology, float[] weights, BodyGenes body, PlasticityGenes plasticity)
         {
             if (weights == null)
                 throw new ArgumentNullException(nameof(weights));
@@ -73,12 +83,16 @@ namespace Eden.Domain
             Topology = topology;
             this.weights = (float[])weights.Clone();
             Body = body;
+            Plasticity = plasticity;
         }
 
         public int SchemaVersion => CurrentSchemaVersion;
         public NetworkTopology Topology { get; }
         public int WeightCount => weights.Length;
         public BodyGenes Body { get; }
+
+        /// <summary>Lifetime plasticity coefficients; <see cref="PlasticityGenes.Fixed"/> for a fixed network.</summary>
+        public PlasticityGenes Plasticity { get; }
 
         public float GetWeight(int index) => weights[index];
 
@@ -94,12 +108,16 @@ namespace Eden.Domain
             Array.Copy(weights, destination, weights.Length);
         }
 
-        /// <summary>Same weights with other body genes.</summary>
-        public Genome WithBody(BodyGenes body) => new Genome(Topology, weights, body);
+        /// <summary>Same weights and plasticity with other body genes.</summary>
+        public Genome WithBody(BodyGenes body) => new Genome(Topology, weights, body, Plasticity);
+
+        /// <summary>Same weights and body genes with other plasticity coefficients.</summary>
+        public Genome WithPlasticity(PlasticityGenes plasticity) => new Genome(Topology, weights, Body, plasticity);
 
         public bool HasSameContent(Genome other)
         {
-            if (other == null || !Topology.Equals(other.Topology) || !Body.Equals(other.Body))
+            if (other == null || !Topology.Equals(other.Topology) || !Body.Equals(other.Body) ||
+                !Plasticity.Equals(other.Plasticity))
                 return false;
             for (var i = 0; i < weights.Length; i++)
             {

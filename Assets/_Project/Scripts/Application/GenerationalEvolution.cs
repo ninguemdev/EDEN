@@ -23,7 +23,7 @@ namespace Eden.Application
             : this(settings ?? throw new ArgumentNullException(nameof(settings)), new Lineage())
         {
             individuals = Lineage.Founders(InitialGenomes.Population(Rules.ExperimentSeed, Rules.PopulationSize,
-                Plan.ExpressedBodyGenes));
+                Plan.ExpressedBodyGenes, Plan.Plasticity));
             population = GenomesOf(individuals);
         }
 

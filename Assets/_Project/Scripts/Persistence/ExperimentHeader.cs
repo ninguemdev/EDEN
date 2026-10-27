@@ -79,6 +79,7 @@ namespace Eden.Persistence
                 "mutation_sigma=" + Rules.MutationSigma.ToString(culture),
                 "crossover=off",
                 "body_genes=" + BodyGenesText(Plan.ExpressedBodyGenes),
+                "plasticity=" + (Plan.Plasticity ? "hebbian_output_layer" : "off"),
                 "body_cost_exponents=size " + world.SizeCostExponent.ToString(culture) +
                 ";speed " + world.SpeedCostExponent.ToString(culture) +
                 ";sensor " + world.SensorCostExponent.ToString(culture) +

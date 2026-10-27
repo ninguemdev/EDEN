@@ -27,7 +27,14 @@ namespace Eden.Application
         /// others neutral. The body genes are drawn after the weights from the same stream, all four every time, so
         /// the weights never depend on the body genes and each gene's value never depends on which others are expressed.
         /// </summary>
-        public static Genome[] Population(ulong experimentSeed, int count, BodyGeneSet expressed)
+        public static Genome[] Population(ulong experimentSeed, int count, BodyGeneSet expressed) =>
+            Population(experimentSeed, count, expressed, false);
+
+        /// <summary>
+        /// As above; with <paramref name="plasticity"/> the plasticity coefficients are drawn after the body genes (two
+        /// draws, uniform within their limits), otherwise every network is fixed. Earlier draws never depend on them.
+        /// </summary>
+        public static Genome[] Population(ulong experimentSeed, int count, BodyGeneSet expressed, bool plasticity)
         {
             BodyGenes.RequireSet(expressed);
             var genomes = new Genome[count];
@@ -36,7 +43,8 @@ namespace Eden.Application
                 var random = SeedDerivation.CreateIndexedStream(experimentSeed, RandomStream.Genome, (ulong)i + 1);
                 var brain = Genome.CreateRandom(NetworkTopology.Mlp12x16x3, random, WeightLimit);
                 var body = BodyGenes.CreateRandom(random).Masked(expressed);
-                genomes[i] = body.IsNeutral ? brain : brain.WithBody(body);
+                var genome = body.IsNeutral ? brain : brain.WithBody(body);
+                genomes[i] = plasticity ? genome.WithPlasticity(PlasticityGenes.CreateRandom(random)) : genome;
             }
 
             return genomes;
