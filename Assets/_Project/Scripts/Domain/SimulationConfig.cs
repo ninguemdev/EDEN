@@ -9,7 +9,7 @@ namespace Eden.Domain
     /// </summary>
     public sealed class SimulationConfig
     {
-        public const int CurrentSchemaVersion = 5;
+        public const int CurrentSchemaVersion = 6;
         public const int MaxTicksPerSecond = 240;
         public const int MaxDecisionIntervalTicks = 1000;
         public const int MaxPopulation = 4096;
@@ -51,6 +51,7 @@ namespace Eden.Domain
             RequireRange(errors, nameof(s.SpeedCostExponent), s.SpeedCostExponent, 0f, MaxCostExponent);
             RequireRange(errors, nameof(s.SensorCostExponent), s.SensorCostExponent, 0f, MaxCostExponent);
             RequireRange(errors, nameof(s.EfficiencyPowerExponent), s.EfficiencyPowerExponent, 0f, MaxCostExponent);
+            RequireRange(errors, nameof(s.FoodShiftSeconds), s.FoodShiftSeconds, 0f, MaxDurationSeconds);
             RequireRange(errors, nameof(s.PopulationCap), s.PopulationCap, 1, MaxPopulation);
             if (s.Reproduction && s.PopulationCap < s.InitialPopulation)
                 errors.Add($"{nameof(s.PopulationCap)} ({s.PopulationCap}) must not be below {nameof(s.InitialPopulation)} " +
@@ -91,6 +92,7 @@ namespace Eden.Domain
             SpeedCostExponent = s.SpeedCostExponent;
             SensorCostExponent = s.SensorCostExponent;
             EfficiencyPowerExponent = s.EfficiencyPowerExponent;
+            FoodShiftSeconds = s.FoodShiftSeconds;
             Reproduction = s.Reproduction;
             PopulationCap = s.PopulationCap;
             MaturitySeconds = s.MaturitySeconds;
@@ -106,6 +108,7 @@ namespace Eden.Domain
             MaxAgeTicks = Math.Max(1L, (long)Math.Round((double)MaxAgeSeconds * TicksPerSecond));
             FoodRespawnTicks = Math.Max(1L, (long)Math.Round((double)FoodRespawnSeconds * TicksPerSecond));
             MaturityTicks = Math.Max(1L, (long)Math.Round((double)MaturitySeconds * TicksPerSecond));
+            FoodShiftTicks = FoodShiftSeconds > 0f ? Math.Max(1L, (long)Math.Round((double)FoodShiftSeconds * TicksPerSecond)) : 0L;
             ReproductionCooldownTicks = (long)Math.Round((double)ReproductionCooldownSeconds * TicksPerSecond);
         }
 
@@ -158,6 +161,14 @@ namespace Eden.Domain
 
         /// <summary>Power of the metabolism factor in a body's acceleration.</summary>
         public float EfficiencyPowerExponent { get; }
+
+        /// <summary>Time food moves from the left to the right half of the arena; 0 when it never does.</summary>
+        public float FoodShiftSeconds { get; }
+
+        /// <summary>Tick at the start of which food moves; 0 when it never does.</summary>
+        public long FoodShiftTicks { get; }
+
+        public bool FoodShifts => FoodShiftTicks > 0;
 
         /// <summary>Whether creatures reproduce (continuous mode); the values below only matter when they do.</summary>
         public bool Reproduction { get; }

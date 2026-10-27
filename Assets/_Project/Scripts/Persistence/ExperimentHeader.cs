@@ -80,6 +80,7 @@ namespace Eden.Persistence
                 "crossover=off",
                 "body_genes=" + BodyGenesText(Plan.ExpressedBodyGenes),
                 "plasticity=" + (Plan.Plasticity ? "hebbian_output_layer" : "off"),
+                "food_shift_seconds=" + world.FoodShiftSeconds.ToString(culture),
                 "body_cost_exponents=size " + world.SizeCostExponent.ToString(culture) +
                 ";speed " + world.SpeedCostExponent.ToString(culture) +
                 ";sensor " + world.SensorCostExponent.ToString(culture) +

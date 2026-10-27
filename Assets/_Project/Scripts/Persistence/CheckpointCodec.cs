@@ -125,7 +125,7 @@ namespace Eden.Persistence
                 // A schema 1 genome is today's genome with neutral body genes, and a schema 3 config is today's config
                 // with the default body costs, which do nothing for the fixed body those files always have.
                 if (actual.Kind == JsonKind.Number && (expected.Key == "genomeSchema" && (actual.Text == "1" || actual.Text == "2") ||
-                                                       expected.Key == "configSchema" && (actual.Text == "3" || actual.Text == "4")))
+                                                       expected.Key == "configSchema" && (actual.Text == "3" || actual.Text == "4" || actual.Text == "5")))
                     continue;
                 if (actual.Kind != expected.Value.Kind || actual.Text != expected.Value.Text)
                     throw new CheckpointException($"Saved with {expected.Key} {actual.Text}; this build uses " +
@@ -268,6 +268,7 @@ namespace Eden.Persistence
             AddIfNotDefault(settings, "speedCostExponent", s.SpeedCostExponent, Defaults.SpeedCostExponent);
             AddIfNotDefault(settings, "sensorCostExponent", s.SensorCostExponent, Defaults.SensorCostExponent);
             AddIfNotDefault(settings, "efficiencyPowerExponent", s.EfficiencyPowerExponent, Defaults.EfficiencyPowerExponent);
+            AddIfNotDefault(settings, "foodShiftSeconds", s.FoodShiftSeconds, Defaults.FoodShiftSeconds);
             if (s.Reproduction)
             {
                 settings.Add("reproduction", JsonValue.NewObject()
@@ -322,7 +323,8 @@ namespace Eden.Persistence
                 SizeCostExponent = FloatOr(saved, "sizeCostExponent", Defaults.SizeCostExponent),
                 SpeedCostExponent = FloatOr(saved, "speedCostExponent", Defaults.SpeedCostExponent),
                 SensorCostExponent = FloatOr(saved, "sensorCostExponent", Defaults.SensorCostExponent),
-                EfficiencyPowerExponent = FloatOr(saved, "efficiencyPowerExponent", Defaults.EfficiencyPowerExponent)
+                EfficiencyPowerExponent = FloatOr(saved, "efficiencyPowerExponent", Defaults.EfficiencyPowerExponent),
+                FoodShiftSeconds = FloatOr(saved, "foodShiftSeconds", Defaults.FoodShiftSeconds)
             };
             // Absent means off; the other reproduction values then keep their defaults and change nothing.
             var reproduction = saved.TryGet("reproduction");

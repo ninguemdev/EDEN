@@ -27,6 +27,14 @@ namespace Eden.Domain
             IsEaten = true;
         }
 
+        /// <summary>Moves an uneaten item (the food shift of a changing world); it keeps its id and energy.</summary>
+        public void MoveTo(Float2 position)
+        {
+            if (IsEaten)
+                throw new InvalidOperationException($"Food {Id} was eaten.");
+            Position = position;
+        }
+
         /// <summary>Turns an eaten item that has left the world into a new one, so respawning does not allocate.</summary>
         internal void Reuse(FoodId id, Float2 position, float energy)
         {

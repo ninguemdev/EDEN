@@ -51,6 +51,12 @@ namespace Eden.Domain
         /// <summary>Acceleration follows the metabolism factor to this power (a thrifty metabolism gives less power).</summary>
         public float EfficiencyPowerExponent = 1f;
 
+        /// <summary>
+        /// A world that changes during a life (M7 experiment): food lives in the left half of the arena until this time and
+        /// in the right half from then on, uneaten food moving there at that moment. 0 (the default) keeps food anywhere.
+        /// </summary>
+        public float FoodShiftSeconds;
+
         // Continuous mode: local asexual reproduction. Off by default; isolated episodes never reproduce.
         /// <summary>Living, mature creatures with enough energy and no cooldown give birth near themselves.</summary>
         public bool Reproduction;

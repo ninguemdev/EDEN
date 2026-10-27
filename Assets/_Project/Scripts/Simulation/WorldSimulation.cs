@@ -131,6 +131,8 @@ namespace Eden.Simulation
             energy = default;
             LastCorrectedInputValues = 0;
 
+            if (config.FoodShifts && tick == config.FoodShiftTicks)
+                ShiftFood(tick);
             RunDueEvents(tick);
 
             var count = creatures.Count;
@@ -186,13 +188,21 @@ namespace Eden.Simulation
                 switch (due.Payload.Kind)
                 {
                     case SimulationEventKind.FoodRespawn:
-                        World.AddFood(WorldFactory.RandomArenaPosition(World.SpawnRandom, World.Config), World.Config.FoodEnergy);
+                        World.AddFood(WorldFactory.RandomFoodPosition(World.SpawnRandom, World.Config, tick), World.Config.FoodEnergy);
                         LastFoodRespawned++;
                         break;
                     default:
                         throw new InvalidOperationException($"Unknown event kind {due.Payload.Kind}.");
                 }
             }
+        }
+
+        // The changing world: every uneaten item moves, in id order, to a new place in the right half (spawn stream).
+        private void ShiftFood(long tick)
+        {
+            var food = World.Food;
+            for (var i = 0; i < food.Count; i++)
+                food[i].MoveTo(WorldFactory.RandomFoodPosition(World.SpawnRandom, World.Config, tick));
         }
 
         // Each food goes to the closest creature within its own eat radius; equal distance goes to the lower id.

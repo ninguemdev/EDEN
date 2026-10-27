@@ -24,6 +24,8 @@ namespace Eden.Editor
     ///   [-eden-presets minimal,standard,stress] and the battery options -logFile -
     /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.AblateBodyFromCommandLine
     ///   [-eden-variants ablation|extended|fixed,all,no-size,only-sensor,…] and the battery options -logFile -
+    /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.ComparePlasticityFromCommandLine
+    ///   [-eden-food-shift SECONDS (default 60)] and the battery options -logFile -
     /// -eden-body takes the expressed body genes: none (the fixed body, default), all, or a comma list of
     /// size, speed, sensor, efficiency; -eden-plasticity on|off turns lifetime plasticity on (default off). The battery
     /// commands accept both.
@@ -69,6 +71,17 @@ namespace Eden.Editor
                 var battery = new BatterySettings();
                 var output = ReadArguments(settings, battery);
                 ComparePresets(settings, battery, ReadPresets(), output);
+            });
+        }
+
+        public static void ComparePlasticityFromCommandLine()
+        {
+            RunAndExit(() =>
+            {
+                var settings = new EvolutionSettings { ExperimentSeed = 1 };
+                var battery = new BatterySettings();
+                var output = ReadArguments(settings, battery);
+                ComparePlasticity(settings, battery, ReadFoodShift(), output);
             });
         }
 
@@ -198,6 +211,51 @@ namespace Eden.Editor
                 foreach (var log in logs.Values)
                     log.Dispose();
             }
+        }
+
+        private static void ComparePlasticity(EvolutionSettings settings, BatterySettings battery, float foodShift,
+            string output)
+        {
+            var comparison = new PlasticityComparison(settings, battery, foodShift);
+            var directory = output ?? DefaultDirectory($"plasticity-seed{settings.ExperimentSeed}x{battery.Runs}");
+            var logs = new Dictionary<(string, int), EvolutionCsvLog>();
+            try
+            {
+                var result = comparison.Run((cell, run, report) =>
+                {
+                    if (!logs.TryGetValue((cell.Name, run), out var log))
+                    {
+                        var runSettings = comparison.Settings(cell).WithExperimentSeed(settings.ExperimentSeed + (ulong)run);
+                        log = RunLog(Path.Combine(directory, cell.Name), run, runSettings, battery, null);
+                        logs.Add((cell.Name, run), log);
+                    }
+
+                    log.Append(report);
+                    LogSummary(run, report.Summary);
+                });
+
+                PlasticityComparisonReport.Write(directory, comparison, result, UnityEngine.Application.version, DateTime.UtcNow);
+                foreach (var line in PlasticityComparisonReport.Describe(result))
+                    Debug.Log("EDEN plasticity | " + line);
+                Debug.Log("EDEN plasticity comparison finished: output=" + directory);
+            }
+            finally
+            {
+                foreach (var log in logs.Values)
+                    log.Dispose();
+            }
+        }
+
+        private static float ReadFoodShift()
+        {
+            var args = Environment.GetCommandLineArgs();
+            for (var i = 0; i + 1 < args.Length; i++)
+            {
+                if (args[i] == "-eden-food-shift")
+                    return float.Parse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture);
+            }
+
+            return 60f;
         }
 
         private static IReadOnlyList<BodyVariant> ReadVariants()
