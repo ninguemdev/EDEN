@@ -1,12 +1,15 @@
 using System.Collections.Generic;
 using Eden.Domain;
+using Eden.Simulation;
 using UnityEngine;
 
 namespace Eden.Presentation
 {
     /// <summary>
     /// Draws the world with pooled sprites: arena, food and creatures (body sized by its eat radius and colored by the
-    /// share of its own capacity it holds, a nose dot showing heading, a ring and the sensor range on the selected one). Creatures are drawn between their pose before the last tick (see
+    /// share of its own capacity it holds, a nose dot showing heading, a ring and the sensor range on the selected one;
+    /// for a selected creature with eyes, each eye's cone instead, with a dot on the food each eye sees now). Creatures
+    /// are drawn between their pose before the last tick (see
     /// <see cref="RememberPreviousTick"/>) and their current pose, so motion is smooth at any frame rate although ticks
     /// run at 20 Hz. Read-only: it never changes simulation state and never draws from simulation random streams.
     /// Arena units map 1:1 to Unity world units.
@@ -24,6 +27,16 @@ namespace Eden.Presentation
         private static readonly Color NoseColor = new Color32(14, 26, 31, 255);
         private static readonly Color SelectionColor = Color.white;
         private static readonly Color SensorColor = new Color(1f, 1f, 1f, 0.06f);
+        private static readonly Color TargetColor = Color.white;
+        private const int ConeSegments = 16;
+        private const float TargetDiameter = 0.55f;
+
+        // One tint per eye slot, so an eye keeps its color whatever it points at.
+        private static readonly Color32[] EyeColors =
+        {
+            new Color32(94, 214, 168, 46), new Color32(120, 170, 255, 46), new Color32(255, 190, 90, 46),
+            new Color32(225, 120, 225, 46)
+        };
 
         [SerializeField] private Camera targetCamera;
         [SerializeField] private Sprite circleSprite;
@@ -41,6 +54,19 @@ namespace Eden.Presentation
         private long previousTick = -1;
         private SpriteRenderer arena;
         private int frame;
+        private MeshFilter eyeCones;
+        private Mesh eyeMesh;
+        private readonly List<Vector3> coneVertices = new List<Vector3>();
+        private readonly List<Color32> coneColors = new List<Color32>();
+        private readonly List<int> coneTriangles = new List<int>();
+        private readonly SpriteRenderer[] eyeTargets = new SpriteRenderer[EyeSet.MaxEyes];
+        private readonly float[] eyeReading = new float[EyeChannels.Count];
+
+        /// <summary>Eye cones drawn in the last <see cref="Render"/> (those of the selected creature).</summary>
+        public int DrawnEyeCones { get; private set; }
+
+        /// <summary>Food items marked as seen by the selected creature's eyes in the last <see cref="Render"/>.</summary>
+        public int DrawnEyeTargets { get; private set; }
 
         public int VisibleCreatures => creatures.Count;
         public int VisibleFood => food.Count;
@@ -149,6 +175,7 @@ namespace Eden.Presentation
         public void Render(WorldState world, CreatureId? selected, float fraction = 1f)
         {
             frame++;
+            var drewEyes = false;
             var referenceRadius = world.Config.EatRadius;
             var interpolate = fraction < 1f && HasPrevious(world);
             LastFraction = interpolate ? Mathf.Clamp01(fraction) : 1f;
@@ -182,10 +209,18 @@ namespace Eden.Presentation
                 visual.Body.color = Color.Lerp(HungryColor, FedColor, Mathf.Clamp01(creature.Energy / body.MaxEnergy));
                 var isSelected = selected.HasValue && selected.Value == creature.Id;
                 visual.Selection.enabled = isSelected;
-                visual.Sensor.enabled = isSelected;
-                if (isSelected)
+                visual.Sensor.enabled = isSelected && creature.Eyes == null;
+                if (isSelected && creature.Eyes == null)
                     visual.Sensor.transform.localScale = Vector3.one * (2f * body.SensorRange / size);
+                if (isSelected && creature.Eyes != null)
+                {
+                    DrawEyes(world, creature, x, y, heading * Mathf.Deg2Rad);
+                    drewEyes = true;
+                }
             }
+
+            if (!drewEyes)
+                HideEyes();
 
             for (var i = 0; i < world.Food.Count; i++)
             {
@@ -202,6 +237,95 @@ namespace Eden.Presentation
             }
 
             RemoveStale();
+        }
+
+        // The selected creature's cones, from where it is drawn, and a dot on the food each eye sees in the current state.
+        private void DrawEyes(WorldState world, CreatureState creature, float x, float y, float heading)
+        {
+            EnsureEyeObjects();
+            coneVertices.Clear();
+            coneColors.Clear();
+            coneTriangles.Clear();
+            DrawnEyeCones = 0;
+            DrawnEyeTargets = 0;
+            var eyes = creature.Eyes;
+            var radius = creature.Body.EatRadius;
+            for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+            {
+                eyeTargets[slot].enabled = false;
+                if (!eyes.Has(slot))
+                    continue;
+                var eye = eyes[slot];
+                var axis = heading + eye.Orientation;
+                var origin = new Vector3(x + radius * Mathf.Cos(axis), y + radius * Mathf.Sin(axis), 0f);
+                var range = creature.Body.SensorRange * eye.Range;
+                var first = coneVertices.Count;
+                coneVertices.Add(origin);
+                coneColors.Add(EyeColors[slot]);
+                for (var k = 0; k <= ConeSegments; k++)
+                {
+                    var angle = axis - eye.Aperture * 0.5f + eye.Aperture * k / ConeSegments;
+                    coneVertices.Add(origin + new Vector3(range * Mathf.Cos(angle), range * Mathf.Sin(angle), 0f));
+                    coneColors.Add(EyeColors[slot]);
+                    if (k == 0)
+                        continue;
+                    coneTriangles.Add(first);
+                    coneTriangles.Add(first + k);
+                    coneTriangles.Add(first + k + 1);
+                }
+
+                DrawnEyeCones++;
+                Vision.See(world, creature, eyes, slot, eyeReading, 0);
+                if (eyeReading[(int)EyeChannel.FoodVisible] <= 0f)
+                    continue;
+                var at = Vision.EyePosition(world.Config, creature, eye);
+                var distance = range * (1f - eyeReading[(int)EyeChannel.FoodProximity]);
+                var direction = creature.Heading + Mathf.Atan2(eyeReading[(int)EyeChannel.FoodSin],
+                    eyeReading[(int)EyeChannel.FoodCos]);
+                eyeTargets[slot].transform.localPosition = new Vector3(at.X + distance * Mathf.Cos(direction),
+                    at.Y + distance * Mathf.Sin(direction), 0f);
+                eyeTargets[slot].enabled = true;
+                DrawnEyeTargets++;
+            }
+
+            eyeMesh.Clear();
+            eyeMesh.SetVertices(coneVertices);
+            eyeMesh.SetColors(coneColors);
+            eyeMesh.SetTriangles(coneTriangles, 0);
+            eyeCones.gameObject.SetActive(true);
+        }
+
+        private void HideEyes()
+        {
+            DrawnEyeCones = 0;
+            DrawnEyeTargets = 0;
+            if (eyeCones == null)
+                return;
+            eyeCones.gameObject.SetActive(false);
+            foreach (var target in eyeTargets)
+                target.enabled = false;
+        }
+
+        private void EnsureEyeObjects()
+        {
+            if (eyeCones != null)
+                return;
+            var cones = new GameObject("Eye cones");
+            cones.transform.SetParent(transform, false);
+            eyeCones = cones.AddComponent<MeshFilter>();
+            eyeMesh = new Mesh { name = "Eye cones" };
+            eyeMesh.MarkDynamic();
+            eyeCones.sharedMesh = eyeMesh;
+            var renderer = cones.AddComponent<MeshRenderer>();
+            renderer.sortingOrder = -1;
+            if (spriteMaterial != null)
+                renderer.sharedMaterial = spriteMaterial;
+            for (var slot = 0; slot < eyeTargets.Length; slot++)
+            {
+                eyeTargets[slot] = CreateRenderer("Eye target", transform, circleSprite, TargetColor, 4);
+                eyeTargets[slot].transform.localScale = Vector3.one * TargetDiameter;
+                eyeTargets[slot].enabled = false;
+            }
         }
 
         public Vector2 ScreenToArena(Vector2 screenPosition)

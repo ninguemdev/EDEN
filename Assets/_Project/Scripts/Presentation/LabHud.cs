@@ -10,8 +10,9 @@ namespace Eden.Presentation
     public readonly struct LabChoice
     {
         public LabChoice(LabMode mode, int preset, int seed, LabBrainKind brain, bool evolvingBody = false,
-            bool neat = false)
+            bool neat = false, bool eyes = false)
         {
+            Eyes = eyes;
             Mode = mode;
             Preset = preset;
             Seed = seed;
@@ -30,6 +31,9 @@ namespace Eden.Presentation
 
         /// <summary>The evolution breeds NEAT networks; otherwise the fixed-topology MLP (the control).</summary>
         public bool Neat { get; }
+
+        /// <summary>Creatures of the evolution sense through eyes (NEAT only); otherwise the legacy senses.</summary>
+        public bool Eyes { get; }
     }
 
     /// <summary>
@@ -44,6 +48,7 @@ namespace Eden.Presentation
         public static readonly string[] PresetChoices = { "Mínimo (32)", "Padrão (64)", "Estresse (128)" };
         public static readonly string[] BodyChoices = { "Fixo (controle)", "Evolutivo (4 genes)" };
         public static readonly string[] AlgorithmChoices = { "MLP fixa (controle)", "NEAT (topologia evolui)" };
+        public static readonly string[] SensesChoices = { "Legados (círculo + radar)", "Olhos (requer NEAT)" };
 
         private const string MlpNetworkTitle = "Rede neural (feed-forward: sem memória nem aprendizado)";
         private const string MlpNetworkLegend = "Neurônios: ativação (verde +, vermelho −). Linhas: peso × sinal.";
@@ -68,6 +73,7 @@ namespace Eden.Presentation
         private DropdownField brainField;
         private DropdownField bodyField;
         private DropdownField algorithmField;
+        private DropdownField sensesField;
         private Label networkTitle;
         private Label networkLegend;
         private IntegerField seedField;
@@ -246,7 +252,8 @@ namespace Eden.Presentation
             presetField.SetValueWithoutNotify(PresetChoices[choice.Preset]);
             brainField.SetValueWithoutNotify(BrainChoices[(int)choice.Brain]);
             bodyField.SetValueWithoutNotify(BodyChoices[choice.EvolvingBody ? 1 : 0]);
-            algorithmField.SetValueWithoutNotify(AlgorithmChoices[choice.Neat ? 1 : 0]);
+            algorithmField.SetValueWithoutNotify(AlgorithmChoices[choice.Neat || choice.Eyes ? 1 : 0]);
+            sensesField.SetValueWithoutNotify(SensesChoices[choice.Eyes ? 1 : 0]);
             seedField.SetValueWithoutNotify(choice.Seed);
             UpdateBrainField();
             resumeButton.style.display = evolutionAvailable && choice.Mode == LabMode.SharedWorld
@@ -269,7 +276,8 @@ namespace Eden.Presentation
                 return default;
             var brain = Math.Max(0, brainField.index);
             return new LabChoice((LabMode)Math.Max(0, modeField.index), Math.Max(0, presetField.index),
-                Math.Max(0, seedField.value), (LabBrainKind)brain, bodyField.index == 1, algorithmField.index == 1);
+                Math.Max(0, seedField.value), (LabBrainKind)brain, bodyField.index == 1, algorithmField.index == 1,
+                sensesField.index == 1);
         }
 
         /// <summary>True while the user types into a text field, so key shortcuts must be ignored.</summary>
@@ -328,6 +336,7 @@ namespace Eden.Presentation
             brainField.SetEnabled(modeField.index == (int)LabMode.SharedWorld);
             bodyField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             algorithmField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+            sensesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             seedGenomesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
         }
 
@@ -392,6 +401,20 @@ namespace Eden.Presentation
             algorithmField = root.Q<DropdownField>("algorithm-field");
             algorithmField.choices = new List<string>(AlgorithmChoices);
             algorithmField.index = 0;
+            sensesField = root.Q<DropdownField>("senses-field");
+            sensesField.choices = new List<string>(SensesChoices);
+            sensesField.index = 0;
+            // Eyes need NEAT: choosing eyes picks NEAT, and choosing the MLP control goes back to the legacy senses.
+            sensesField.RegisterValueChangedCallback(change =>
+            {
+                if (sensesField.index == 1)
+                    algorithmField.index = 1;
+            });
+            algorithmField.RegisterValueChangedCallback(change =>
+            {
+                if (algorithmField.index == 0)
+                    sensesField.index = 0;
+            });
             seedField = root.Q<IntegerField>("seed-field");
             seedField.RegisterValueChangedCallback(change =>
             {

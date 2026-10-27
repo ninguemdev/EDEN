@@ -45,7 +45,8 @@ namespace Eden.Presentation
     /// reaches the simulation. In evolution mode the world shown is the isolated episode being evaluated. The run can
     /// be saved to and loaded from a checkpoint between ticks.
     /// Command line (builds): -eden-mode shared|evolution, -eden-preset minimal|standard|stress,
-    /// -eden-brain heuristic|random|neural, -eden-body fixed|evolving, -eden-algorithm mlp|neat, -eden-reproduction on|off,
+    /// -eden-brain heuristic|random|neural, -eden-body fixed|evolving, -eden-algorithm mlp|neat, -eden-senses legacy|eyes,
+    /// -eden-reproduction on|off,
     /// -eden-seed N,
     /// -eden-select ID, -eden-max, and for a measured run
     /// -eden-benchmark SECONDS [-eden-benchmark-warmup SECONDS] [-eden-benchmark-output DIR] (see <see cref="LabBenchmark"/>).
@@ -68,12 +69,14 @@ namespace Eden.Presentation
         [Tooltip("A new evolution expresses and mutates all body genes; off keeps the fixed reference body (control).")]
         [SerializeField] private bool evolvingBody;
         [SerializeField] private bool neat;
+        [SerializeField] private bool eyes;
         [SerializeField] private bool writeMetrics = true;
         [SerializeField] private WorldView worldView;
         [SerializeField] private LabHud hud;
 
         private readonly NeuralSnapshot networkSnapshot = new NeuralSnapshot();
         private readonly NeatSnapshot neatSnapshot = new NeatSnapshot();
+        private readonly float[] observedEyes = new float[NeuralContract.Eyes.InputCount];
         private readonly Stopwatch budgetWatch = new Stopwatch();
         private BrainController controller;
         private MetricsRecorder metrics;
@@ -100,6 +103,9 @@ namespace Eden.Presentation
 
         /// <summary>Algorithm choice for the next evolution (see <see cref="LabChoice.Neat"/>).</summary>
         public bool Neat => neat;
+
+        /// <summary>Senses choice for the next evolution (see <see cref="LabChoice.Eyes"/>).</summary>
+        public bool Eyes => eyes;
 
         /// <summary>
         /// World rules of the lab, as edited in the Inspector (or by -eden-reproduction); a preset sets the population and
@@ -167,7 +173,8 @@ namespace Eden.Presentation
             seed = Math.Max(0, choice.Seed);
             brain = choice.Brain == LabBrainKind.Evolved && Evolution == null ? LabBrainKind.Heuristic : choice.Brain;
             evolvingBody = choice.EvolvingBody;
-            neat = choice.Neat;
+            neat = choice.Neat || choice.Eyes;
+            eyes = choice.Eyes;
             StartRun();
         }
 
@@ -186,7 +193,7 @@ namespace Eden.Presentation
                 StartSharedWorld();
             ResetClock(Simulation.World.Config.TicksPerSecond);
             worldView.Bind(Simulation.World);
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat), Evolution != null);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes), Evolution != null);
             RefreshHud();
         }
 
@@ -200,7 +207,7 @@ namespace Eden.Presentation
             sharedGenomes = null;
             ClearSelection();
             ShowEpisode();
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat), true);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes), true);
             RefreshHud();
         }
 
@@ -310,6 +317,7 @@ namespace Eden.Presentation
             brain = loadedBrain;
             evolvingBody = session != null && session.Evolution.Plan.ExpressedBodyGenes != BodyGeneSet.None;
             neat = session != null && session.Evolution.Plan.Algorithm == EvolutionAlgorithm.Neat;
+            eyes = session != null && session.Evolution.Plan.Senses == Senses.Eyes;
             Evolution = session;
             EvolutionDirectory = null;
             MetricsDirectory = null;
@@ -339,7 +347,7 @@ namespace Eden.Presentation
             if (mode == LabMode.SharedWorld && world.IsExtinct)
                 Clock.Pause();
             worldView.Bind(world.World);
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat), Evolution != null);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes), Evolution != null);
             ShowCheckpointStatus(LabText.CheckpointLoaded(CheckpointPath, world.World.Tick, EvolutionShown, problem));
             return true;
         }
@@ -765,7 +773,8 @@ namespace Eden.Presentation
             sharedGenomes = null;
             var evolutionSettings = Preset.Evolution((ulong)seed);
             evolutionSettings.ExpressedBodyGenes = evolvingBody ? BodyGeneSet.All : BodyGeneSet.None;
-            evolutionSettings.Algorithm = neat ? EvolutionAlgorithm.Neat : EvolutionAlgorithm.Mlp;
+            evolutionSettings.Algorithm = neat || eyes ? EvolutionAlgorithm.Neat : EvolutionAlgorithm.Mlp;
+            evolutionSettings.Senses = eyes ? Senses.Eyes : Senses.Legacy;
             Evolution = CreateEvolution(evolutionSettings);
             BrainName = EvolutionBrainName(Evolution);
             if (writeMetrics)
@@ -914,8 +923,12 @@ namespace Eden.Presentation
                     continue;
                 controller.TryGetLastAction(id, out var action);
                 controller.TryGetBrain(id, out var creatureBrain);
-                var text = LabText.Creature(creature, Sensors.Observe(Simulation.World, creature), action,
-                    creatureBrain?.Name ?? BrainName, Simulation.World.Config);
+                TryObserve(id, out var sensed);
+                Observation? decided = null;
+                if (creature.Eyes != null && controller.TryGetWatchedDecision(out var lastDecision))
+                    decided = lastDecision;
+                var text = LabText.Creature(creature, sensed, action, creatureBrain?.Name ?? BrainName,
+                    Simulation.World.Config, decided);
                 if (creatureBrain is MlpBrain mlp)
                 {
                     controller.TryGetState(id, out var state);
@@ -983,6 +996,7 @@ namespace Eden.Presentation
         private static string EvolutionBrainName(EvolutionSession session) =>
             session.Evolution.Plan.Algorithm == EvolutionAlgorithm.Neat ? NeatBrain.BrainName : MlpBrain.BrainName;
 
+        // What the creature senses now (for a creature with eyes, its eye inputs too, in the runner's own buffer).
         private bool TryObserve(CreatureId id, out Observation observation)
         {
             foreach (var creature in Simulation.World.Creatures)
@@ -990,6 +1004,8 @@ namespace Eden.Presentation
                 if (creature.Id != id)
                     continue;
                 observation = Sensors.Observe(Simulation.World, creature);
+                if (creature.Eyes != null)
+                    observation = Sensors.WithEyes(observation, Simulation.World, creature, observedEyes);
                 return true;
             }
 
@@ -1018,6 +1034,9 @@ namespace Eden.Presentation
                         break;
                     case "-eden-algorithm" when value == "mlp" || value == "neat":
                         neat = value == "neat";
+                        break;
+                    case "-eden-senses" when value == "legacy" || value == "eyes":
+                        eyes = value == "eyes";
                         break;
                     case "-eden-reproduction" when value == "on" || value == "off":
                         settings.Reproduction = value == "on";

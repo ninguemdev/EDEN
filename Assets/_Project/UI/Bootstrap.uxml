@@ -11,6 +11,7 @@
                     <ui:DropdownField name="brain-field" label="Cérebro" class="lab-field" />
                     <ui:DropdownField name="body-field" label="Corpo" class="lab-field" />
                     <ui:DropdownField name="algorithm-field" label="Algoritmo" class="lab-field" />
+                    <ui:DropdownField name="senses-field" label="Sentidos" class="lab-field" />
                     <ui:IntegerField name="seed-field" label="Seed" value="1" class="lab-field" />
                     <ui:VisualElement class="lab-row">
                         <ui:TextField name="seed-genomes-field" label="Pool de genomas" class="lab-field" style="flex-grow: 1;" />

@@ -20,6 +20,7 @@ namespace Eden.Application
         private readonly int decisionInterval;
         private CreatureId? watched;
         private Observation watchedObservation;
+        private float[] watchedEyes;
         private bool hasWatchedDecision;
 
         public BrainController(SimulationConfig config, Func<CreatureId, IBrain> brainFor)
@@ -58,7 +59,7 @@ namespace Eden.Application
                 slot.TicksUntilDecision = decisionInterval;
                 if (watched.HasValue && watched.Value == creature)
                 {
-                    watchedObservation = observation;
+                    watchedObservation = KeepEyes(observation);
                     hasWatchedDecision = true;
                 }
             }
@@ -92,7 +93,25 @@ namespace Eden.Application
             hasWatchedDecision = false;
         }
 
-        /// <summary>Observation the watched creature's brain used for its current held action, if it decided since.</summary>
+        // Eye inputs live in the simulation's buffer for one tick; the watched decision keeps its own copy.
+        private Observation KeepEyes(in Observation observation)
+        {
+            var eyes = observation.EyeInputs;
+            if (eyes == null)
+                return observation;
+            if (watchedEyes == null || watchedEyes.Length != eyes.Length)
+                watchedEyes = new float[eyes.Length];
+            Array.Copy(eyes, watchedEyes, eyes.Length);
+            return new Observation(observation.Energy, observation.Age, observation.VelocityForward,
+                observation.VelocityLeft, observation.FoodSin, observation.FoodCos, observation.FoodProximity,
+                observation.FoodVisible, observation.WallFront, observation.WallRight, observation.WallBack,
+                observation.WallLeft, watchedEyes);
+        }
+
+        /// <summary>
+        /// Observation the watched creature's brain used for its current held action, if it decided since (its eye
+        /// inputs are a copy that later ticks do not change).
+        /// </summary>
         public bool TryGetWatchedDecision(out Observation observation)
         {
             observation = watchedObservation;
