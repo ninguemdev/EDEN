@@ -3,6 +3,34 @@ using System.Collections.Generic;
 
 namespace Eden.Domain
 {
+    /// <summary>
+    /// What one eye reports, in this order, in <see cref="NeuralContract.Eyes"/>. Directions are sine and cosine of the
+    /// angle in the body's frame (positive sine = to the left, cosine 1 = straight ahead); proximity is
+    /// 1 − distance / the eye's range. A channel whose target is not seen reads 0. Persisted as channel ids: never
+    /// renumber.
+    /// </summary>
+    public enum EyeChannel
+    {
+        /// <summary>1 when the slot holds an eye, 0 for an absent eye.</summary>
+        Present = 0,
+        FoodVisible = 1,
+        FoodSin = 2,
+        FoodCos = 3,
+        FoodProximity = 4,
+
+        /// <summary>1 when part of the arena's border lies inside the cone and range.</summary>
+        BarrierVisible = 5,
+        BarrierSin = 6,
+        BarrierCos = 7,
+        BarrierProximity = 8
+    }
+
+    /// <summary>Number of <see cref="EyeChannel"/> values per eye.</summary>
+    public static class EyeChannels
+    {
+        public const int Count = 9;
+    }
+
     /// <summary>One brain input or output: an id that keeps a single meaning forever, and a name for people.</summary>
     public readonly struct NeuralChannel
     {
@@ -43,7 +71,29 @@ namespace Eden.Domain
         public static readonly NeuralContract Legacy = new NeuralContract(LegacyId, LegacyInputs(),
             new[] { new NeuralChannel(0, "Thrust"), new NeuralChannel(1, "Turn"), new NeuralChannel(2, "Strafe") });
 
-        private static readonly NeuralContract[] Known = { Legacy };
+        /// <summary>Id of <see cref="Eyes"/>.</summary>
+        public const string EyesId = "eyes-v1";
+
+        /// <summary>Inputs of <see cref="Eyes"/> about the body itself, before the eye channels.</summary>
+        public const int EyesBodyInputs = 4;
+
+        /// <summary>Channel ids of eye slot s start at <see cref="EyeChannelBase"/> + s × <see cref="EyeChannelStride"/>.</summary>
+        public const int EyeChannelBase = 100;
+
+        public const int EyeChannelStride = 16;
+
+        /// <summary>
+        /// Senses through eyes: energy, age and the two velocities (ids 0–3, the same meaning and ids as in
+        /// <see cref="Legacy"/>), then, for each of the <see cref="EyeSet.MaxEyes"/> eye slots in slot order, the
+        /// <see cref="EyeChannel"/> channels, with ids <see cref="EyeChannelBase"/> + slot × <see cref="EyeChannelStride"/>
+        /// + channel. Every slot is always reserved, so an absent eye reads 0 everywhere (present 0) and is told apart
+        /// from a present eye that sees nothing (present 1). There is no wall radar and no circular food sense: only what
+        /// an eye's cone and range reach. Same outputs as <see cref="Legacy"/>.
+        /// </summary>
+        public static readonly NeuralContract Eyes = new NeuralContract(EyesId, EyesInputs(),
+            new[] { new NeuralChannel(0, "Thrust"), new NeuralChannel(1, "Turn"), new NeuralChannel(2, "Strafe") });
+
+        private static readonly NeuralContract[] Known = { Legacy, Eyes };
 
         private readonly NeuralChannel[] inputs;
         private readonly NeuralChannel[] outputs;
@@ -86,6 +136,39 @@ namespace Eden.Domain
         }
 
         public override string ToString() => Id;
+
+        /// <summary>Stable id of one channel of an eye slot.</summary>
+        public static int EyeChannelId(int slot, EyeChannel channel) =>
+            EyeChannelBase + CheckSlot(slot) * EyeChannelStride + (int)channel;
+
+        /// <summary>Position of one channel of an eye slot in the input vector of <see cref="Eyes"/>.</summary>
+        public static int EyeInputIndex(int slot, EyeChannel channel) =>
+            EyesBodyInputs + CheckSlot(slot) * EyeChannels.Count + (int)channel;
+
+        private static int CheckSlot(int slot)
+        {
+            if (slot < 0 || slot >= EyeSet.MaxEyes)
+                throw new ArgumentOutOfRangeException(nameof(slot), $"Eye slots are 0 to {EyeSet.MaxEyes - 1}.");
+            return slot;
+        }
+
+        private static NeuralChannel[] EyesInputs()
+        {
+            var channels = new NeuralChannel[EyesBodyInputs + EyeSet.MaxEyes * EyeChannels.Count];
+            for (var i = 0; i < EyesBodyInputs; i++)
+                channels[i] = new NeuralChannel(i, ObservationLimits.Name(i));
+            for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+            {
+                for (var c = 0; c < EyeChannels.Count; c++)
+                {
+                    var channel = (EyeChannel)c;
+                    channels[EyesBodyInputs + slot * EyeChannels.Count + c] =
+                        new NeuralChannel(EyeChannelBase + slot * EyeChannelStride + c, $"Eye{slot}{channel}");
+                }
+            }
+
+            return channels;
+        }
 
         private static NeuralChannel[] LegacyInputs()
         {
