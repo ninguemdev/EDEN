@@ -359,6 +359,13 @@ namespace Eden.Presentation
             }
         }
 
+        /// <summary>Copies <see cref="GenomeExportDirectory"/> to the system clipboard (what "Copiar pasta" does).</summary>
+        public void CopyGenomeDirectory()
+        {
+            GUIUtility.systemCopyBuffer = GenomeExportDirectory;
+            ShowGenomeExportStatus(LabText.GenomeDirectoryCopied(GenomeExportDirectory));
+        }
+
         // What the selected creature's genome is, if it has one: the episode's candidate in Isolated Evolution, or a
         // shared-world creature with a neural brain (founder or born). Null otherwise, including no selection.
         private GenomeRecord ResolveExportableGenome()
@@ -546,6 +553,8 @@ namespace Eden.Presentation
                 hud.SaveClicked += () => SaveCheckpoint();
                 hud.LoadClicked += () => LoadCheckpoint();
                 hud.ExportGenomeClicked += () => ExportGenome();
+                hud.CopyGenomeDirectoryClicked += CopyGenomeDirectory;
+                hud.UseExportDirectoryClicked += () => hud.SetSeedGenomesDirectory(GenomeExportDirectory);
                 hud.PauseClicked += TogglePause;
                 hud.StepClicked += RequestStep;
                 hud.SlowerClicked += () => ScaleSpeed(0.5f);

@@ -11,7 +11,10 @@
                     <ui:DropdownField name="brain-field" label="Cérebro" class="lab-field" />
                     <ui:DropdownField name="body-field" label="Corpo" class="lab-field" />
                     <ui:IntegerField name="seed-field" label="Seed" value="1" class="lab-field" />
-                    <ui:TextField name="seed-genomes-field" label="Pool de genomas" class="lab-field" />
+                    <ui:VisualElement class="lab-row">
+                        <ui:TextField name="seed-genomes-field" label="Pool de genomas" class="lab-field" style="flex-grow: 1;" />
+                        <ui:Button name="use-export-directory-button" text="Usar exportação" class="lab-button" />
+                    </ui:VisualElement>
                     <ui:VisualElement class="lab-row">
                         <ui:Button name="start-button" text="Iniciar" class="lab-button lab-button--primary" />
                         <ui:Button name="resume-evolution-button" text="Voltar à evolução" class="lab-button" style="display: none;" />
@@ -40,7 +43,10 @@
         <ui:VisualElement name="inspector-panel" picking-mode="Ignore" style="display: none; width: 420px; max-height: 100%; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; background-color: rgba(8, 16, 20, 0.82); overflow: hidden;">
             <ui:ScrollView name="inspector-panel-scroll" mode="Vertical" style="flex-grow: 1; height: 100%; padding: 14px;">
                 <ui:Label name="inspector" text="" style="font-size: 15px; color: rgb(214, 226, 220); white-space: normal;" />
-                <ui:Button name="export-genome-button" text="Exportar genoma" class="lab-button" style="display: none; margin-top: 8px;" />
+                <ui:VisualElement name="export-genome-row" class="lab-row" style="display: none; margin-top: 8px;">
+                    <ui:Button name="export-genome-button" text="Exportar genoma" class="lab-button" />
+                    <ui:Button name="copy-genome-directory-button" text="Copiar pasta" class="lab-button" />
+                </ui:VisualElement>
                 <ui:Label name="export-status" text="" style="display: none; font-size: 12px; color: rgb(160, 190, 180); white-space: normal; margin-top: 4px;" />
                 <ui:VisualElement name="network-panel" picking-mode="Ignore" style="display: none; margin-top: 10px;">
                     <ui:Label name="network-title" text="Rede neural (feed-forward: sem memória nem aprendizado)" style="font-size: 14px; -unity-font-style: bold; color: rgb(226, 240, 233); white-space: normal;" />

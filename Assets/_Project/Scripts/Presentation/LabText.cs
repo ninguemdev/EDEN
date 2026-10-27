@@ -318,6 +318,8 @@ namespace Eden.Presentation
 
         public static string GenomePoolFailed(string reason) => $"Pool de genomas não usado (geração 0 aleatória): {reason}";
 
+        public static string GenomeDirectoryCopied(string path) => $"Pasta copiada para a área de transferência: {path}";
+
         private static string Position(long tick, EvolutionSession evolution) =>
             evolution == null ? $"tick {tick}" : $"geração {evolution.Job.Generation}, tick {tick} do episódio";
 

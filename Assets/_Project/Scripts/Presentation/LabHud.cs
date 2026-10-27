@@ -50,6 +50,7 @@ namespace Eden.Presentation
         private VisualElement networkPanel;
         private VisualElement chartPanel;
         private VisualElement controls;
+        private VisualElement exportGenomeRow;
         private DropdownField modeField;
         private DropdownField presetField;
         private DropdownField brainField;
@@ -60,6 +61,8 @@ namespace Eden.Presentation
         private Button pauseButton;
         private Button maxButton;
         private Button exportGenomeButton;
+        private Button copyGenomeDirectoryButton;
+        private Button useExportDirectoryButton;
         private bool inspectorVisible;
         private LabChoice? shownChoice;
         private bool shownEvolution;
@@ -75,6 +78,8 @@ namespace Eden.Presentation
         public event Action SaveClicked;
         public event Action LoadClicked;
         public event Action ExportGenomeClicked;
+        public event Action CopyGenomeDirectoryClicked;
+        public event Action UseExportDirectoryClicked;
 
         public string RunText => Bind() ? runStats.text : string.Empty;
         public string CheckpointText => Bind() ? checkpointStatus.text : string.Empty;
@@ -85,6 +90,13 @@ namespace Eden.Presentation
         /// starts. Only meaningful in <see cref="LabMode.IsolatedEvolution"/>, where the field is enabled.
         /// </summary>
         public string SeedGenomesDirectory => Bind() ? seedGenomesField.value?.Trim() ?? string.Empty : string.Empty;
+
+        /// <summary>Fills the seed-pool field (what "Usar exportação" does), e.g. with the export directory.</summary>
+        public void SetSeedGenomesDirectory(string path)
+        {
+            if (Bind())
+                seedGenomesField.SetValueWithoutNotify(path ?? string.Empty);
+        }
 
         public bool NetworkVisible { get; private set; }
         public bool ChartVisible { get; private set; }
@@ -119,12 +131,12 @@ namespace Eden.Presentation
             inspector.text = text ?? string.Empty;
         }
 
-        /// <summary>Shows or hides the "Exportar genoma" button (the selected creature has, or has not, an exportable genome).</summary>
+        /// <summary>Shows or hides "Exportar genoma"/"Copiar pasta" (the selected creature has, or has not, an exportable genome).</summary>
         public void SetExportAvailable(bool available)
         {
             if (!Bind())
                 return;
-            exportGenomeButton.style.display = available ? DisplayStyle.Flex : DisplayStyle.None;
+            exportGenomeRow.style.display = available ? DisplayStyle.Flex : DisplayStyle.None;
             if (!available)
                 ShowExportStatus(null);
         }
@@ -293,9 +305,10 @@ namespace Eden.Presentation
             var controlsElement = root.Q<VisualElement>("experiment-panel");
             var checkpointLabel = root.Q<Label>("checkpoint-status");
             var exportStatusLabel = root.Q<Label>("export-status");
+            var exportRowElement = root.Q<VisualElement>("export-genome-row");
             if (stats == null || inspectorLabel == null || inspectorElement == null || networkElement == null ||
                 host == null || chartElement == null || chartHost == null || legend == null || controlsElement == null ||
-                checkpointLabel == null || exportStatusLabel == null)
+                checkpointLabel == null || exportStatusLabel == null || exportRowElement == null)
                 return false;
 
             inspector = inspectorLabel;
@@ -304,6 +317,7 @@ namespace Eden.Presentation
             chartPanel = chartElement;
             controls = controlsElement;
             exportStatus = exportStatusLabel;
+            exportGenomeRow = exportRowElement;
             Graph = new NetworkGraph();
             host.Add(Graph);
             Chart = new GenerationChart();
@@ -330,6 +344,8 @@ namespace Eden.Presentation
                     seedField.SetValueWithoutNotify(0);
             });
             seedGenomesField = root.Q<TextField>("seed-genomes-field");
+            useExportDirectoryButton = root.Q<Button>("use-export-directory-button");
+            useExportDirectoryButton.clicked += () => UseExportDirectoryClicked?.Invoke();
 
             root.Q<Button>("start-button").clicked += () => StartClicked?.Invoke();
             resumeButton = root.Q<Button>("resume-evolution-button");
@@ -345,6 +361,8 @@ namespace Eden.Presentation
             root.Q<Button>("load-button").clicked += () => LoadClicked?.Invoke();
             exportGenomeButton = root.Q<Button>("export-genome-button");
             exportGenomeButton.clicked += () => ExportGenomeClicked?.Invoke();
+            copyGenomeDirectoryButton = root.Q<Button>("copy-genome-directory-button");
+            copyGenomeDirectoryButton.clicked += () => CopyGenomeDirectoryClicked?.Invoke();
             checkpointStatus = checkpointLabel;
             runStats = stats;
             ApplyChoice();
