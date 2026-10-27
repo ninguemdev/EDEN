@@ -56,9 +56,11 @@ namespace Eden.Evolution
         }
 
         /// <summary>
-        /// Compatibility distance δ = c1·E/N + c2·D/N + c3·W̄: E excess and D disjoint connections, W̄ the mean
+        /// Compatibility distance δ = c1·E/N + c2·D/N + c3·W̄ (+ c4·O): E excess and D disjoint connections, W̄ the mean
         /// absolute weight difference of matching connections (0 when none match), N the larger connection count, or 1
-        /// when both genomes have fewer than <see cref="NeatRules.NormalizationThreshold"/> connections.
+        /// when both genomes have fewer than <see cref="NeatRules.NormalizationThreshold"/> connections. O is the eye
+        /// difference (<see cref="EyeDifference"/>), weighted by <see cref="NeatRules.EyeCompatibilityCoefficient"/>: an
+        /// experimental extension of the EDEN, off (0) by default, when δ is the purely neural distance of NEAT.
         /// </summary>
         public static float Distance(Genome first, Genome second, NeatRules rules)
         {
@@ -71,8 +73,46 @@ namespace Eden.Evolution
             var larger = Math.Max(a.Connections.Count, b.Connections.Count);
             var n = larger < rules.NormalizationThreshold || larger == 0 ? 1f : larger;
             var meanDifference = matching == 0 ? 0f : (float)(weightDifference / matching);
-            return rules.ExcessCoefficient * excess / n + rules.DisjointCoefficient * disjoint / n +
-                   rules.WeightDifferenceCoefficient * meanDifference;
+            var neural = rules.ExcessCoefficient * excess / n + rules.DisjointCoefficient * disjoint / n +
+                         rules.WeightDifferenceCoefficient * meanDifference;
+            if (rules.EyeCompatibilityCoefficient == 0f || first.Eyes == null || second.Eyes == null)
+                return neural;
+            return neural + rules.EyeCompatibilityCoefficient * EyeDifference(first.Eyes, second.Eyes);
+        }
+
+        /// <summary>
+        /// How different two sets of eyes are, slot by slot (eyes are compared by identity, never by angle): 1 for a slot
+        /// only one set fills, and for a slot both fill the mean of their normalized differences in orientation (the
+        /// shorter way around, / 180°), aperture (/ its range of limits) and range (/ its range of limits). Between 0 and
+        /// <see cref="EyeSet.MaxEyes"/>.
+        /// </summary>
+        public static float EyeDifference(EyeSet a, EyeSet b)
+        {
+            if (a == null)
+                throw new ArgumentNullException(nameof(a));
+            if (b == null)
+                throw new ArgumentNullException(nameof(b));
+            var total = 0f;
+            for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+            {
+                if (a.Has(slot) != b.Has(slot))
+                {
+                    total += 1f;
+                    continue;
+                }
+
+                if (!a.Has(slot))
+                    continue;
+                var x = a[slot];
+                var y = b[slot];
+                var turn = Math.Abs(x.Orientation - y.Orientation);
+                if (turn > MathF.PI)
+                    turn = 2f * MathF.PI - turn;
+                total += (turn / MathF.PI + Math.Abs(x.Aperture - y.Aperture) / (Eye.MaxAperture - Eye.MinAperture) +
+                          Math.Abs(x.Range - y.Range) / (Eye.MaxRange - Eye.MinRange)) / 3f;
+            }
+
+            return total;
         }
 
         // Both lists are in innovation order: a merge walk classifies every connection once.

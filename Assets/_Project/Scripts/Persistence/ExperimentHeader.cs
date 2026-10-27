@@ -118,6 +118,7 @@ namespace Eden.Persistence
                     "c2 " + neat.DisjointCoefficient.ToString(culture),
                     "c3 " + neat.WeightDifferenceCoefficient.ToString(culture),
                     "normalization_threshold " + neat.NormalizationThreshold.ToString(culture),
+                    "c4_eyes " + neat.EyeCompatibilityCoefficient.ToString(culture),
                     "compatibility_threshold " + neat.CompatibilityThreshold.ToString(culture),
                     "stagnation " + neat.StagnationGenerations.ToString(culture),
                     "protected_species " + neat.ProtectedSpecies.ToString(culture),

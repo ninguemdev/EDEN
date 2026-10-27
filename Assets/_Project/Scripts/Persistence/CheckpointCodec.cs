@@ -218,6 +218,7 @@ namespace Eden.Persistence
                 DisjointCoefficient = saved["disjointCoefficient"].Float(),
                 WeightDifferenceCoefficient = saved["weightDifferenceCoefficient"].Float(),
                 NormalizationThreshold = saved["normalizationThreshold"].Int(),
+                EyeCompatibilityCoefficient = saved["eyeCompatibilityCoefficient"].Float(),
                 CompatibilityThreshold = saved["compatibilityThreshold"].Float(),
                 StagnationGenerations = saved["stagnationGenerations"].Int(),
                 ProtectedSpecies = saved["protectedSpecies"].Int(),
@@ -249,6 +250,7 @@ namespace Eden.Persistence
                 .Add("disjointCoefficient", JsonValue.Of(neat.DisjointCoefficient))
                 .Add("weightDifferenceCoefficient", JsonValue.Of(neat.WeightDifferenceCoefficient))
                 .Add("normalizationThreshold", JsonValue.Of(neat.NormalizationThreshold))
+                .Add("eyeCompatibilityCoefficient", JsonValue.Of(neat.EyeCompatibilityCoefficient))
                 .Add("compatibilityThreshold", JsonValue.Of(neat.CompatibilityThreshold))
                 .Add("stagnationGenerations", JsonValue.Of(neat.StagnationGenerations))
                 .Add("protectedSpecies", JsonValue.Of(neat.ProtectedSpecies))
