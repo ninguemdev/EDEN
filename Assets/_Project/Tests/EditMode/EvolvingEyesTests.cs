@@ -116,6 +116,8 @@ namespace Eden.Tests.EditMode
             settings.Senses = Senses.Eyes;
             settings.EvolvingEyes = evolvingEyes;
             settings.Neat.EyeMutationProbability = 0.5f;
+            settings.Neat.EyeAddProbability = 0f; // traits only here; adding and removing eyes is MultipleEyesTests
+            settings.Neat.EyeRemoveProbability = 0f;
             return settings;
         }
     }

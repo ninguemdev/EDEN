@@ -90,7 +90,9 @@ namespace Eden.Persistence
                 lines.Add(Plan.EvolvingEyes
                     ? "eyes=evolving;probability " + neatEyes.EyeMutationProbability.ToString(culture) + ";orientation_sigma " +
                       neatEyes.EyeOrientationSigma.ToString(culture) + ";aperture_sigma " +
-                      neatEyes.EyeApertureSigma.ToString(culture) + ";range_sigma " + neatEyes.EyeRangeSigma.ToString(culture)
+                      neatEyes.EyeApertureSigma.ToString(culture) + ";range_sigma " + neatEyes.EyeRangeSigma.ToString(culture) +
+                      ";add " + neatEyes.EyeAddProbability.ToString(culture) + ";remove " +
+                      neatEyes.EyeRemoveProbability.ToString(culture)
                     : "eyes=fixed");
             }
 

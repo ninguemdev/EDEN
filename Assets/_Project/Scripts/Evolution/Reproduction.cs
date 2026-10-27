@@ -287,9 +287,12 @@ namespace Eden.Evolution
         /// <summary>
         /// Eyes mutated by <paramref name="rules"/>: for each slot holding an eye, in slot order, its orientation, aperture
         /// and range in that order, each with one coin and, when it mutates, one Gaussian sample. Orientation wraps around
-        /// ±π; aperture and range stay within the <see cref="Eye"/> limits. Slots keep their identity: an eye never moves
-        /// to another slot, and empty slots stay empty and draw nothing. Disabled rules return the same set and draw
-        /// nothing.
+        /// ±π; aperture and range stay within the <see cref="Eye"/> limits. Then the structure: one coin to add an eye
+        /// (only while a slot is free), which duplicates an eye drawn among the present ones (one draw) into the lowest
+        /// free slot with each trait nudged by one Gaussian sample, so it starts close to the original and can diverge;
+        /// then one coin to remove an eye (only while there are at least two, so a genome never goes blind), which draws
+        /// the eye to clear. Slots keep their identity: an eye never moves to another slot, so the other eyes' input
+        /// channels keep their meaning. Disabled rules return the same set and draw nothing.
         /// </summary>
         public static EyeSet MutateEyes(EyeSet eyes, EyeMutation rules, GaussianSampler random)
         {
@@ -316,6 +319,67 @@ namespace Eden.Evolution
                 if (random.Source.NextFloat() < rules.Probability)
                     range = Math.Min(Eye.MaxRange, Math.Max(Eye.MinRange, range + (float)(rules.RangeSigma * random.NextStandard())));
                 slots[slot] = new Eye(orientation, aperture, range);
+            }
+
+            var count = eyes.Count;
+            if (random.Source.NextFloat() < rules.AddProbability && count < EyeSet.MaxEyes)
+            {
+                var source = slots[NthPresent(slots, (int)random.Source.NextUInt((uint)count))].Value;
+                var free = 0;
+                while (slots[free].HasValue)
+                    free++;
+                slots[free] = Nudge(source, rules, random);
+                count++;
+            }
+
+            if (random.Source.NextFloat() < rules.RemoveProbability && count > 1)
+                slots[NthPresent(slots, (int)random.Source.NextUInt((uint)count))] = null;
+            return new EyeSet(slots);
+        }
+
+        // Index of the n-th (0-based) slot holding an eye.
+        private static int NthPresent(Eye?[] slots, int n)
+        {
+            for (var slot = 0; slot < slots.Length; slot++)
+            {
+                if (slots[slot].HasValue && n-- == 0)
+                    return slot;
+            }
+
+            throw new ArgumentOutOfRangeException(nameof(n));
+        }
+
+        // A copy of an eye with every trait moved by one Gaussian sample of its sigma, within the limits.
+        private static Eye Nudge(Eye eye, EyeMutation rules, GaussianSampler random)
+        {
+            var orientation = Wrap(eye.Orientation + (float)(rules.OrientationSigma * random.NextStandard()));
+            var aperture = Math.Min(Eye.MaxAperture, Math.Max(Eye.MinAperture,
+                eye.Aperture + (float)(rules.ApertureSigma * random.NextStandard())));
+            var range = Math.Min(Eye.MaxRange, Math.Max(Eye.MinRange, eye.Range + (float)(rules.RangeSigma * random.NextStandard())));
+            return new Eye(orientation, aperture, range);
+        }
+
+        /// <summary>
+        /// Eyes of a crossover child, aligned by slot (an eye's identity), never by angle: for each slot in order, an eye
+        /// both parents have comes from either by one coin (no coin when both eyes are the same, as with fixed eyes); an eye
+        /// only the fitter parent has is inherited from it; an eye only the other parent has is not, as with disjoint
+        /// connection genes. Null for genomes without eyes (no draws).
+        /// </summary>
+        public static EyeSet CrossEyes(EyeSet fitter, EyeSet other, IRandomSource random)
+        {
+            if (fitter == null)
+                return null;
+            if (other == null)
+                return fitter;
+            if (random == null)
+                throw new ArgumentNullException(nameof(random));
+            var slots = new Eye?[EyeSet.MaxEyes];
+            for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+            {
+                if (!fitter.Has(slot))
+                    continue;
+                var differs = other.Has(slot) && !other[slot].Equals(fitter[slot]);
+                slots[slot] = differs && random.NextFloat() >= 0.5f ? other[slot] : fitter[slot];
             }
 
             return new EyeSet(slots);
