@@ -154,6 +154,14 @@ Um experimento evolui uma população de genomas (padrão 64) sem competição e
 
 Esses valores são propostas iniciais a medir, não garantias de melhoria. Com a mesma seed o experimento repete as mesmas gerações, ids e resultados.
 
+Essa evolução de **topologia fixa** (MLP 12 → 16 → 3, só pesos e genes de corpo mudam) é o padrão e o controle. Não é NEAT.
+
+### NEAT (em desenvolvimento)
+
+Com `-eden-algorithm neat` (opção `Algorithm` do experimento) a rede passa a evoluir também a estrutura, seguindo NEAT (Stanley e Miikkulainen, 2002): cada genoma começa mínimo (bias e as 12 entradas ligadas às 3 saídas, 39 conexões), conexões e nós novos surgem por mutação e recebem **marcações históricas** (a mesma estrutura nova na mesma geração recebe o mesmo número), o **cruzamento** alinha genes por essas marcações e a seleção acontece por **espécies** com fitness compartilhada, campeões copiados e remoção de espécies estagnadas. As entradas e saídas têm identidade estável por um contrato neural versionado (`legacy-12-3-v1`), base para os olhos futuros. Todos os parâmetros são propostas iniciais a calibrar, registrados em `experiment.txt`.
+
+Além dos CSVs comuns, um experimento NEAT grava `neat-generations.csv` (espécies e tamanho das redes por geração) e `neat-individuals.csv` (espécie, nós ocultos e conexões de cada indivíduo); `individuals.csv` lista os dois pais de um filho de cruzamento, e a diversidade de pesos por posição fica vazia porque não se aplica. Ainda não disponível: escolher NEAT no laboratório, salvar/carregar checkpoint de um experimento NEAT e semeá-lo com um pool de genomas.
+
 ### Plasticidade durante a vida (experimento M7)
 
 Por padrão a rede é fixa durante a vida. Com `-eden-plasticity on` (opção `Plasticity` do experimento), cada genoma ganha dois coeficientes de plasticidade, sorteados na geração 0 depois dos genes de corpo: uma **taxa de aprendizado** em [0, 1] e um **decaimento** em [0, 0,2]. Os coeficientes são herdados e mutam como os genes de corpo (mesma chance, ruído proporcional à faixa de cada um, sempre dentro dela), na evolução e nos nascimentos do mundo compartilhado. A rede passa a agir com W_base + ΔW nas 48 conexões da camada oculta para a de saída, e ΔW muda a cada decisão por uma regra Hebbiana modulada pela variação de energia:
@@ -214,7 +222,7 @@ Para rodar: menu **EDEN → Evolution → Run 20 generations (seed 1)** no Edito
   -executeMethod Eden.Editor.EvolutionBatch.RunFromCommandLine -eden-seed 1 -eden-generations 20 -logFile evolution.log
 ```
 
-Opções: `-eden-seed N`, `-eden-generations N`, `-eden-food N` (comida do episódio, padrão 32), `-eden-body none|all|size,speed,sensor,efficiency` (genes de corpo expressos, padrão `none`), `-eden-plasticity on|off` (plasticidade durante a vida, padrão `off`) e `-eden-output DIR`. Sem `-eden-output`, o resultado vai para `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\EvolutionRuns\<data>-seed<n>\`:
+Opções: `-eden-seed N`, `-eden-generations N`, `-eden-food N` (comida do episódio, padrão 32), `-eden-body none|all|size,speed,sensor,efficiency` (genes de corpo expressos, padrão `none`), `-eden-plasticity on|off` (plasticidade durante a vida, padrão `off`), `-eden-algorithm mlp|neat` (veja [NEAT](#neat-em-desenvolvimento), padrão `mlp`) e `-eden-output DIR`. Sem `-eden-output`, o resultado vai para `%USERPROFILE%\AppData\LocalLow\NinguemDev\EDEN\EvolutionRuns\<data>-seed<n>\`:
 
 - `experiment.txt` e `experiment.json`: todos os parâmetros do experimento, o hash da configuração (o mesmo texto canônico que os checkpoints usam: hash igual, experimento igual), o modo de avaliação e a unidade de cada coluna dos CSVs; numa execução retomada, também a origem descrita em [checkpoints](#checkpoints);
 - `summary.json`: reescrito a cada geração com os totais de treino e validação, os últimos resumos, o melhor resultado de treino e o campeão na validação;
