@@ -34,6 +34,8 @@ namespace Eden.Brains
         {
             if (genome == null)
                 throw new ArgumentNullException(nameof(genome));
+            if (genome.Network != Genome.MlpNetwork)
+                throw new ArgumentException($"MlpBrain needs an MLP genome, got a {genome.Network} one.", nameof(genome));
             if (!genome.Topology.Equals(NetworkTopology.Mlp12x16x3) || genome.WeightCount != NeuralLayout.ParameterCount)
                 throw new ArgumentException($"MlpBrain needs a {NetworkTopology.Mlp12x16x3} genome, got {genome.Topology}.",
                     nameof(genome));

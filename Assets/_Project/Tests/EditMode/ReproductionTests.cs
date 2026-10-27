@@ -278,6 +278,20 @@ namespace Eden.Tests.EditMode
         }
 
         [Test]
+        public void Seed_RefusesNeatGenomesInAnMlpEvolution()
+        {
+            var pool = new[]
+            {
+                InitialGenomes.Population(25, 1)[0],
+                new Genome(NeatNetwork.CreateMinimal(NeuralContract.Legacy, new Pcg32(8, 3), 1f))
+            };
+
+            Assert.That(() => Reproduction.Seed(Rules(4, elites: 1), pool, new[] { 1f, 2f },
+                    new GaussianSampler(new Pcg32(9, 3))),
+                Throws.ArgumentException.With.Message.Contains("neat genome"));
+        }
+
+        [Test]
         public void Seed_IsDeterministicForTheSameInputs()
         {
             var pool = InitialGenomes.Population(24, 4);

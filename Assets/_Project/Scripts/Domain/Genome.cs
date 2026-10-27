@@ -33,12 +33,15 @@ namespace Eden.Domain
     }
 
     /// <summary>
-    /// Heritable description of a creature: network topology, base weights, <see cref="BodyGenes"/> and
-    /// <see cref="PlasticityGenes"/>. It never holds energy, age, position or any brain state. Immutable: weights are
-    /// copied in on construction and copied out by <see cref="CopyWeights"/>, so variants (e.g. mutations) are
-    /// built as new genomes and no two owners can share mutable weight storage. Schema 2 added the body genes and
-    /// schema 3 the plasticity coefficients; an older genome is the same genome with neutral body genes and a fixed
-    /// network.
+    /// Heritable description of a creature: a network, <see cref="BodyGenes"/> and <see cref="PlasticityGenes"/>. It
+    /// never holds energy, age, position or any brain state. The network is one of two formats, told apart by
+    /// <see cref="Network"/>: the fixed-topology MLP (<see cref="MlpNetwork"/>: <see cref="Topology"/> and flat base
+    /// weights, the legacy control) or a NEAT network (<see cref="NeatNetwork.Kind"/>: <see cref="Neat"/>, nodes and
+    /// connections with historical markings, always fixed during a life). The weight members only exist for the MLP and
+    /// throw for a NEAT genome. Immutable: weights are copied in on construction and copied out by
+    /// <see cref="CopyWeights"/>, so variants (e.g. mutations) are built as new genomes and no two owners can share
+    /// mutable weight storage. Schema 2 added the body genes and schema 3 the plasticity coefficients; an older genome is
+    /// the same genome with neutral body genes and a fixed network.
     /// </summary>
     public sealed class Genome
     {
@@ -47,7 +50,9 @@ namespace Eden.Domain
         /// <summary>Weights are kept within [-MaxAbsWeight, MaxAbsWeight].</summary>
         public const float MaxAbsWeight = 3f;
 
+        private readonly NetworkTopology topology;
         private readonly float[] weights;
+        private readonly NeatNetwork neat;
 
         /// <summary>Genome with neutral body genes (the reference body).</summary>
         public Genome(NetworkTopology topology, float[] weights)
@@ -80,10 +85,24 @@ namespace Eden.Domain
                         $"Weight {i} = {value} must be finite and within ±{MaxAbsWeight}.", nameof(weights));
             }
 
-            Topology = topology;
+            this.topology = topology;
             this.weights = (float[])weights.Clone();
             Body = body;
             Plasticity = plasticity;
+        }
+
+        /// <summary>NEAT genome with neutral body genes (the reference body).</summary>
+        public Genome(NeatNetwork network)
+            : this(network, BodyGenes.Neutral)
+        {
+        }
+
+        /// <summary>NEAT genome; its network is fixed during a life (no plasticity coefficients).</summary>
+        public Genome(NeatNetwork network, BodyGenes body)
+        {
+            neat = network ?? throw new ArgumentNullException(nameof(network));
+            Body = body;
+            Plasticity = PlasticityGenes.Fixed;
         }
 
         /// <summary>Kind of network recorded in files: a fixed-topology MLP described by <see cref="Topology"/> and flat weights.</summary>
@@ -91,26 +110,37 @@ namespace Eden.Domain
 
         public int SchemaVersion => CurrentSchemaVersion;
 
-        /// <summary>Kind of network (<see cref="MlpNetwork"/>); a genome of another kind is not the same format.</summary>
-        public string Network => MlpNetwork;
+        /// <summary>Kind of network: <see cref="MlpNetwork"/> or <see cref="NeatNetwork.Kind"/>; different formats.</summary>
+        public string Network => neat == null ? MlpNetwork : NeatNetwork.Kind;
 
-        /// <summary>What the network reads and writes. Every MLP genome uses <see cref="NeuralContract.Legacy"/>.</summary>
-        public NeuralContract Contract => NeuralContract.Legacy;
+        /// <summary>The NEAT network, or null for an MLP genome.</summary>
+        public NeatNetwork Neat => neat;
 
-        public NetworkTopology Topology { get; }
-        public int WeightCount => weights.Length;
+        /// <summary>
+        /// What the network reads and writes: the NEAT network's contract, and <see cref="NeuralContract.Legacy"/> for
+        /// every MLP genome.
+        /// </summary>
+        public NeuralContract Contract => neat?.Contract ?? NeuralContract.Legacy;
+
+        /// <summary>Shape of the MLP; throws for a NEAT genome.</summary>
+        public NetworkTopology Topology => RequireMlp().topology;
+
+        /// <summary>Number of MLP parameters; throws for a NEAT genome.</summary>
+        public int WeightCount => RequireMlp().weights.Length;
+
         public BodyGenes Body { get; }
 
         /// <summary>Lifetime plasticity coefficients; <see cref="PlasticityGenes.Fixed"/> for a fixed network.</summary>
         public PlasticityGenes Plasticity { get; }
 
-        public float GetWeight(int index) => weights[index];
+        public float GetWeight(int index) => RequireMlp().weights[index];
 
-        /// <summary>Fresh copy of the weights; changing it never affects this genome.</summary>
-        public float[] CopyWeights() => (float[])weights.Clone();
+        /// <summary>Fresh copy of the MLP weights; changing it never affects this genome. Throws for a NEAT genome.</summary>
+        public float[] CopyWeights() => (float[])RequireMlp().weights.Clone();
 
         public void CopyWeightsTo(float[] destination)
         {
+            RequireMlp();
             if (destination == null)
                 throw new ArgumentNullException(nameof(destination));
             if (destination.Length < weights.Length)
@@ -118,16 +148,31 @@ namespace Eden.Domain
             Array.Copy(weights, destination, weights.Length);
         }
 
-        /// <summary>Same weights and plasticity with other body genes.</summary>
-        public Genome WithBody(BodyGenes body) => new Genome(Topology, weights, body, Plasticity);
+        /// <summary>Same network and plasticity with other body genes.</summary>
+        public Genome WithBody(BodyGenes body) =>
+            neat == null ? new Genome(topology, weights, body, Plasticity) : new Genome(neat, body);
 
-        /// <summary>Same weights and body genes with other plasticity coefficients.</summary>
-        public Genome WithPlasticity(PlasticityGenes plasticity) => new Genome(Topology, weights, Body, plasticity);
+        /// <summary>
+        /// Same weights and body genes with other plasticity coefficients. Only the MLP has a plastic rule; a NEAT genome
+        /// only accepts <see cref="PlasticityGenes.Fixed"/>.
+        /// </summary>
+        public Genome WithPlasticity(PlasticityGenes plasticity)
+        {
+            if (neat == null)
+                return new Genome(topology, weights, Body, plasticity);
+            if (!plasticity.IsFixed)
+                throw new InvalidOperationException("NEAT networks have no lifetime plasticity.");
+            return this;
+        }
 
         public bool HasSameContent(Genome other)
         {
-            if (other == null || !Topology.Equals(other.Topology) || !Body.Equals(other.Body) ||
+            if (other == null || Network != other.Network || !Body.Equals(other.Body) ||
                 !Plasticity.Equals(other.Plasticity))
+                return false;
+            if (neat != null)
+                return neat.HasSameContent(other.neat);
+            if (!topology.Equals(other.topology))
                 return false;
             for (var i = 0; i < weights.Length; i++)
             {
@@ -153,6 +198,13 @@ namespace Eden.Domain
             for (var i = 0; i < weights.Length; i++)
                 weights[i] = random.NextFloat(-limit, limit);
             return new Genome(topology, weights);
+        }
+
+        private Genome RequireMlp()
+        {
+            if (neat != null)
+                throw new InvalidOperationException("Topology and weights belong to MLP genomes; this one is NEAT.");
+            return this;
         }
     }
 }

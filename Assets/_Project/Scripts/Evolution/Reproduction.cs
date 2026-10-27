@@ -164,6 +164,9 @@ namespace Eden.Evolution
             {
                 if (pool[i] == null)
                     throw new ArgumentException($"Pool genome {i} is null.", nameof(pool));
+                if (pool[i].Network != Genome.MlpNetwork)
+                    throw new ArgumentException($"Pool genome {i} is a {pool[i].Network} genome; this evolution breeds " +
+                                                $"{Genome.MlpNetwork} genomes.", nameof(pool));
             }
 
             var ranking = Rank(poolFitness);
