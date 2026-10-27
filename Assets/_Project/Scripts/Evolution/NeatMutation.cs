@@ -36,6 +36,27 @@ namespace Eden.Evolution
         /// <summary>Random (source, target) pairs tried before giving up on adding a connection (proposed 20).</summary>
         public int AddConnectionAttempts = 20;
 
+        /// <summary>
+        /// In crossover, chance that a matching connection disabled in either parent stays disabled in the child
+        /// (proposed 0.75).
+        /// </summary>
+        public float DisabledInheritProbability = 0.75f;
+
+        /// <summary>Compatibility weight c1 of excess connections (proposed 1).</summary>
+        public float ExcessCoefficient = 1f;
+
+        /// <summary>Compatibility weight c2 of disjoint connections (proposed 1).</summary>
+        public float DisjointCoefficient = 1f;
+
+        /// <summary>Compatibility weight c3 of the mean weight difference of matching connections (proposed 0.4).</summary>
+        public float WeightDifferenceCoefficient = 0.4f;
+
+        /// <summary>
+        /// Genomes with fewer connections than this are not normalized by size in the compatibility distance (N = 1);
+        /// proposed 20, as in the original NEAT.
+        /// </summary>
+        public int NormalizationThreshold = 20;
+
         public NeatSettings Clone() => (NeatSettings)MemberwiseClone();
     }
 
@@ -63,6 +84,13 @@ namespace Eden.Evolution
             if (settings.AddConnectionAttempts < 1 || settings.AddConnectionAttempts > MaxAddConnectionAttempts)
                 errors.Add($"{nameof(settings.AddConnectionAttempts)} must be in [1, {MaxAddConnectionAttempts}] " +
                            $"(was {settings.AddConnectionAttempts})");
+            Probability(settings.DisabledInheritProbability, nameof(settings.DisabledInheritProbability), errors);
+            Coefficient(settings.ExcessCoefficient, nameof(settings.ExcessCoefficient), errors);
+            Coefficient(settings.DisjointCoefficient, nameof(settings.DisjointCoefficient), errors);
+            Coefficient(settings.WeightDifferenceCoefficient, nameof(settings.WeightDifferenceCoefficient), errors);
+            if (settings.NormalizationThreshold < 0 || settings.NormalizationThreshold > NeatNetwork.MaxConnections)
+                errors.Add($"{nameof(settings.NormalizationThreshold)} must be in [0, {NeatNetwork.MaxConnections}] " +
+                           $"(was {settings.NormalizationThreshold})");
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid NEAT settings: " + string.Join("; ", errors));
 
@@ -74,6 +102,11 @@ namespace Eden.Evolution
             AddConnectionProbability = settings.AddConnectionProbability;
             ToggleProbability = settings.ToggleProbability;
             AddConnectionAttempts = settings.AddConnectionAttempts;
+            DisabledInheritProbability = settings.DisabledInheritProbability;
+            ExcessCoefficient = settings.ExcessCoefficient;
+            DisjointCoefficient = settings.DisjointCoefficient;
+            WeightDifferenceCoefficient = settings.WeightDifferenceCoefficient;
+            NormalizationThreshold = settings.NormalizationThreshold;
         }
 
         public float InitialWeightLimit { get; }
@@ -84,6 +117,17 @@ namespace Eden.Evolution
         public float AddConnectionProbability { get; }
         public float ToggleProbability { get; }
         public int AddConnectionAttempts { get; }
+        public float DisabledInheritProbability { get; }
+        public float ExcessCoefficient { get; }
+        public float DisjointCoefficient { get; }
+        public float WeightDifferenceCoefficient { get; }
+        public int NormalizationThreshold { get; }
+
+        private static void Coefficient(float value, string name, List<string> errors)
+        {
+            if (!(value >= 0f) || float.IsInfinity(value))
+                errors.Add($"{name} must be finite and >= 0 (was {value})");
+        }
 
         private static void Probability(float value, string name, List<string> errors)
         {
