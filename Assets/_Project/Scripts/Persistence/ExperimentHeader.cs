@@ -149,6 +149,17 @@ namespace Eden.Persistence
                 lines.Add("bodies=solid;radius " + world.BodyRadius.ToString(culture) + ";substeps " +
                           world.SolidSubsteps.ToString(culture) + ";contact_passes " +
                           SimulationConfig.ContactPasses.ToString(culture));
+            if (world.Obstacles.Count > 0)
+            {
+                var obstacles = new List<string>();
+                foreach (var o in world.Obstacles)
+                {
+                    obstacles.Add(o.MinX.ToString(culture) + " " + o.MinY.ToString(culture) + " " +
+                                  o.MaxX.ToString(culture) + " " + o.MaxY.ToString(culture));
+                }
+
+                lines.Add("obstacles=" + world.Obstacles.Count.ToString(culture) + ";" + string.Join(";", obstacles));
+            }
             if (Preset != null)
                 lines.Add("preset=" + Preset);
             if (ResumedFrom != null)

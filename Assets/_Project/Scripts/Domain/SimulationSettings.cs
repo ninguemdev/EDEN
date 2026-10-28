@@ -77,6 +77,13 @@ namespace Eden.Domain
         /// </summary>
         public float BodyRadius = 0.5f;
 
+        /// <summary>
+        /// Static obstacles solid bodies cannot enter (they need <see cref="SolidBodies"/>); empty for the open arena. See
+        /// <see cref="ObstacleLayouts"/> for named layouts. Not shown in the Inspector: it is set from code or the command
+        /// line.
+        /// </summary>
+        public Obstacle[] Obstacles = Array.Empty<Obstacle>();
+
         // Continuous mode: local asexual reproduction. Off by default; isolated episodes never reproduce.
         /// <summary>Living, mature creatures with enough energy and no cooldown give birth near themselves.</summary>
         public bool Reproduction;
@@ -108,6 +115,11 @@ namespace Eden.Domain
         /// <summary>Standard deviation of the Gaussian noise of a mutation at birth.</summary>
         public float BirthMutationSigma = 0.10f;
 
-        public SimulationSettings Clone() => (SimulationSettings)MemberwiseClone();
+        public SimulationSettings Clone()
+        {
+            var copy = (SimulationSettings)MemberwiseClone();
+            copy.Obstacles = (Obstacle[])Obstacles?.Clone();
+            return copy;
+        }
     }
 }
