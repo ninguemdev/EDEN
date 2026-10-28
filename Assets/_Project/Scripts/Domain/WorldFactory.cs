@@ -12,7 +12,10 @@ namespace Eden.Domain
 
         /// <summary>
         /// Initial world where creature i (0-based, so id i + 1) has the body genes <paramref name="genesOf"/> gives.
-        /// Placement does not depend on the genes; a creature starts with the initial energy or its capacity if smaller.
+        /// A creature starts with the initial energy or its capacity if smaller. With point bodies placement does not
+        /// depend on the genes. With solid bodies every founder's disc (its own radius) and every food item go only where
+        /// they fit (see <see cref="Placement"/>); when one does not, a <see cref="ScenarioInfeasibleException"/> says how
+        /// many fit: the scenario is never reduced silently.
         /// </summary>
         public static WorldState CreateInitial(SimulationConfig config, Func<int, BodyGenes> genesOf)
         {
@@ -22,6 +25,8 @@ namespace Eden.Domain
                 throw new ArgumentNullException(nameof(genesOf));
 
             var world = new WorldState(config);
+            if (config.SolidBodies)
+                return PlaceSolid(world, genesOf);
             var random = world.SpawnRandom;
             for (var i = 0; i < config.InitialPopulation; i++)
             {
@@ -34,6 +39,39 @@ namespace Eden.Domain
 
             for (var i = 0; i < config.InitialFood; i++)
                 world.AddFood(RandomFoodPosition(random, config, 0), config.FoodEnergy);
+
+            return world;
+        }
+
+        // Each founder draws positions until its disc fits (then its heading), each food item until it fits.
+        private static WorldState PlaceSolid(WorldState world, Func<int, BodyGenes> genesOf)
+        {
+            var config = world.Config;
+            var random = world.SpawnRandom;
+            for (var i = 0; i < config.InitialPopulation; i++)
+            {
+                var genes = genesOf(i);
+                var body = genes.IsNeutral ? world.ReferenceBody : CreatureBody.Express(config, genes);
+                var placed = false;
+                var position = default(Float2);
+                for (var attempt = 0; attempt < Placement.FounderAttempts && !placed; attempt++)
+                {
+                    position = RandomArenaPosition(random, config);
+                    placed = Placement.BodyFits(config, world.Creatures, position, body.Radius);
+                }
+
+                if (!placed)
+                    throw new ScenarioInfeasibleException("creatures", config.InitialPopulation, i);
+                var heading = random.NextFloat() * FullTurn;
+                world.AddCreature(position, heading, Math.Min(config.InitialEnergy, body.MaxEnergy), genes);
+            }
+
+            for (var i = 0; i < config.InitialFood; i++)
+            {
+                if (!Placement.TryPlaceFood(random, config, world.Creatures, 0, out var position))
+                    throw new ScenarioInfeasibleException("food items", config.InitialFood, i);
+                world.AddFood(position, config.FoodEnergy);
+            }
 
             return world;
         }

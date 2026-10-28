@@ -20,8 +20,6 @@ namespace Eden.Simulation
         // Rounding slack on the cone's border, so a target exactly on the edge counts as inside.
         private const float EdgeSlack = 1e-5f;
 
-        // Share of a segment that must lie inside an obstacle to be blocked; grazing a side or corner does not block.
-        private const float CrossingSlack = 1e-6f;
 
         /// <summary>
         /// Writes the <see cref="EyeChannels.Count"/> channels of eye slot <paramref name="slot"/> of
@@ -109,34 +107,11 @@ namespace Eden.Simulation
             var obstacles = config.Obstacles;
             for (var i = 0; i < obstacles.Count; i++)
             {
-                if (Crosses(obstacles[i], from, to))
+                if (obstacles[i].Blocks(from, to))
                     return false;
             }
 
             return true;
-        }
-
-        // Whether the segment from a to b has a piece of positive length strictly inside the rectangle (slab method).
-        private static bool Crosses(Obstacle obstacle, Float2 a, Float2 b)
-        {
-            var enter = 0f;
-            var leave = 1f;
-            return Slab(a.X, b.X - a.X, obstacle.MinX, obstacle.MaxX, ref enter, ref leave) &&
-                   Slab(a.Y, b.Y - a.Y, obstacle.MinY, obstacle.MaxY, ref enter, ref leave) &&
-                   leave - enter > CrossingSlack;
-        }
-
-        private static bool Slab(float start, float delta, float min, float max, ref float enter, ref float leave)
-        {
-            if (MathF.Abs(delta) < 1e-9f)
-                return start > min && start < max;
-            var first = (min - start) / delta;
-            var second = (max - start) / delta;
-            if (first > second)
-                (first, second) = (second, first);
-            enter = MathF.Max(enter, first);
-            leave = MathF.Min(leave, second);
-            return leave > enter;
         }
 
         private static bool NearestFood(WorldState world, Float2 origin, float axisX, float axisY, float cosHalf,

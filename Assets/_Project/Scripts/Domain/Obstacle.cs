@@ -8,6 +8,9 @@ namespace Eden.Domain
     /// </summary>
     public readonly struct Obstacle : IEquatable<Obstacle>
     {
+        // Share of a segment that must lie inside to block it; grazing a side or corner does not block.
+        private const float CrossingSlack = 1e-6f;
+
         public Obstacle(float minX, float minY, float maxX, float maxY)
         {
             MinX = minX;
@@ -22,6 +25,44 @@ namespace Eden.Domain
         public float MaxY { get; }
         public float Width => MaxX - MinX;
         public float Height => MaxY - MinY;
+
+        /// <summary>Whether a point lies strictly inside (its sides do not count).</summary>
+        public bool Contains(Float2 point) =>
+            point.X > MinX && point.X < MaxX && point.Y > MinY && point.Y < MaxY;
+
+        /// <summary>Distance from a point to the rectangle's nearest point; 0 on or inside it.</summary>
+        public float DistanceTo(Float2 point)
+        {
+            var dx = Math.Max(Math.Max(MinX - point.X, 0f), point.X - MaxX);
+            var dy = Math.Max(Math.Max(MinY - point.Y, 0f), point.Y - MaxY);
+            return MathF.Sqrt(dx * dx + dy * dy);
+        }
+
+        /// <summary>
+        /// Whether the segment from <paramref name="from"/> to <paramref name="to"/> passes through the inside of the
+        /// rectangle (slab method). Running along a side or touching a corner does not count.
+        /// </summary>
+        public bool Blocks(Float2 from, Float2 to)
+        {
+            var enter = 0f;
+            var leave = 1f;
+            return Slab(from.X, to.X - from.X, MinX, MaxX, ref enter, ref leave) &&
+                   Slab(from.Y, to.Y - from.Y, MinY, MaxY, ref enter, ref leave) &&
+                   leave - enter > CrossingSlack;
+        }
+
+        private static bool Slab(float start, float delta, float min, float max, ref float enter, ref float leave)
+        {
+            if (MathF.Abs(delta) < 1e-9f)
+                return start > min && start < max;
+            var first = (min - start) / delta;
+            var second = (max - start) / delta;
+            if (first > second)
+                (first, second) = (second, first);
+            enter = MathF.Max(enter, first);
+            leave = MathF.Min(leave, second);
+            return leave > enter;
+        }
 
         public bool Equals(Obstacle other) =>
             MinX == other.MinX && MinY == other.MinY && MaxX == other.MaxX && MaxY == other.MaxY;

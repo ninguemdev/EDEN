@@ -160,6 +160,7 @@ namespace Eden.Persistence
 
                 lines.Add("obstacles=" + world.Obstacles.Count.ToString(culture) + ";" + string.Join(";", obstacles));
                 lines.Add("occlusion=obstacles block movement, eyes and feeding;the legacy senses do not see them");
+                lines.Add("free_regions=" + world.FreeSpace.Regions.ToString(culture));
             }
             if (Preset != null)
                 lines.Add("preset=" + Preset);

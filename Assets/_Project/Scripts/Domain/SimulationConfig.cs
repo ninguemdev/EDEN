@@ -88,6 +88,14 @@ namespace Eden.Domain
             RequirePositive(errors, nameof(s.BirthDistance), s.BirthDistance, MaxArenaSize);
             RequireRange(errors, nameof(s.BirthMutationProbability), s.BirthMutationProbability, 0f, 1f);
             RequireRange(errors, nameof(s.BirthMutationSigma), s.BirthMutationSigma, 0f, 3f);
+            FreeSpace freeSpace = null;
+            if (errors.Count == 0 && obstacles.Length > 0)
+            {
+                freeSpace = new FreeSpace(s.ArenaWidth, s.ArenaHeight, s.BodyRadius, obstacles);
+                if (freeSpace.Regions == 0)
+                    errors.Add("the obstacles leave no room for the reference body");
+            }
+
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid simulation config: " + string.Join("; ", errors));
 
@@ -122,6 +130,7 @@ namespace Eden.Domain
             BodyRadius = s.BodyRadius;
             SolidSubsteps = s.SolidBodies ? substeps : 1;
             Obstacles = (Obstacle[])obstacles.Clone();
+            FreeSpace = freeSpace;
             Reproduction = s.Reproduction;
             PopulationCap = s.PopulationCap;
             MaturitySeconds = s.MaturitySeconds;
@@ -211,6 +220,9 @@ namespace Eden.Domain
 
         /// <summary>Static obstacles solid bodies cannot enter, in the order given; empty for the open arena.</summary>
         public IReadOnlyList<Obstacle> Obstacles { get; }
+
+        /// <summary>Where the reference body can stand among the obstacles; null in the open arena.</summary>
+        public FreeSpace FreeSpace { get; }
 
         /// <summary>Tick at the start of which food moves; 0 when it never does.</summary>
         public long FoodShiftTicks { get; }
