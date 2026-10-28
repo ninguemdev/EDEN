@@ -7,7 +7,9 @@ namespace Eden.Simulation
     /// Builds a creature's local <see cref="Observation"/> from the current world state. Readings are clamped to
     /// their ranges, but non-finite state would pass through; <see cref="WorldSimulation"/> therefore checks every
     /// observation with <see cref="ObservationLimits.Sanitize"/> before a brain sees it. Energy, range and speed readings
-    /// are relative to the creature's own body: its energy capacity, its sensor range and its speed cap.
+    /// are relative to the creature's own body: its energy capacity, its sensor range and its speed cap. The legacy
+    /// readings keep the <see cref="NeuralContract.Legacy"/> meaning on purpose and ignore obstacles: the food sense
+    /// sees through them and the wall readings only know the arena's border. Only eyes see obstacles.
     /// </summary>
     public static class Sensors
     {
