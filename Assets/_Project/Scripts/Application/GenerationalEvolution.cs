@@ -9,7 +9,10 @@ namespace Eden.Application
     /// Generational evolution in isolated episodes: evaluate the current population on its training seeds, then
     /// breed the next one from those scores only. The generation counter advances when all episodes are done, never
     /// on a death, and a generation where every creature died still yields a full population. Same settings → same
-    /// sequence of generations, ids and parents.
+    /// sequence of generations, ids and parents. With <see cref="EvolutionAlgorithm.Neat"/> the population starts from
+    /// minimal NEAT networks and every generation is placed into species and bred by <see cref="NeatSpeciation"/>
+    /// (crossover and structural mutation numbered by one <see cref="InnovationHistory"/>); species champions play the
+    /// role of the MLP's elites.
     /// </summary>
     public sealed class GenerationalEvolution
     {
@@ -18,12 +21,18 @@ namespace Eden.Application
         private Individual[] individuals;
         private Genome[] population;
         private Offspring[] origins;
+        private readonly NeatRules neatRules;
+        private readonly NeatSpeciation speciation;
+        private readonly InnovationHistory innovations;
 
         public GenerationalEvolution(EvolutionSettings settings)
             : this(settings ?? throw new ArgumentNullException(nameof(settings)), new Lineage())
         {
-            individuals = Lineage.Founders(InitialGenomes.Population(Rules.ExperimentSeed, Rules.PopulationSize,
-                Plan.ExpressedBodyGenes, Plan.Plasticity));
+            individuals = Lineage.Founders(neatRules == null
+                ? InitialGenomes.Population(Rules.ExperimentSeed, Rules.PopulationSize, Plan.ExpressedBodyGenes,
+                    Plan.Plasticity)
+                : InitialGenomes.NeatPopulation(Rules.ExperimentSeed, Rules.PopulationSize, Plan.ExpressedBodyGenes,
+                    neatRules.InitialWeightLimit));
             population = GenomesOf(individuals);
         }
 
@@ -38,6 +47,9 @@ namespace Eden.Application
         {
             var evolution = new GenerationalEvolution(settings ?? throw new ArgumentNullException(nameof(settings)),
                 new Lineage());
+            if (evolution.neatRules != null)
+                throw new ArgumentException("Seeding a NEAT evolution from a genome pool is not supported yet.",
+                    nameof(settings));
             var random = new GaussianSampler(
                 SeedDerivation.CreateStream(evolution.Rules.ExperimentSeed, RandomStream.SeededGeneration));
             var seeded = Reproduction.Seed(evolution.Rules, pool, poolFitness, random);
@@ -53,6 +65,11 @@ namespace Eden.Application
             Rules = new ReproductionRules(settings);
             evaluator = new IsolatedEvaluator(Plan);
             Lineage = lineage;
+            if (Plan.Algorithm != EvolutionAlgorithm.Neat)
+                return;
+            neatRules = new NeatRules(settings.Neat);
+            speciation = new NeatSpeciation(neatRules);
+            innovations = new InnovationHistory(NeuralContract.Legacy);
         }
 
         /// <summary>
@@ -75,6 +92,8 @@ namespace Eden.Application
                 throw new ArgumentException("Only generation 0 has no previous generation.", nameof(previous));
 
             var evolution = new GenerationalEvolution(settings, lineage);
+            if (evolution.neatRules != null)
+                throw new ArgumentException("Restoring a NEAT evolution is not supported yet.", nameof(settings));
             if (population.Count != evolution.Rules.PopulationSize)
                 throw new ArgumentException($"Expected {evolution.Rules.PopulationSize} individuals, got {population.Count}.",
                     nameof(population));
@@ -96,6 +115,15 @@ namespace Eden.Application
 
         public EvaluationPlan Plan { get; }
         public ReproductionRules Rules { get; }
+
+        /// <summary>NEAT parameters, or null for the MLP.</summary>
+        public NeatRules NeatRules => neatRules;
+
+        /// <summary>Species of a NEAT evolution (those of the last bred generation), or null for the MLP.</summary>
+        public NeatSpeciation Speciation => speciation;
+
+        /// <summary>Historical markings of a NEAT evolution, or null for the MLP.</summary>
+        public InnovationHistory Innovations => innovations;
 
         /// <summary>Ids, parents and birth generations of every individual created so far.</summary>
         public Lineage Lineage { get; }
@@ -129,16 +157,44 @@ namespace Eden.Application
                 evaluation.Candidates.Count != population.Length || !SameSeeds(evaluation.Seeds, Plan.TrainingSeeds(Generation)))
                 throw new ArgumentException($"Expected the training evaluation of generation {Generation}.", nameof(evaluation));
 
-            var report = new GenerationReport(evaluation, individuals);
             var fitness = new float[evaluation.Candidates.Count];
             for (var i = 0; i < fitness.Length; i++)
                 fitness[i] = evaluation.Candidates[i].MeanFitness;
 
-            origins = Reproduction.Breed(Rules, population, fitness, Generation + 1);
+            GenerationReport report;
+            if (neatRules == null)
+            {
+                report = new GenerationReport(evaluation, individuals);
+                origins = Reproduction.Breed(Rules, population, fitness, Generation + 1);
+            }
+            else
+            {
+                report = new GenerationReport(evaluation, individuals, speciation.Assign(population, Generation));
+                origins = BreedNeat(fitness);
+            }
+
             individuals = Lineage.Descend(individuals, origins, Generation + 1);
             population = GenomesOf(individuals);
             Generation++;
             return report;
+        }
+
+        // Species breed the next generation from the same stream the MLP uses; expressed body genes mutate with the
+        // experiment's chance and noise, as in the MLP.
+        private Offspring[] BreedNeat(float[] fitness)
+        {
+            var children = speciation.Breed(population, fitness, Generation, Rules.PopulationSize, innovations,
+                Rules.MutationRandom(Generation + 1),
+                new BodyMutation(Plan.ExpressedBodyGenes, Rules.MutationProbability, Rules.MutationSigma));
+            var bred = new Offspring[children.Length];
+            for (var i = 0; i < bred.Length; i++)
+            {
+                var child = children[i];
+                bred[i] = new Offspring(child.Genome, child.FirstParent, child.IsChampion, child.Mutation.MutatedWeights,
+                    child.SecondParent);
+            }
+
+            return bred;
         }
 
         /// <summary>

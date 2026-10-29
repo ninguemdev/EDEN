@@ -47,6 +47,9 @@ namespace Eden.Persistence
         {
             if (checkpoint == null)
                 throw new ArgumentNullException(nameof(checkpoint));
+            if (checkpoint.Evolution != null && checkpoint.Evolution.Settings.Algorithm != EvolutionAlgorithm.Mlp)
+                throw new CheckpointException("Saving a NEAT experiment is not supported yet; this build saves MLP " +
+                                              "experiments only.");
 
             var config = EncodeConfig(checkpoint);
             var state = EncodeState(checkpoint);
@@ -174,8 +177,38 @@ namespace Eden.Persistence
                 settings.Add("expressedBodyGenes", EncodeGeneSet(s.ExpressedBodyGenes));
             if (s.Plasticity)
                 settings.Add("plasticity", JsonValue.Of(true));
+            if (s.Algorithm == EvolutionAlgorithm.Neat)
+                settings.Add("algorithm", JsonValue.Of(AlgorithmName(s.Algorithm))).Add("neat", EncodeNeat(s.Neat));
             return settings;
         }
+
+        /// <summary>Name of an evolution algorithm in files: "mlp" or "neat".</summary>
+        internal static string AlgorithmName(EvolutionAlgorithm algorithm) =>
+            algorithm == EvolutionAlgorithm.Neat ? NeatNetwork.Kind : Genome.MlpNetwork;
+
+        // Every NEAT parameter, so experiments that differ in any of them have different hashes.
+        private static JsonValue EncodeNeat(NeatSettings neat) =>
+            JsonValue.NewObject()
+                .Add("initialWeightLimit", JsonValue.Of(neat.InitialWeightLimit))
+                .Add("weightMutationProbability", JsonValue.Of(neat.WeightMutationProbability))
+                .Add("weightPerturbProbability", JsonValue.Of(neat.WeightPerturbProbability))
+                .Add("weightSigma", JsonValue.Of(neat.WeightSigma))
+                .Add("addNodeProbability", JsonValue.Of(neat.AddNodeProbability))
+                .Add("addConnectionProbability", JsonValue.Of(neat.AddConnectionProbability))
+                .Add("toggleProbability", JsonValue.Of(neat.ToggleProbability))
+                .Add("addConnectionAttempts", JsonValue.Of(neat.AddConnectionAttempts))
+                .Add("disabledInheritProbability", JsonValue.Of(neat.DisabledInheritProbability))
+                .Add("excessCoefficient", JsonValue.Of(neat.ExcessCoefficient))
+                .Add("disjointCoefficient", JsonValue.Of(neat.DisjointCoefficient))
+                .Add("weightDifferenceCoefficient", JsonValue.Of(neat.WeightDifferenceCoefficient))
+                .Add("normalizationThreshold", JsonValue.Of(neat.NormalizationThreshold))
+                .Add("compatibilityThreshold", JsonValue.Of(neat.CompatibilityThreshold))
+                .Add("stagnationGenerations", JsonValue.Of(neat.StagnationGenerations))
+                .Add("protectedSpecies", JsonValue.Of(neat.ProtectedSpecies))
+                .Add("championMinimumSize", JsonValue.Of(neat.ChampionMinimumSize))
+                .Add("survivalFraction", JsonValue.Of(neat.SurvivalFraction))
+                .Add("crossoverProbability", JsonValue.Of(neat.CrossoverProbability))
+                .Add("interspeciesProbability", JsonValue.Of(neat.InterspeciesProbability));
 
         // Absent means off; an explicit false does not read back the same and is refused.
         private static bool DecodePlasticityOption(JsonValue saved) => saved != null && saved.Boolean();

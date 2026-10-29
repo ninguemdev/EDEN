@@ -179,7 +179,7 @@ namespace Eden.Evolution
         /// <see cref="Assign"/> and its fitness. Updates every species' best fitness and drops stagnant species.
         /// </summary>
         public NeatOffspring[] Breed(IReadOnlyList<Genome> population, IReadOnlyList<float> fitness, int generation,
-            int populationSize, InnovationHistory history, GaussianSampler random)
+            int populationSize, InnovationHistory history, GaussianSampler random, BodyMutation body = default)
         {
             if (population == null)
                 throw new ArgumentNullException(nameof(population));
@@ -243,7 +243,7 @@ namespace Eden.Evolution
                         genome = NeatCrossover.Cross(population[first], population[second], rules, source);
                     }
 
-                    genome = NeatMutation.Mutate(genome, rules, history, random, out var mutation);
+                    genome = NeatMutation.Mutate(genome, rules, history, random, out var mutation, body);
                     children.Add(new NeatOffspring(genome, first, second, false, current.Id, mutation));
                 }
             }
