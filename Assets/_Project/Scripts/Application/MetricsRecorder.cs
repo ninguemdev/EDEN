@@ -10,9 +10,13 @@ namespace Eden.Application
         public MetricsSample(long tick, double simulatedSeconds, int population, int foodAvailable, int foodEatenInWindow,
             int starvationDeathsInWindow, int oldAgeDeathsInWindow, float meanEnergy, long totalFoodEaten,
             int birthsInWindow = 0, int birthsRefusedInWindow = 0, int maxGeneration = 0, bool extinct = false,
-            int dehydrationDeathsInWindow = 0)
+            int dehydrationDeathsInWindow = 0, float contactsPerTick = 0f, int birthsBlockedInWindow = 0,
+            int respawnsDelayedInWindow = 0)
         {
             DehydrationDeathsInWindow = dehydrationDeathsInWindow;
+            ContactsPerTick = contactsPerTick;
+            BirthsBlockedInWindow = birthsBlockedInWindow;
+            RespawnsDelayedInWindow = respawnsDelayedInWindow;
             Tick = tick;
             SimulatedSeconds = simulatedSeconds;
             Population = population;
@@ -38,8 +42,17 @@ namespace Eden.Application
         public int StarvationDeathsInWindow { get; }
         public int OldAgeDeathsInWindow { get; }
 
-        /// <summary>Deaths of thirst (only in runs with water; not yet a column of metrics.csv).</summary>
+        /// <summary>Deaths of thirst (only in runs with water).</summary>
         public int DehydrationDeathsInWindow { get; }
+
+        /// <summary>Pairs of solid bodies touching, on average per tick of the window (0 without solid bodies).</summary>
+        public float ContactsPerTick { get; }
+
+        /// <summary>Births refused for want of room next to the parent (solid bodies; nobody paid for them).</summary>
+        public int BirthsBlockedInWindow { get; }
+
+        /// <summary>Food respawns that found no free place and waited for a later tick, one count per wait.</summary>
+        public int RespawnsDelayedInWindow { get; }
 
         /// <summary>Deaths of every cause in the window.</summary>
         public int DeathsInWindow => StarvationDeathsInWindow + OldAgeDeathsInWindow + DehydrationDeathsInWindow;
@@ -73,6 +86,10 @@ namespace Eden.Application
         private int dehydrationDeaths;
         private int births;
         private int birthsRefused;
+        private long contacts;
+        private int birthsBlocked;
+        private int respawnsDelayed;
+        private int ticks;
 
         public MetricsRecorder(SimulationConfig config, int windowTicks)
         {
@@ -100,6 +117,10 @@ namespace Eden.Application
             TotalFoodEaten += simulation.LastFoodEaten;
             births += simulation.LastBirths.Count;
             birthsRefused += simulation.LastBirthsRefused;
+            contacts += simulation.LastContacts;
+            birthsBlocked += simulation.LastBirthsBlocked;
+            respawnsDelayed += simulation.LastFoodRespawnsDelayed;
+            ticks++;
             var deaths = simulation.LastDeaths;
             for (var i = 0; i < deaths.Count; i++)
             {
@@ -131,8 +152,12 @@ namespace Eden.Application
             LastSample = new MetricsSample(world.Tick, (double)world.Tick / config.TicksPerSecond, population,
                 world.Food.Count, foodEaten, starvationDeaths, oldAgeDeaths,
                 population > 0 ? energy / population : 0f, TotalFoodEaten, births, birthsRefused, generation, extinct,
-                dehydrationDeaths);
+                dehydrationDeaths, (float)((double)contacts / ticks), birthsBlocked, respawnsDelayed);
             HasSample = true;
+            contacts = 0;
+            birthsBlocked = 0;
+            respawnsDelayed = 0;
+            ticks = 0;
             foodEaten = 0;
             starvationDeaths = 0;
             oldAgeDeaths = 0;

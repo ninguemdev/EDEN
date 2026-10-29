@@ -13,6 +13,9 @@ namespace Eden.Tests.EditMode
     /// <summary>Genealogy of a shared world with chained births, window metrics of births and an explicit extinction.</summary>
     public class GenealogyTests
     {
+        // Position of "extinct" in metrics.csv.
+        private static readonly int ExtinctColumn = Array.IndexOf(MetricsCsvLog.Header.Split(','), "extinct");
+
         private string root;
 
         [SetUp]
@@ -148,7 +151,7 @@ namespace Eden.Tests.EditMode
             }
 
             Assert.That(File.ReadAllLines(replay), Is.EqualTo(rows.Take(rows.Length - 1)));
-            Assert.That(MetricsCsvLog.FormatRow(final), Does.EndWith(",1"));
+            Assert.That(MetricsCsvLog.FormatRow(final).Split(',')[ExtinctColumn], Is.EqualTo("1"));
         }
 
         [Test]

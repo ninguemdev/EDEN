@@ -20,7 +20,7 @@ namespace Eden.Presentation
         /// </summary>
         public static string Run(WorldSimulation simulation, FixedStepClock clock, string brainName,
             ExperimentPreset preset, MetricsRecorder metrics, string runDirectory, string evolvedSource,
-            ArenaTally arena = default, GenomeComposition composition = null)
+            ArenaTally arena = default, GenomeComposition composition = null, WorldAudit audit = null)
         {
             var world = simulation.World;
             var config = world.Config;
@@ -74,6 +74,8 @@ namespace Eden.Presentation
             }
 
             text.AppendLine($"Total comido: {metrics.TotalFoodEaten}");
+            if (audit != null)
+                text.AppendLine(Audit(audit, world));
             if (simulation.IsExtinct)
                 text.AppendLine(metrics.ExtinctionTick.HasValue
                     ? $"EXTINÇÃO no tick {metrics.ExtinctionTick.Value} " +
@@ -310,6 +312,38 @@ namespace Eden.Presentation
                                     ? "sem espaço para o filho ao lado"
                                     : "população no teto"));
             return text.ToString().TrimEnd();
+        }
+
+        /// <summary>A start that was refused, above everything else: the scenario and why; the run shown goes on.</summary>
+        public static string StartRefused(string problem) =>
+            $"CENÁRIO INVIÁVEL — não iniciado; a execução mostrada continua. Motivo: {problem}";
+
+        /// <summary>
+        /// Where energy and water went since the start or the load, split by cause, and how far each balance is from
+        /// closing (float rounding only, when the audit is complete).
+        /// </summary>
+        public static string Audit(WorldAudit audit, WorldState world)
+        {
+            var e = audit.Energy;
+            var text = new StringBuilder();
+            text.AppendLine($"Energia em {audit.Ticks} ticks: comida surgiu {e.FoodAppeared:0}, comida comida {e.Food:0} " +
+                            $"(absorvida {e.Absorbed:0}, desperdiçada {e.Overflow:0.#})");
+            text.AppendLine($"Gastos cobrados {e.Charged:0.#}: manutenção {e.Maintenance:0.#} · sensor {e.SensorCosts:0.#} · " +
+                            $"esforço (inclui empurrar) {e.Effort:0.#} · olhos {e.EyeCosts:0.#} · giro {e.TurnCosts:0.#} · " +
+                            $"não pagos (sem energia) {e.Unpaid:0.#}");
+            text.Append($"Reprodução: repassado {e.Transferred:0.#}, custo {e.BirthCosts:0.#} · levado por mortos " +
+                        $"{e.CarriedAwayByDeaths:0.#} · fechamento: criaturas {audit.CreatureEnergyError(world):0.###}, " +
+                        $"comida {audit.FoodEnergyError(world):0.###}");
+            if (world.Config.HasWater)
+            {
+                var h = audit.Hydration;
+                text.Append($"\nÁgua: bebida {h.Drunk:0.#} (de fontes inesgotáveis {h.DrunkFromInexhaustible:0.#}), " +
+                            $"perdida {h.Lost:0.#}, repassada {h.Transferred:0.#}, levada por mortos {h.CarriedAwayByDeaths:0.#}, " +
+                            $"recarga {h.Recharged:0.#} · fechamento: criaturas {audit.HydrationError(world):0.###}, " +
+                            $"fontes {audit.WaterError(world):0.###}");
+            }
+
+            return text.ToString();
         }
 
         /// <summary>

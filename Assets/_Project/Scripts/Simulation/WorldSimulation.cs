@@ -246,12 +246,14 @@ namespace Eden.Simulation
                     case SimulationEventKind.FoodRespawn when !World.Config.SolidBodies:
                         World.AddFood(WorldFactory.RandomFoodPosition(World.SpawnRandom, World.Config, tick), World.Config.FoodEnergy);
                         LastFoodRespawned++;
+                        energy.FoodAppeared += World.Config.FoodEnergy;
                         break;
                     case SimulationEventKind.FoodRespawn:
                         if (Placement.TryPlaceFood(World.SpawnRandom, World.Config, World.Creatures, tick, out var place))
                         {
                             World.AddFood(place, World.Config.FoodEnergy);
                             LastFoodRespawned++;
+                            energy.FoodAppeared += World.Config.FoodEnergy;
                         }
                         else
                         {
@@ -409,10 +411,14 @@ namespace Eden.Simulation
                 var effort = action.Thrust * action.Thrust + action.Strafe * action.Strafe;
                 var body = creature.Body;
                 float cost;
+                // The parts are audited apart in doubles; the charge itself keeps its single float expression.
+                energy.Maintenance += (double)config.TickDuration * body.MetabolismPerSecond;
+                energy.Effort += (double)config.TickDuration * body.MovementCostPerSecond * effort;
                 if (creature.Eyes == null)
                 {
                     cost = config.TickDuration *
                            (body.MetabolismPerSecond + body.MovementCostPerSecond * effort + body.SensorCostPerSecond);
+                    energy.SensorCosts += (double)config.TickDuration * body.SensorCostPerSecond;
                 }
                 else
                 {
@@ -424,6 +430,8 @@ namespace Eden.Simulation
                     energy.EyeCosts += (double)config.TickDuration * eyeCost;
                     energy.TurnCosts += (double)config.TickDuration * body.MovementCostPerSecond * turning;
                 }
+
+                energy.Charged += cost;
 
                 // Kept as one expression: splitting it would round the intermediate sum and change every run.
                 var left = creature.Energy + foodGains[i] - cost;

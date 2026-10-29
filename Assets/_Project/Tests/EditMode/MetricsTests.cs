@@ -76,7 +76,7 @@ namespace Eden.Tests.EditMode
             try
             {
                 Thread.CurrentThread.CurrentCulture = new CultureInfo("pt-BR");
-                Assert.That(MetricsCsvLog.FormatRow(sample), Is.EqualTo("40,2,60,120,7,1,0,43.21,55,0,0,0,0"));
+                Assert.That(MetricsCsvLog.FormatRow(sample), Is.EqualTo("40,2,60,120,7,1,0,43.21,55,0,0,0,0,0,0,0,0"));
             }
             finally
             {
@@ -98,7 +98,7 @@ namespace Eden.Tests.EditMode
                 }
 
                 var lines = File.ReadAllLines(path);
-                Assert.That(lines, Is.EqualTo(new[] { MetricsCsvLog.Header, "20,1,64,128,3,0,0,49.9,3,0,0,0,0" }));
+                Assert.That(lines, Is.EqualTo(new[] { MetricsCsvLog.Header, "20,1,64,128,3,0,0,49.9,3,0,0,0,0,0,0,0,0" }));
             }
             finally
             {
