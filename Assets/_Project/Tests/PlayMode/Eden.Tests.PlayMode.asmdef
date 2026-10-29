@@ -8,6 +8,7 @@
     "Eden.Application",
     "Eden.Evolution",
     "Eden.Presentation",
+    "Eden.Persistence",
     "UnityEngine.TestRunner",
     "UnityEditor.TestRunner"
   ],

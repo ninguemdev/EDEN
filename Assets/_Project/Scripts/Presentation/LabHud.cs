@@ -13,9 +13,13 @@ namespace Eden.Presentation
     {
         public LabChoice(LabMode mode, int preset, int seed, LabBrainKind brain, bool evolvingBody = false,
             bool neat = false, bool eyes = false, bool evolvingEyes = false, bool solidBodies = false,
-            ObstacleLayout obstacles = ObstacleLayout.None, ScenarioSettings scenario = null)
+            ObstacleLayout obstacles = ObstacleLayout.None, ScenarioSettings scenario = null, string genomeDirectory = null,
+            string compositionText = null, bool compositionFrozen = true)
         {
             Scenario = scenario;
+            GenomeDirectory = genomeDirectory;
+            CompositionText = compositionText;
+            CompositionFrozen = compositionFrozen;
             SolidBodies = solidBodies || obstacles != ObstacleLayout.None;
             Obstacles = obstacles;
             Eyes = eyes || evolvingEyes;
@@ -59,6 +63,15 @@ namespace Eden.Presentation
         /// for the 50 × 50 control with the template's resources.
         /// </summary>
         public ScenarioSettings Scenario { get; }
+
+        /// <summary>Directory of genome files: the evolution's seed pool, and the genomes of a composition.</summary>
+        public string GenomeDirectory { get; }
+
+        /// <summary>Which genomes and how many copies, for <see cref="LabBrainKind.Composition"/> (see <see cref="GenomeComposition.Parse"/>).</summary>
+        public string CompositionText { get; }
+
+        /// <summary>Composed genomes face each other unchanged; otherwise they have mutating descendants.</summary>
+        public bool CompositionFrozen { get; }
     }
 
     /// <summary>
@@ -98,8 +111,12 @@ namespace Eden.Presentation
         private const string NeatNetworkLegend =
             "Colunas por profundidade. Nós: valor (verde +, vermelho −). Linhas: peso × sinal; cinza = conexão desabilitada.";
 
-        private static readonly string[] BrainChoices =
-            { "Heurístico", "Aleatório", "Rede aleatória", "População evoluída" };
+        /// <summary>Brains of the shared world, in <see cref="LabBrainKind"/> order.</summary>
+        public static readonly string[] BrainChoices =
+            { "Heurístico", "Aleatório", "Rede aleatória", "População evoluída", "Composição de genomas (pasta)" };
+
+        public static readonly string[] CompositionModeChoices =
+            { "Congelados (confronto, sem reprodução)", "Com descendência mutante" };
 
         private Label runStats;
         private Label checkpointStatus;
@@ -131,6 +148,9 @@ namespace Eden.Presentation
         private FloatField initialEnergyField;
         private float customSide = ScenarioSettings.ControlSide;
         private ScenarioSettings shownScenario = new ScenarioSettings();
+        private VisualElement compositionRow;
+        private TextField compositionField;
+        private DropdownField compositionModeField;
         private Label networkTitle;
         private Label networkLegend;
         private IntegerField seedField;
@@ -313,6 +333,11 @@ namespace Eden.Presentation
             sensesField.SetValueWithoutNotify(SensesChoices[choice.EvolvingEyes ? 2 : choice.Eyes ? 1 : 0]);
             arenaField.SetValueWithoutNotify(ArenaChoices[ArenaIndex(choice.SolidBodies, choice.Obstacles)]);
             ShowScenario(choice.Scenario ?? new ScenarioSettings());
+            if (choice.GenomeDirectory != null)
+                seedGenomesField.SetValueWithoutNotify(choice.GenomeDirectory);
+            if (choice.CompositionText != null)
+                compositionField.SetValueWithoutNotify(choice.CompositionText);
+            compositionModeField.SetValueWithoutNotify(CompositionModeChoices[choice.CompositionFrozen ? 0 : 1]);
             seedField.SetValueWithoutNotify(choice.Seed);
             UpdateBrainField();
             resumeButton.style.display = evolutionAvailable && choice.Mode == LabMode.SharedWorld
@@ -333,13 +358,14 @@ namespace Eden.Presentation
         {
             if (!Bind())
                 return default;
-            var brain = Math.Max(0, brainField.index);
+            // By label: the evolved population may be missing from the list, which shifts the indices after it.
+            var brain = Math.Max(0, Array.IndexOf(BrainChoices, brainField.value));
             var arena = Math.Max(0, arenaField.index);
             return new LabChoice((LabMode)Math.Max(0, modeField.index), Math.Max(0, presetField.index),
                 Math.Max(0, seedField.value), (LabBrainKind)brain, bodyField.index == 1, algorithmField.index == 1,
                 sensesField.index >= 1, sensesField.index == 2, arena >= 1,
                 arena == 2 ? ObstacleLayout.Pillars : arena == 3 ? ObstacleLayout.Corridor : ObstacleLayout.None,
-                ReadScenario());
+                ReadScenario(), seedGenomesField.value?.Trim(), compositionField.value, compositionModeField.index != 1);
         }
 
         // The scenario fields; a food count of 0 keeps the mode's own (the preset's or the episodes'), and a size that is
@@ -454,8 +480,11 @@ namespace Eden.Presentation
             bodyField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             algorithmField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             sensesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
-            seedGenomesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+            var composing = modeField.index == (int)LabMode.SharedWorld &&
+                            Array.IndexOf(BrainChoices, brainField.value) == (int)LabBrainKind.Composition;
+            seedGenomesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution || composing);
             episodeField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+            compositionRow.style.display = composing ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         // The scenario fields start at the control's values. A value the simulation would refuse (not a number, zero or
@@ -595,6 +624,12 @@ namespace Eden.Presentation
                     seedField.SetValueWithoutNotify(0);
             });
             seedGenomesField = root.Q<TextField>("seed-genomes-field");
+            compositionRow = root.Q<VisualElement>("composition-panel");
+            compositionField = root.Q<TextField>("composition-field");
+            compositionModeField = root.Q<DropdownField>("composition-mode-field");
+            compositionModeField.choices = new List<string>(CompositionModeChoices);
+            compositionModeField.index = 0;
+            brainField.RegisterValueChangedCallback(_ => UpdateBrainField());
             useExportDirectoryButton = root.Q<Button>("use-export-directory-button");
             useExportDirectoryButton.clicked += () => UseExportDirectoryClicked?.Invoke();
 

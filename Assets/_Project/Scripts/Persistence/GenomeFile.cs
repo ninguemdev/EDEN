@@ -99,7 +99,10 @@ namespace Eden.Persistence
         /// when building that pool: it never outranks a pool member with a real score, but mixing both kinds in one
         /// pool means the scored ones dominate elite selection.
         /// </summary>
-        public static GenomeRecord[] LoadPool(string directory)
+        public static GenomeRecord[] LoadPool(string directory) => LoadPool(directory, out _);
+
+        /// <summary>As above, with each genome's file name (e.g. for a composition that names its genomes).</summary>
+        public static GenomeRecord[] LoadPool(string directory, out string[] names)
         {
             if (string.IsNullOrEmpty(directory))
                 throw new ArgumentException("A directory path is required.", nameof(directory));
@@ -112,8 +115,13 @@ namespace Eden.Persistence
                 throw new CheckpointException($"{directory} has no genome files (*.json).");
 
             var pool = new GenomeRecord[paths.Length];
+            names = new string[paths.Length];
             for (var i = 0; i < pool.Length; i++)
+            {
                 pool[i] = Load(paths[i]);
+                names[i] = Path.GetFileName(paths[i]);
+            }
+
             return pool;
         }
 

@@ -35,7 +35,10 @@ namespace Eden.Presentation
         Neural = 2,
 
         /// <summary>The last evaluated generation of the lab's evolution, one individual per creature.</summary>
-        Evolved = 3
+        Evolved = 3,
+
+        /// <summary>Exact copies of genomes from a directory (see <see cref="GenomeComposition"/>).</summary>
+        Composition = 4
     }
 
     /// <summary>
@@ -52,6 +55,8 @@ namespace Eden.Presentation
     /// -eden-resources density|quantity, -eden-food N, -eden-food-energy E, -eden-food-respawn SECONDS,
     /// -eden-water none|pond|ponds, -eden-water-supply finite|inexhaustible, -eden-water-capacity C,
     /// -eden-water-recharge R, -eden-episode-seconds S, -eden-max-age SECONDS, -eden-initial-energy E,
+    /// a shared world by composition with -eden-brain composition -eden-genomes DIR -eden-composition "a.json*20;#2*5"
+    /// [-eden-composition-mode frozen|descendants] (see <see cref="GenomeComposition.Parse"/>),
     /// -eden-seed N,
     /// -eden-select ID, -eden-max, and for a measured run
     /// -eden-benchmark SECONDS [-eden-benchmark-warmup SECONDS] [-eden-benchmark-output DIR] (see <see cref="LabBenchmark"/>).
@@ -82,6 +87,14 @@ namespace Eden.Presentation
         [Tooltip("Obstacles of the arena (shared world and episodes); any layout but None makes the bodies solid.")]
         [SerializeField] private ObstacleLayout obstacles;
         private ScenarioSettings scenario = new ScenarioSettings();
+
+        /// <summary>Brain name of a shared world by composition (its genomes may mix MLP and NEAT brains).</summary>
+        public const string CompositionBrainName = "composition";
+
+        private string genomeDirectory;
+        private string compositionText;
+        private bool compositionFrozen = true;
+        private GenomeComposition composition;
         [SerializeField] private bool writeMetrics = true;
         [SerializeField] private WorldView worldView;
         [SerializeField] private LabHud hud;
@@ -209,6 +222,9 @@ namespace Eden.Presentation
             solidBodies = choice.SolidBodies;
             obstacles = choice.Obstacles;
             scenario = choice.Scenario?.Clone() ?? new ScenarioSettings();
+            genomeDirectory = choice.GenomeDirectory;
+            compositionText = choice.CompositionText;
+            compositionFrozen = choice.CompositionFrozen;
             StartRun();
         }
 
@@ -259,7 +275,7 @@ namespace Eden.Presentation
             {
                 var shared = mode == LabMode.SharedWorld
                     ? new SharedWorldSnapshot(sharedSettings, Simulation.Capture(), controller.Capture(),
-                        sharedGenomes?.Capture(), genealogy?.Capture())
+                        sharedGenomes?.Capture(), genealogy?.Capture(), composition)
                     : null;
                 var checkpoint = new Checkpoint(ModeName(mode), Preset.Name, (ulong)seed, KindName(brain),
                     Evolution?.Capture(), shared);
@@ -293,6 +309,7 @@ namespace Eden.Presentation
             WorldSimulation world;
             BrainController brains;
             SharedGenomes genomes = null;
+            GenomeComposition loadedComposition = null;
             Genealogy lineage = null;
             IReadOnlyList<Individual> individuals = null;
             var name = MlpBrain.BrainName;
@@ -327,7 +344,12 @@ namespace Eden.Presentation
                     }
 
                     world = WorldSimulation.Restore(config, saved.SharedWorld.World);
-                    genomes = CreateGenomes(config, loadedBrain, individuals, session);
+                    loadedComposition = saved.SharedWorld.Composition;
+                    if ((loadedBrain == LabBrainKind.Composition) != (loadedComposition != null))
+                        throw new CheckpointException("Only a world by composition holds a composition, and it needs one.");
+                    loadedComposition?.RequireFits(config);
+                    genomes = loadedComposition?.CreateGenomes(config) ??
+                              CreateGenomes(config, loadedBrain, individuals, session);
                     if (genomes == null && saved.SharedWorld.BornGenomes.Count > 0)
                         throw new CheckpointException("Only neural brains have genomes to restore.");
                     genomes?.Restore(saved.SharedWorld.BornGenomes, world.World);
@@ -369,6 +391,7 @@ namespace Eden.Presentation
             BrainName = name;
             sharedSettings = saved.SharedWorld?.Settings;
             sharedGenomes = genomes;
+            composition = loadedComposition;
             genealogy = lineage;
             sharedIndividuals = individuals;
             sharedGeneration = session?.LastTraining?.Summary.Generation ?? 0;
@@ -798,18 +821,23 @@ namespace Eden.Presentation
                 runSettings.InitialPopulation = sharedIndividuals.Count;
             }
 
-            var config = new SimulationConfig(runSettings);
+            composition = null;
+            WorldState composed = null;
+            if (brain == LabBrainKind.Composition && !TryCompose(runSettings, out composition, out composed))
+                brain = LabBrainKind.Heuristic;
+
+            var config = composed?.Config ?? new SimulationConfig(runSettings);
             sharedSettings = runSettings;
-            // Evolved creatures live with the bodies their genes express in the evolution; any other brain gets the
-            // reference body.
+            // Evolved creatures live with the bodies their genes express in the evolution, composed ones with their
+            // genome's body; any other brain gets the reference body.
             var individuals = sharedIndividuals;
             var plan = Evolution?.Evolution.Plan;
-            Simulation = new WorldSimulation(individuals == null
+            Simulation = new WorldSimulation(composed ?? (individuals == null
                 ? WorldFactory.CreateInitial(config)
-                : WorldFactory.CreateInitial(config, i => plan.ExpressedGenes(individuals[i].Genome.Body)));
+                : WorldFactory.CreateInitial(config, i => plan.ExpressedGenes(individuals[i].Genome.Body))));
             for (var i = 0; individuals != null && i < individuals.Count; i++)
                 Simulation.World.Creatures[i].Eyes = individuals[i].Genome.Eyes;
-            sharedGenomes = CreateGenomes(config, brain, individuals, Evolution);
+            sharedGenomes = composition?.CreateGenomes(config) ?? CreateGenomes(config, brain, individuals, Evolution);
             Simulation.Heredity = sharedGenomes;
             genealogy = config.Reproduction ? new Genealogy(Simulation.World) : null;
             controller = CreateController(config, brain, sharedGenomes, out var name);
@@ -817,6 +845,44 @@ namespace Eden.Presentation
             metrics = new MetricsRecorder(config, config.TicksPerSecond);
             if (writeMetrics)
                 OpenMetricsLog(config);
+        }
+
+        // The shared world by composition: the genomes named in the composition text, from the genome directory, each
+        // checked against the world. A composition that cannot be read or does not fit leaves the heuristic brain and
+        // says why, rather than leaving the lab unable to start.
+        private bool TryCompose(SimulationSettings runSettings, out GenomeComposition composed, out WorldState world)
+        {
+            composed = null;
+            world = null;
+            try
+            {
+                if (string.IsNullOrEmpty(genomeDirectory))
+                    throw new CheckpointException("choose the genome directory (Pool de genomas)");
+                var pool = GenomeFile.LoadPool(genomeDirectory, out var names);
+                var genomes = new Genome[pool.Length];
+                var fitness = new float[pool.Length];
+                for (var i = 0; i < pool.Length; i++)
+                {
+                    genomes[i] = pool[i].Genome;
+                    fitness[i] = pool[i].FitnessFor(Fitness.Profile) ?? 0f;
+                }
+
+                var candidate = GenomeComposition.Parse(compositionText, names, genomes, fitness, compositionFrozen);
+                candidate.Apply(runSettings);
+                world = candidate.CreateWorld(new SimulationConfig(runSettings));
+                composed = candidate;
+                ShowGenomeExportStatus(LabText.CompositionStarted(candidate));
+                return true;
+            }
+            catch (Exception error) when (error is CheckpointException || error is ArgumentException ||
+                                          error is ScenarioInfeasibleException)
+            {
+                Debug.LogWarning($"EDEN: composition not used ({error.Message})");
+                ShowGenomeExportStatus(LabText.CompositionFailed(error.Message));
+                runSettings.InitialPopulation = Preset.Population;
+                runSettings.Reproduction = settings.Reproduction;
+                return false;
+            }
         }
 
         private void StartEvolution()
@@ -961,7 +1027,8 @@ namespace Eden.Presentation
             hud.ShowPlayback(Clock.IsPaused, Clock.IsUnpaced);
             hud.ShowRun(evolving
                 ? LabText.Evolution(Evolution, Clock, Preset, RunDirectory)
-                : LabText.Run(Simulation, Clock, BrainName, Preset, metrics, RunDirectory, SharedSource(), arenaTally));
+                : LabText.Run(Simulation, Clock, BrainName, Preset, metrics, RunDirectory, SharedSource(), arenaTally,
+                    composition));
             hud.ShowEvolution(evolving || sharedIndividuals != null ? Evolution : null);
             hud.ShowInspector(Selected.HasValue ? DescribeSelected(Selected.Value) : null);
             hud.SetExportAvailable(ResolveExportableGenome() != null);
@@ -1021,6 +1088,8 @@ namespace Eden.Presentation
                                SpeciesOf(current)));
             }
 
+            if (composition != null)
+                return GenealogyOf(creature.Id) + "\n\n" + LabText.CompositionOrigin(composition, genealogy, creature.Id);
             var index = creature.Id.Value - 1;
             if (sharedIndividuals == null || index < 0 || index >= sharedIndividuals.Count)
                 return GenealogyOf(creature.Id);
@@ -1153,6 +1222,15 @@ namespace Eden.Presentation
                     case "-eden-initial-energy" when TryNumber(value, out var initialEnergy):
                         scenario.InitialEnergy = initialEnergy;
                         break;
+                    case "-eden-genomes":
+                        genomeDirectory = value;
+                        break;
+                    case "-eden-composition":
+                        compositionText = value;
+                        break;
+                    case "-eden-composition-mode" when value == "frozen" || value == "descendants":
+                        compositionFrozen = value == "frozen";
+                        break;
                     case "-eden-reproduction" when value == "on" || value == "off":
                         settings.Reproduction = value == "on";
                         break;
@@ -1202,6 +1280,9 @@ namespace Eden.Presentation
         {
             switch (kind)
             {
+                case LabBrainKind.Composition:
+                    brainName = CompositionBrainName;
+                    return new BrainController(config, id => GenomeBrains.Create(genomes.GenomeOf(id)));
                 case LabBrainKind.Evolved:
                 case LabBrainKind.Neural:
                     brainName = genomes.GenomeOf(new CreatureId(1)).Neat == null ? MlpBrain.BrainName : NeatBrain.BrainName;
@@ -1262,7 +1343,7 @@ namespace Eden.Presentation
 
         private LabChoice CurrentChoice() =>
             new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes, solidBodies, obstacles,
-                scenario.Clone());
+                scenario.Clone(), genomeDirectory, compositionText, compositionFrozen);
 
         // The lab's scenario with its arena choice, the same for the shared world and the evolution's episodes.
         private ScenarioSettings AppliedScenario()

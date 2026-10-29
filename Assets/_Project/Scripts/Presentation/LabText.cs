@@ -20,7 +20,7 @@ namespace Eden.Presentation
         /// </summary>
         public static string Run(WorldSimulation simulation, FixedStepClock clock, string brainName,
             ExperimentPreset preset, MetricsRecorder metrics, string runDirectory, string evolvedSource,
-            ArenaTally arena = default)
+            ArenaTally arena = default, GenomeComposition composition = null)
         {
             var world = simulation.World;
             var config = world.Config;
@@ -55,10 +55,16 @@ namespace Eden.Presentation
                 text.AppendLine($"Reposições de comida adiadas (sem lugar livre): {arena.DelayedRespawns}");
             }
 
-            text.AppendLine(evolvedSource == null
-                ? "Cérebro: " + BrainLabel(brainName)
-                : $"Cérebro: rede 12-16-3 da população evoluída ({evolvedSource}), um indivíduo por criatura; " +
-                  "sem memória nem aprendizado");
+            if (composition != null)
+                text.AppendLine($"Composição: {composition.Describe()} criaturas, cada cópia com estado próprio  ·  " +
+                                (composition.Frozen
+                                    ? "congelados: confronto sem reprodução, nenhum genoma muda"
+                                    : "com descendência: filhos mutam e entram na genealogia"));
+            else
+                text.AppendLine(evolvedSource == null
+                    ? "Cérebro: " + BrainLabel(brainName)
+                    : $"Cérebro: rede 12-16-3 da população evoluída ({evolvedSource}), um indivíduo por criatura; " +
+                      "sem memória nem aprendizado");
             if (metrics.HasSample)
             {
                 var sample = metrics.LastSample;
@@ -447,6 +453,29 @@ namespace Eden.Presentation
         }
 
         /// <summary>
+        /// Which genome of the composition a creature carries: a founder's entry and copy, or, for a descendant, the
+        /// entry of the founder its line goes back to (when the genealogy knows it).
+        /// </summary>
+        public static string CompositionOrigin(GenomeComposition composition, Genealogy genealogy, CreatureId id)
+        {
+            var founder = id;
+            if (id.Value > composition.Total)
+            {
+                if (genealogy == null || !genealogy.TryGet(id, out _))
+                    return "Composição: descendente (linha não registrada)";
+                var line = genealogy.Ancestry(id);
+                founder = line[line.Count - 1].Creature;
+                if (founder.Value > composition.Total)
+                    return "Composição: descendente (fundadora anterior ao registro)";
+            }
+
+            var entry = composition.Entries[composition.EntryOf(founder)];
+            return founder == id
+                ? $"Composição: {entry.Source}, cópia {composition.CopyOf(id)} de {entry.Count}"
+                : $"Composição: descende de {founder} ({entry.Source}); genoma mutado ao nascer";
+        }
+
+        /// <summary>
         /// Line of a creature back to its founder (the nearest ancestors and the founder when the line is long) and its
         /// descendants, from the genealogy of the shared world.
         /// </summary>
@@ -548,6 +577,12 @@ namespace Eden.Presentation
         public static string GenomeExported(string path) => $"Genoma exportado: {path}";
 
         public static string GenomeExportFailed(string reason) => $"Genoma não exportado: {reason}";
+
+        public static string CompositionStarted(GenomeComposition composition) =>
+            $"Composição: {composition.Describe()} criaturas " + (composition.Frozen ? "(congelados)" : "(com descendência)");
+
+        public static string CompositionFailed(string reason) =>
+            $"Composição não usada (cérebro heurístico no lugar): {reason}";
 
         public static string GenomePoolFailed(string reason) => $"Pool de genomas não usado (geração 0 aleatória): {reason}";
 
