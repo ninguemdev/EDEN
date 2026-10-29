@@ -159,6 +159,7 @@ namespace Eden.Persistence
                 }
 
                 lines.Add("obstacles=" + world.Obstacles.Count.ToString(culture) + ";" + string.Join(";", obstacles));
+                lines.Add("obstacle_layout=" + LayoutName(world));
                 lines.Add("occlusion=obstacles block movement, eyes and feeding;the legacy senses do not see them");
                 lines.Add("free_regions=" + world.FreeSpace.Regions.ToString(culture));
             }
@@ -167,6 +168,13 @@ namespace Eden.Persistence
             if (ResumedFrom != null)
                 lines.AddRange(ResumedFrom.Describe());
             return lines;
+        }
+
+        /// <summary>Name of the config's obstacle layout (none, pillars, corridor), or "custom" for hand-placed obstacles.</summary>
+        internal static string LayoutName(SimulationConfig world)
+        {
+            var layout = ObstacleLayouts.Identify(world);
+            return layout.HasValue ? ObstacleLayouts.Name(layout.Value) : "custom";
         }
 
         // "fixed" for the fixed-body control, otherwise the expressed genes in genome order, e.g. "size;sensor".

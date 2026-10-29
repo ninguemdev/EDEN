@@ -6,9 +6,11 @@ using UnityEngine;
 namespace Eden.Presentation
 {
     /// <summary>
-    /// Draws the world with pooled sprites: arena, food and creatures (body sized by its eat radius and colored by the
-    /// share of its own capacity it holds, a nose dot showing heading, a ring and the sensor range on the selected one;
-    /// for a selected creature with eyes, each eye's cone instead, with a dot on the food each eye sees now). Creatures
+    /// Draws the world with pooled sprites: arena, obstacles, food and creatures (body sized by its eat radius and
+    /// colored by the share of its own capacity it holds, a nose dot showing heading, a ring and the sensor range on the
+    /// selected one; for a selected creature with eyes, each eye's cone instead, with a dot on the food each eye sees
+    /// now). With solid bodies the body is the solid disc itself, the selected one also shows its mouth's reach as a
+    /// halo, and a dot marks where two bodies touch now (<see cref="PhysicalInspection"/>). Creatures
     /// are drawn between their pose before the last tick (see
     /// <see cref="RememberPreviousTick"/>) and their current pose, so motion is smooth at any frame rate although ticks
     /// run at 20 Hz. Read-only: it never changes simulation state and never draws from simulation random streams.
@@ -28,6 +30,12 @@ namespace Eden.Presentation
         private static readonly Color SelectionColor = Color.white;
         private static readonly Color SensorColor = new Color(1f, 1f, 1f, 0.06f);
         private static readonly Color TargetColor = Color.white;
+        private static readonly Color ObstacleColor = new Color32(74, 88, 96, 255);
+        private static readonly Color ReachColor = new Color32(240, 200, 92, 70);
+        private static readonly Color ContactColor = new Color32(255, 150, 60, 255);
+        private const float ContactDiameter = 0.22f;
+        private const float SolidSelectionScale = 1.2f;
+        private const float PointSelectionScale = 1.5f;
         private const int ConeSegments = 16;
         private const float TargetDiameter = 0.55f;
 
@@ -61,12 +69,23 @@ namespace Eden.Presentation
         private readonly List<int> coneTriangles = new List<int>();
         private readonly SpriteRenderer[] eyeTargets = new SpriteRenderer[EyeSet.MaxEyes];
         private readonly float[] eyeReading = new float[EyeChannels.Count];
+        private readonly List<SpriteRenderer> obstacles = new List<SpriteRenderer>();
+        private readonly List<SpriteRenderer> contactDots = new List<SpriteRenderer>();
+        private readonly List<TouchingPair> contactPairs = new List<TouchingPair>();
+        private readonly List<Vector2> drawnPositions = new List<Vector2>();
+        private readonly PhysicalInspection inspection = new PhysicalInspection();
 
         /// <summary>Eye cones drawn in the last <see cref="Render"/> (those of the selected creature).</summary>
         public int DrawnEyeCones { get; private set; }
 
         /// <summary>Food items marked as seen by the selected creature's eyes in the last <see cref="Render"/>.</summary>
         public int DrawnEyeTargets { get; private set; }
+
+        /// <summary>Obstacles drawn for the bound world.</summary>
+        public int DrawnObstacles { get; private set; }
+
+        /// <summary>Touching pairs of solid bodies marked in the last <see cref="Render"/>.</summary>
+        public int DrawnContacts { get; private set; }
 
         public int VisibleCreatures => creatures.Count;
         public int VisibleFood => food.Count;
@@ -123,6 +142,22 @@ namespace Eden.Presentation
             return false;
         }
 
+        /// <summary>
+        /// Diameter in arena units of the mouth's reach drawn around the selected solid body; false when none is drawn
+        /// for that creature (not selected, or points instead of solid bodies, where the body already is the reach).
+        /// </summary>
+        public bool TryGetDrawnReach(CreatureId creature, out float diameter)
+        {
+            if (creatures.TryGetValue(creature, out var visual) && visual.Reach.enabled)
+            {
+                diameter = visual.Reach.transform.localScale.x * visual.Root.transform.localScale.x;
+                return true;
+            }
+
+            diameter = 0f;
+            return false;
+        }
+
         /// <summary>Where a creature was last drawn, in arena units and degrees.</summary>
         public bool TryGetDrawnPose(CreatureId creature, out Vector2 position, out float headingDegrees)
         {
@@ -156,6 +191,7 @@ namespace Eden.Presentation
                 arena = CreateRenderer("Arena", transform, squareSprite, ArenaColor, -10);
             arena.transform.localPosition = new Vector3(config.ArenaWidth / 2f, config.ArenaHeight / 2f, 0f);
             arena.transform.localScale = new Vector3(config.ArenaWidth, config.ArenaHeight, 1f);
+            BindObstacles(config);
 
             if (targetCamera != null)
             {
@@ -177,6 +213,8 @@ namespace Eden.Presentation
             frame++;
             var drewEyes = false;
             var referenceRadius = world.Config.EatRadius;
+            var solid = world.Config.SolidBodies;
+            drawnPositions.Clear();
             var interpolate = fraction < 1f && HasPrevious(world);
             LastFraction = interpolate ? Mathf.Clamp01(fraction) : 1f;
             // Indexed loops: a foreach over the read-only lists would allocate an enumerator every frame.
@@ -203,12 +241,19 @@ namespace Eden.Presentation
 
                 visual.Root.transform.localPosition = new Vector3(x, y, 0f);
                 visual.Root.transform.localRotation = Quaternion.Euler(0f, 0f, heading);
+                drawnPositions.Add(new Vector2(x, y));
                 var body = creature.Body;
-                var size = body.EatRadius / referenceRadius;
+                // Solid bodies are drawn as the disc that collides; points as the reach of their mouth.
+                var size = solid ? 2f * body.Radius / CreatureDiameter : body.EatRadius / referenceRadius;
                 visual.Root.transform.localScale = new Vector3(size, size, 1f);
                 visual.Body.color = Color.Lerp(HungryColor, FedColor, Mathf.Clamp01(creature.Energy / body.MaxEnergy));
                 var isSelected = selected.HasValue && selected.Value == creature.Id;
                 visual.Selection.enabled = isSelected;
+                visual.Selection.transform.localScale =
+                    Vector3.one * CreatureDiameter * (solid ? SolidSelectionScale : PointSelectionScale);
+                visual.Reach.enabled = isSelected && solid;
+                if (isSelected && solid)
+                    visual.Reach.transform.localScale = Vector3.one * (2f * body.EatRadius / size);
                 visual.Sensor.enabled = isSelected && creature.Eyes == null;
                 if (isSelected && creature.Eyes == null)
                     visual.Sensor.transform.localScale = Vector3.one * (2f * body.SensorRange / size);
@@ -221,6 +266,7 @@ namespace Eden.Presentation
 
             if (!drewEyes)
                 HideEyes();
+            DrawContacts(world);
 
             for (var i = 0; i < world.Food.Count; i++)
             {
@@ -237,6 +283,56 @@ namespace Eden.Presentation
             }
 
             RemoveStale();
+        }
+
+        // The obstacles of the bound arena: static, so drawn once per world.
+        private void BindObstacles(SimulationConfig config)
+        {
+            var count = config.Obstacles.Count;
+            while (obstacles.Count < count)
+                obstacles.Add(CreateRenderer("Obstacle", transform, squareSprite, ObstacleColor, -5));
+            for (var i = 0; i < obstacles.Count; i++)
+            {
+                var shown = i < count;
+                obstacles[i].gameObject.SetActive(shown);
+                if (!shown)
+                    continue;
+                var obstacle = config.Obstacles[i];
+                obstacles[i].transform.localPosition = new Vector3((obstacle.MinX + obstacle.MaxX) / 2f,
+                    (obstacle.MinY + obstacle.MaxY) / 2f, 0f);
+                obstacles[i].transform.localScale = new Vector3(obstacle.Width, obstacle.Height, 1f);
+            }
+
+            DrawnObstacles = count;
+        }
+
+        // A dot where each touching pair meets, between where the two are drawn (the point on the line between the
+        // centres at the first body's radius); no dots without solid bodies.
+        private void DrawContacts(WorldState world)
+        {
+            var count = inspection.FindPairs(world, contactPairs);
+            while (contactDots.Count < count)
+            {
+                var dot = CreateRenderer("Contact", transform, circleSprite, ContactColor, 5);
+                dot.transform.localScale = Vector3.one * ContactDiameter;
+                contactDots.Add(dot);
+            }
+
+            for (var i = 0; i < contactDots.Count; i++)
+            {
+                var shown = i < count;
+                if (contactDots[i].enabled != shown)
+                    contactDots[i].enabled = shown;
+                if (!shown)
+                    continue;
+                var pair = contactPairs[i];
+                var first = world.Creatures[pair.First].Body.Radius;
+                var second = world.Creatures[pair.Second].Body.Radius;
+                var at = Vector2.Lerp(drawnPositions[pair.First], drawnPositions[pair.Second], first / (first + second));
+                contactDots[i].transform.localPosition = new Vector3(at.x, at.y, 0f);
+            }
+
+            DrawnContacts = count;
         }
 
         // The selected creature's cones, from where it is drawn, and a dot on the food each eye sees in the current state.
@@ -382,11 +478,13 @@ namespace Eden.Presentation
             nose.transform.localPosition = new Vector3(CreatureDiameter * 0.3f, 0f, 0f);
             nose.transform.localScale = Vector3.one * CreatureDiameter * 0.3f;
             var selection = CreateRenderer("Selection", root.transform, circleSprite, SelectionColor, 1);
-            selection.transform.localScale = Vector3.one * CreatureDiameter * 1.5f;
+            selection.transform.localScale = Vector3.one * CreatureDiameter * PointSelectionScale;
             selection.enabled = false;
+            var reach = CreateRenderer("Reach", root.transform, circleSprite, ReachColor, 0);
+            reach.enabled = false;
             var sensor = CreateRenderer("Sensor", root.transform, circleSprite, SensorColor, -1);
             sensor.enabled = false;
-            return new CreatureVisual(root, body, selection, sensor);
+            return new CreatureVisual(root, body, selection, sensor, reach);
         }
 
         private FoodVisual CreateFoodVisual()
@@ -427,12 +525,14 @@ namespace Eden.Presentation
 
         private sealed class CreatureVisual
         {
-            public CreatureVisual(GameObject root, SpriteRenderer body, SpriteRenderer selection, SpriteRenderer sensor)
+            public CreatureVisual(GameObject root, SpriteRenderer body, SpriteRenderer selection, SpriteRenderer sensor,
+                SpriteRenderer reach)
             {
                 Root = root;
                 Body = body;
                 Selection = selection;
                 Sensor = sensor;
+                Reach = reach;
             }
 
             public GameObject Root { get; }
@@ -441,6 +541,9 @@ namespace Eden.Presentation
 
             /// <summary>Disk of the sensor range, shown for the selected creature only.</summary>
             public SpriteRenderer Sensor { get; }
+
+            /// <summary>Halo of the mouth's reach around a selected solid body.</summary>
+            public SpriteRenderer Reach { get; }
             public int Frame { get; set; }
         }
 

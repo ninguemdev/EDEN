@@ -24,8 +24,8 @@ namespace Eden.Simulation
     internal sealed class Contacts
     {
         // Bodies this close beyond touching still count as touching (for the velocity rule and the count), and overlaps
-        // up to this little do not ask for another pass.
-        private const float TouchSlack = 1e-4f;
+        // up to this little do not ask for another pass. PhysicalInspection counts contacts by the same rule.
+        internal const float TouchSlack = 1e-4f;
 
         // Most rounds of pushing a body out of the obstacles it overlaps.
         private const int ObstacleRounds = 4;

@@ -19,6 +19,31 @@ namespace Eden.Simulation
         public SimulationEventKind Kind { get; }
     }
 
+    /// <summary>Why a ready parent had no child.</summary>
+    public enum BirthRefusalReason
+    {
+        /// <summary>The population was at its cap.</summary>
+        PopulationCap = 0,
+
+        /// <summary>No room for the child's disc next to the parent (solid bodies).</summary>
+        NoRoom = 1
+    }
+
+    /// <summary>A birth refused for free: the parent paid nothing and no child exists.</summary>
+    public readonly struct BirthRefusal
+    {
+        public BirthRefusal(CreatureId parent, long tick, BirthRefusalReason reason)
+        {
+            Parent = parent;
+            Tick = tick;
+            Reason = reason;
+        }
+
+        public CreatureId Parent { get; }
+        public long Tick { get; }
+        public BirthRefusalReason Reason { get; }
+    }
+
     public readonly struct CreatureBirth
     {
         public CreatureBirth(CreatureId child, CreatureId parent, long tick)

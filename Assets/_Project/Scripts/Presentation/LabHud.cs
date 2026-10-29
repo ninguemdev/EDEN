@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Eden.Application;
+using Eden.Domain;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -10,8 +11,11 @@ namespace Eden.Presentation
     public readonly struct LabChoice
     {
         public LabChoice(LabMode mode, int preset, int seed, LabBrainKind brain, bool evolvingBody = false,
-            bool neat = false, bool eyes = false, bool evolvingEyes = false)
+            bool neat = false, bool eyes = false, bool evolvingEyes = false, bool solidBodies = false,
+            ObstacleLayout obstacles = ObstacleLayout.None)
         {
+            SolidBodies = solidBodies || obstacles != ObstacleLayout.None;
+            Obstacles = obstacles;
             Eyes = eyes || evolvingEyes;
             EvolvingEyes = evolvingEyes;
             Mode = mode;
@@ -38,6 +42,15 @@ namespace Eden.Presentation
 
         /// <summary>The eyes' orientation, aperture and range are inherited with mutation.</summary>
         public bool EvolvingEyes { get; }
+
+        /// <summary>
+        /// Creatures are solid bodies that push each other (the arena of the shared world and of the evolution's episodes
+        /// alike); otherwise points that pass through each other (the control).
+        /// </summary>
+        public bool SolidBodies { get; }
+
+        /// <summary>Obstacle layout of the arena; any layout but none implies <see cref="SolidBodies"/>.</summary>
+        public ObstacleLayout Obstacles { get; }
     }
 
     /// <summary>
@@ -54,6 +67,10 @@ namespace Eden.Presentation
         public static readonly string[] AlgorithmChoices = { "MLP fixa (controle)", "NEAT (topologia evolui)" };
         public static readonly string[] SensesChoices =
             { "Legados (círculo + radar)", "Olhos fixos (requer NEAT)", "Olhos evolutivos (requer NEAT)" };
+
+        /// <summary>Arena of both modes; obstacles come only with solid bodies.</summary>
+        public static readonly string[] ArenaChoices =
+            { "Aberta (sem colisão; controle)", "Corpos sólidos", "Sólidos + pilares", "Sólidos + corredor" };
 
         private const string MlpNetworkTitle = "Rede neural (feed-forward: sem memória nem aprendizado)";
         private const string MlpNetworkLegend = "Neurônios: ativação (verde +, vermelho −). Linhas: peso × sinal.";
@@ -79,6 +96,7 @@ namespace Eden.Presentation
         private DropdownField bodyField;
         private DropdownField algorithmField;
         private DropdownField sensesField;
+        private DropdownField arenaField;
         private Label networkTitle;
         private Label networkLegend;
         private IntegerField seedField;
@@ -259,6 +277,7 @@ namespace Eden.Presentation
             bodyField.SetValueWithoutNotify(BodyChoices[choice.EvolvingBody ? 1 : 0]);
             algorithmField.SetValueWithoutNotify(AlgorithmChoices[choice.Neat || choice.Eyes ? 1 : 0]);
             sensesField.SetValueWithoutNotify(SensesChoices[choice.EvolvingEyes ? 2 : choice.Eyes ? 1 : 0]);
+            arenaField.SetValueWithoutNotify(ArenaChoices[ArenaIndex(choice.SolidBodies, choice.Obstacles)]);
             seedField.SetValueWithoutNotify(choice.Seed);
             UpdateBrainField();
             resumeButton.style.display = evolutionAvailable && choice.Mode == LabMode.SharedWorld
@@ -280,10 +299,19 @@ namespace Eden.Presentation
             if (!Bind())
                 return default;
             var brain = Math.Max(0, brainField.index);
+            var arena = Math.Max(0, arenaField.index);
             return new LabChoice((LabMode)Math.Max(0, modeField.index), Math.Max(0, presetField.index),
                 Math.Max(0, seedField.value), (LabBrainKind)brain, bodyField.index == 1, algorithmField.index == 1,
-                sensesField.index >= 1, sensesField.index == 2);
+                sensesField.index >= 1, sensesField.index == 2, arena >= 1,
+                arena == 2 ? ObstacleLayout.Pillars : arena == 3 ? ObstacleLayout.Corridor : ObstacleLayout.None);
         }
+
+        // Index into ArenaChoices: the open control, solid bodies, then one entry per obstacle layout.
+        private static int ArenaIndex(bool solidBodies, ObstacleLayout obstacles) =>
+            obstacles == ObstacleLayout.Pillars ? 2
+            : obstacles == ObstacleLayout.Corridor ? 3
+            : solidBodies ? 1
+            : 0;
 
         /// <summary>True while the user types into a text field, so key shortcuts must be ignored.</summary>
         public bool IsTyping
@@ -409,6 +437,9 @@ namespace Eden.Presentation
             sensesField = root.Q<DropdownField>("senses-field");
             sensesField.choices = new List<string>(SensesChoices);
             sensesField.index = 0;
+            arenaField = root.Q<DropdownField>("arena-field");
+            arenaField.choices = new List<string>(ArenaChoices);
+            arenaField.index = 0;
             // Eyes need NEAT: choosing eyes picks NEAT, and choosing the MLP control goes back to the legacy senses.
             sensesField.RegisterValueChangedCallback(change =>
             {

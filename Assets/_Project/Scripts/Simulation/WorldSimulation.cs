@@ -18,6 +18,7 @@ namespace Eden.Simulation
         private readonly List<ScheduledEvent<SimulationEvent>> dueEvents = new List<ScheduledEvent<SimulationEvent>>();
         private readonly List<CreatureDeath> deaths = new List<CreatureDeath>();
         private readonly List<CreatureBirth> births = new List<CreatureBirth>();
+        private readonly List<BirthRefusal> refusals = new List<BirthRefusal>();
         private Observation[] observations = Array.Empty<Observation>();
         private float[][] eyeInputs = Array.Empty<float[]>();
         private CreatureAction[] actions = Array.Empty<CreatureAction>();
@@ -43,7 +44,11 @@ namespace Eden.Simulation
             dueEvents.Capacity = config.InitialFood;
             deaths.Capacity = most;
             if (config.Reproduction)
+            {
                 births.Capacity = most;
+                refusals.Capacity = most;
+            }
+
             EnsureCapacity(most);
             if (config.SolidBodies)
                 contacts.Reserve(most);
@@ -98,6 +103,12 @@ namespace Eden.Simulation
         /// </summary>
         public int LastBirthsBlocked { get; private set; }
 
+        /// <summary>
+        /// Every birth refused during the last tick, cap and room alike, with its parent and reason, in the parents' id
+        /// order. Only a record: nothing in the world depends on it.
+        /// </summary>
+        public IReadOnlyList<BirthRefusal> LastRefusedBirths => refusals;
+
         /// <summary>What children inherit; null gives every child its parent's body genes. Never saved: set it again.</summary>
         public IHeredity Heredity { get; set; }
 
@@ -146,6 +157,7 @@ namespace Eden.Simulation
             var creatures = World.Creatures;
             deaths.Clear();
             births.Clear();
+            refusals.Clear();
             LastBirthsRefused = 0;
             LastBirthsBlocked = 0;
             LastFoodEaten = 0;
@@ -369,6 +381,7 @@ namespace Eden.Simulation
                 if (alive >= config.PopulationCap)
                 {
                     LastBirthsRefused++;
+                    refusals.Add(new BirthRefusal(parent.Id, tick, BirthRefusalReason.PopulationCap));
                     continue;
                 }
 
@@ -380,6 +393,7 @@ namespace Eden.Simulation
                     {
                         Heredity?.Cancel(childId);
                         LastBirthsBlocked++;
+                        refusals.Add(new BirthRefusal(parent.Id, tick, BirthRefusalReason.NoRoom));
                         continue;
                     }
 

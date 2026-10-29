@@ -46,7 +46,8 @@ namespace Eden.Presentation
     /// be saved to and loaded from a checkpoint between ticks.
     /// Command line (builds): -eden-mode shared|evolution, -eden-preset minimal|standard|stress,
     /// -eden-brain heuristic|random|neural, -eden-body fixed|evolving, -eden-algorithm mlp|neat, -eden-senses legacy|eyes,
-    /// -eden-eyes fixed|evolving,
+    /// -eden-eyes fixed|evolving, -eden-solid on|off, -eden-obstacles none|pillars|corridor (a layout implies solid
+    /// bodies; both apply to the shared world and to the evolution's episodes),
     /// -eden-reproduction on|off,
     /// -eden-seed N,
     /// -eden-select ID, -eden-max, and for a measured run
@@ -72,6 +73,11 @@ namespace Eden.Presentation
         [SerializeField] private bool neat;
         [SerializeField] private bool eyes;
         [SerializeField] private bool evolvingEyes;
+
+        [Tooltip("Creatures of the shared world and of the evolution's episodes are solid bodies that push each other.")]
+        [SerializeField] private bool solidBodies;
+        [Tooltip("Obstacles of the arena (shared world and episodes); any layout but None makes the bodies solid.")]
+        [SerializeField] private ObstacleLayout obstacles;
         [SerializeField] private bool writeMetrics = true;
         [SerializeField] private WorldView worldView;
         [SerializeField] private LabHud hud;
@@ -79,6 +85,7 @@ namespace Eden.Presentation
         private readonly NeuralSnapshot networkSnapshot = new NeuralSnapshot();
         private readonly NeatSnapshot neatSnapshot = new NeatSnapshot();
         private readonly float[] observedEyes = new float[NeuralContract.Eyes.InputCount];
+        private readonly List<CreatureId> touching = new List<CreatureId>();
         private readonly Stopwatch budgetWatch = new Stopwatch();
         private BrainController controller;
         private MetricsRecorder metrics;
@@ -91,6 +98,8 @@ namespace Eden.Presentation
         private IReadOnlyList<Individual> sharedIndividuals;
         private int sharedGeneration;
         private CreatureDeath? selectedDeath;
+        private BirthRefusal? selectedRefusal;
+        private ArenaTally arenaTally;
         private float hudTimer;
         private float networkTimer;
         private LabBenchmark benchmark;
@@ -111,6 +120,15 @@ namespace Eden.Presentation
 
         /// <summary>Whether the next evolution's eyes evolve (see <see cref="LabChoice.EvolvingEyes"/>).</summary>
         public bool EvolvingEyes => evolvingEyes;
+
+        /// <summary>Whether the next run's creatures are solid bodies (see <see cref="LabChoice.SolidBodies"/>).</summary>
+        public bool SolidBodies => solidBodies || obstacles != ObstacleLayout.None;
+
+        /// <summary>Obstacle layout of the next run's arena (see <see cref="LabChoice.Obstacles"/>).</summary>
+        public ObstacleLayout Obstacles => obstacles;
+
+        /// <summary>Totals of the physical arena since the shared world started or was loaded.</summary>
+        public ArenaTally ArenaTally => arenaTally;
 
         /// <summary>
         /// World rules of the lab, as edited in the Inspector (or by -eden-reproduction); a preset sets the population and
@@ -181,6 +199,8 @@ namespace Eden.Presentation
             neat = choice.Neat || choice.Eyes;
             eyes = choice.Eyes;
             evolvingEyes = choice.EvolvingEyes;
+            solidBodies = choice.SolidBodies;
+            obstacles = choice.Obstacles;
             StartRun();
         }
 
@@ -190,6 +210,8 @@ namespace Eden.Presentation
             CloseMetricsLog();
             Selected = null;
             selectedDeath = null;
+            selectedRefusal = null;
+            arenaTally = default;
             networkSnapshot.Clear();
             neatSnapshot.Clear();
             hud?.ShowNetwork(null);
@@ -199,7 +221,7 @@ namespace Eden.Presentation
                 StartSharedWorld();
             ResetClock(Simulation.World.Config.TicksPerSecond);
             worldView.Bind(Simulation.World);
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes), Evolution != null);
+            hud?.ShowChoice(CurrentChoice(), Evolution != null);
             RefreshHud();
         }
 
@@ -211,9 +233,10 @@ namespace Eden.Presentation
             CloseMetricsLog();
             mode = LabMode.IsolatedEvolution;
             sharedGenomes = null;
+            ReadArena(Evolution.Evolution.Settings.World);
             ClearSelection();
             ShowEpisode();
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes), true);
+            hud?.ShowChoice(CurrentChoice(), true);
             RefreshHud();
         }
 
@@ -325,6 +348,8 @@ namespace Eden.Presentation
             neat = session != null && session.Evolution.Plan.Algorithm == EvolutionAlgorithm.Neat;
             eyes = session != null && session.Evolution.Plan.Senses == Senses.Eyes;
             evolvingEyes = session != null && session.Evolution.Plan.EvolvingEyes;
+            ReadArena(loadedMode == LabMode.IsolatedEvolution ? session.Evolution.Settings.World : saved.SharedWorld.Settings);
+            arenaTally = default;
             Evolution = session;
             EvolutionDirectory = null;
             MetricsDirectory = null;
@@ -347,6 +372,7 @@ namespace Eden.Presentation
 
             Selected = null;
             selectedDeath = null;
+            selectedRefusal = null;
             networkSnapshot.Clear();
             neatSnapshot.Clear();
             hud?.ShowNetwork(null);
@@ -354,7 +380,7 @@ namespace Eden.Presentation
             if (mode == LabMode.SharedWorld && world.IsExtinct)
                 Clock.Pause();
             worldView.Bind(world.World);
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes), Evolution != null);
+            hud?.ShowChoice(CurrentChoice(), Evolution != null);
             ShowCheckpointStatus(LabText.CheckpointLoaded(CheckpointPath, world.World.Tick, EvolutionShown, problem));
             return true;
         }
@@ -469,6 +495,7 @@ namespace Eden.Presentation
         {
             Selected = creature;
             selectedDeath = null;
+            selectedRefusal = null;
             controller.Watch(creature);
             networkSnapshot.Clear();
             neatSnapshot.Clear();
@@ -480,6 +507,7 @@ namespace Eden.Presentation
         {
             Selected = null;
             selectedDeath = null;
+            selectedRefusal = null;
             controller.Watch(null);
             networkSnapshot.Clear();
             neatSnapshot.Clear();
@@ -721,6 +749,14 @@ namespace Eden.Presentation
                     selectedDeath = deaths[i];
             }
 
+            arenaTally = arenaTally.Add(Simulation);
+            var refused = Simulation.LastRefusedBirths;
+            for (var i = 0; i < refused.Count; i++)
+            {
+                if (Selected.HasValue && refused[i].Parent == Selected.Value)
+                    selectedRefusal = refused[i];
+            }
+
             controller.Forget(deaths);
             sharedGenomes?.Forget(deaths);
             genealogy?.Record(Simulation);
@@ -742,6 +778,7 @@ namespace Eden.Presentation
             if (brain != LabBrainKind.Evolved)
                 sharedIndividuals = null;
             var runSettings = Preset.SharedWorld(settings, (ulong)seed);
+            ApplyArena(runSettings);
             if (brain == LabBrainKind.Evolved)
             {
                 var source = Evolution.LastTraining;
@@ -783,6 +820,7 @@ namespace Eden.Presentation
             evolutionSettings.Algorithm = neat || eyes || evolvingEyes ? EvolutionAlgorithm.Neat : EvolutionAlgorithm.Mlp;
             evolutionSettings.Senses = eyes || evolvingEyes ? Senses.Eyes : Senses.Legacy;
             evolutionSettings.EvolvingEyes = evolvingEyes;
+            ApplyArena(evolutionSettings.World);
             Evolution = CreateEvolution(evolutionSettings);
             BrainName = EvolutionBrainName(Evolution);
             if (writeMetrics)
@@ -912,7 +950,7 @@ namespace Eden.Presentation
             hud.ShowPlayback(Clock.IsPaused, Clock.IsUnpaced);
             hud.ShowRun(evolving
                 ? LabText.Evolution(Evolution, Clock, Preset, RunDirectory)
-                : LabText.Run(Simulation, Clock, BrainName, Preset, metrics, RunDirectory, SharedSource()));
+                : LabText.Run(Simulation, Clock, BrainName, Preset, metrics, RunDirectory, SharedSource(), arenaTally));
             hud.ShowEvolution(evolving || sharedIndividuals != null ? Evolution : null);
             hud.ShowInspector(Selected.HasValue ? DescribeSelected(Selected.Value) : null);
             hud.SetExportAvailable(ResolveExportableGenome() != null);
@@ -937,6 +975,10 @@ namespace Eden.Presentation
                     decided = lastDecision;
                 var text = LabText.Creature(creature, sensed, action, creatureBrain?.Name ?? BrainName,
                     Simulation.World.Config, decided);
+                touching.Clear();
+                var arena = LabText.Arena(Simulation.World, creature, touching, selectedRefusal);
+                if (arena != null)
+                    text += "\n\n" + arena;
                 if (creatureBrain is MlpBrain mlp)
                 {
                     controller.TryGetState(id, out var state);
@@ -1049,6 +1091,14 @@ namespace Eden.Presentation
                     case "-eden-eyes" when value == "fixed" || value == "evolving":
                         evolvingEyes = value == "evolving";
                         break;
+                    case "-eden-solid" when value == "on" || value == "off":
+                        solidBodies = value == "on";
+                        break;
+                    case "-eden-obstacles" when value == "none" || value == "pillars" || value == "corridor":
+                        obstacles = value == "pillars" ? ObstacleLayout.Pillars
+                            : value == "corridor" ? ObstacleLayout.Corridor
+                            : ObstacleLayout.None;
+                        break;
                     case "-eden-reproduction" when value == "on" || value == "off":
                         settings.Reproduction = value == "on";
                         break;
@@ -1151,6 +1201,23 @@ namespace Eden.Presentation
             }
 
             throw new CheckpointException($"Unknown preset \"{name}\".");
+        }
+
+        private LabChoice CurrentChoice() =>
+            new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes, solidBodies, obstacles);
+
+        // The lab's arena choice, the same for the shared world and the evolution's episodes.
+        private void ApplyArena(SimulationSettings world)
+        {
+            world.SolidBodies = SolidBodies;
+            world.Obstacles = ObstacleLayouts.Create(obstacles, world);
+        }
+
+        // What a saved or resumed run's arena was, so the controls show it (hand-placed obstacles show as solid bodies).
+        private void ReadArena(SimulationSettings world)
+        {
+            solidBodies = world.SolidBodies;
+            obstacles = ObstacleLayouts.Identify(world) ?? ObstacleLayout.None;
         }
 
         private EvolutionSession EvolutionShown => mode == LabMode.IsolatedEvolution ? Evolution : null;

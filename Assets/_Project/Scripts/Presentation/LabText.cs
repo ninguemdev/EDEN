@@ -14,9 +14,13 @@ namespace Eden.Presentation
     {
         private const int MaxAncestors = 6;
 
-        /// <summary>Shared world summary; <paramref name="evolvedSource"/> names the evolved population, if used.</summary>
+        /// <summary>
+        /// Shared world summary; <paramref name="evolvedSource"/> names the evolved population, if used, and
+        /// <paramref name="arena"/> holds the physical arena's totals since the start.
+        /// </summary>
         public static string Run(WorldSimulation simulation, FixedStepClock clock, string brainName,
-            ExperimentPreset preset, MetricsRecorder metrics, string runDirectory, string evolvedSource)
+            ExperimentPreset preset, MetricsRecorder metrics, string runDirectory, string evolvedSource,
+            ArenaTally arena = default)
         {
             var world = simulation.World;
             var config = world.Config;
@@ -40,6 +44,16 @@ namespace Eden.Presentation
                 text.AppendLine($"População {world.Creatures.Count} de {config.InitialPopulation}  ·  Comida {world.Food.Count}");
             }
             text.AppendLine($"Preset {PresetLabel(preset)}  ·  Seed {config.Seed}");
+            text.AppendLine("Arena: " + ArenaLabel(config));
+            if (config.SolidBodies)
+            {
+                text.AppendLine($"Contatos no último tick: {simulation.LastContacts} pares de corpos encostados");
+                if (config.Reproduction)
+                    text.AppendLine($"Nascimentos recusados desde o início: {arena.BlockedBirths} sem espaço ao lado do pai, " +
+                                    $"{arena.CappedBirths} pelo teto (de graça: ninguém paga nem é posto longe)");
+                text.AppendLine($"Reposições de comida adiadas (sem lugar livre): {arena.DelayedRespawns}");
+            }
+
             text.AppendLine(evolvedSource == null
                 ? "Cérebro: " + BrainLabel(brainName)
                 : $"Cérebro: rede 12-16-3 da população evoluída ({evolvedSource}), um indivíduo por criatura; " +
@@ -90,6 +104,7 @@ namespace Eden.Presentation
             text.AppendLine(plan.ExpressedBodyGenes == BodyGeneSet.None
                 ? "Corpo fixo (controle): todos com o corpo de referência"
                 : "Corpo evolutivo: tamanho, velocidade, sensor e eficiência herdados e mutados, cada um com custo");
+            text.AppendLine("Arena dos episódios: " + ArenaLabel(episode.Simulation.World.Config));
 
             var last = session.LastTraining?.Summary;
             var structure = session.LastTraining?.Neat;
@@ -231,6 +246,74 @@ namespace Eden.Presentation
             text.AppendLine("Ação mantida");
             text.Append($"propulsão {action.Thrust:0.00}  giro {action.Turn:0.00}  lateral {action.Strafe:0.00}");
             return text.ToString();
+        }
+
+        /// <summary>
+        /// The physical arena as one creature meets it: its solid disc and reach, what it touches now, what obstacles
+        /// keep from it and its last refused birth. Null for the open arena (points that pass through each other).
+        /// </summary>
+        public static string Arena(WorldState world, CreatureState creature, List<CreatureId> touching,
+            BirthRefusal? refusal)
+        {
+            var config = world.Config;
+            if (!config.SolidBodies)
+                return null;
+            var text = new StringBuilder();
+            text.AppendLine("Arena física");
+            text.AppendLine($"Corpo sólido: disco de raio {creature.Body.Radius:0.00}; a boca alcança " +
+                            $"{creature.Body.EatRadius:0.00} do centro (halo claro)");
+            var contacts = PhysicalInspection.ContactsOf(world, creature, touching);
+            if (contacts.Any)
+            {
+                var parts = new List<string>();
+                if (contacts.Creatures > 0)
+                    parts.Add((contacts.Creatures == 1 ? "criatura " : "criaturas ") + string.Join(", ", touching));
+                if (contacts.Wall)
+                    parts.Add("parede");
+                if (contacts.Obstacle)
+                    parts.Add("obstáculo");
+                text.AppendLine("Encostada em: " + string.Join(" · ", parts) + " (empurra e é empurrada)");
+            }
+            else
+            {
+                text.AppendLine("Sem contato agora");
+            }
+
+            if (config.Obstacles.Count > 0)
+            {
+                var occlusion = PhysicalInspection.OcclusionOf(world, creature);
+                if (creature.Eyes != null)
+                    text.AppendLine(occlusion.HiddenFromEyes == 0
+                        ? "Nenhuma comida dos cones escondida por obstáculos"
+                        : $"Comida nos cones escondida por obstáculos: {occlusion.HiddenFromEyes}");
+                else if (occlusion.LegacyTargetHidden)
+                    text.AppendLine("Sentido legado: a comida que ele aponta está atrás de um obstáculo " +
+                                    "(ele não vê obstáculos)");
+                if (occlusion.BlockedFromMouth > 0)
+                    text.AppendLine($"Comida ao alcance da boca, mas atrás de obstáculo: {occlusion.BlockedFromMouth}");
+            }
+
+            if (refusal.HasValue)
+                text.AppendLine($"Último nascimento recusado (tick {refusal.Value.Tick}): " +
+                                (refusal.Value.Reason == BirthRefusalReason.NoRoom
+                                    ? "sem espaço para o filho ao lado"
+                                    : "população no teto"));
+            return text.ToString().TrimEnd();
+        }
+
+        /// <summary>The arena in words: open or solid, and its obstacle layout.</summary>
+        public static string ArenaLabel(SimulationConfig config)
+        {
+            if (!config.SolidBodies)
+                return "aberta, criaturas sem colisão (controle)";
+            var obstacles = config.Obstacles.Count;
+            var layout = ObstacleLayouts.Identify(config);
+            var name = obstacles == 0 ? "sem obstáculos"
+                : layout == ObstacleLayout.Pillars ? $"pilares ({obstacles} obstáculos)"
+                : layout == ObstacleLayout.Corridor ? $"corredor ({obstacles} obstáculos com uma passagem)"
+                : $"{obstacles} obstáculos";
+            return $"corpos sólidos (raio {config.BodyRadius:0.##}), {name}" +
+                   (obstacles == 0 ? string.Empty : "; obstáculos barram corpo, olhos e boca");
         }
 
         private static void AppendGenealogy(StringBuilder text, CreatureState creature, SimulationConfig config)
