@@ -211,6 +211,8 @@ namespace Eden.Persistence
                 EyeOrientationSigma = saved["eyeOrientationSigma"].Float(),
                 EyeApertureSigma = saved["eyeApertureSigma"].Float(),
                 EyeRangeSigma = saved["eyeRangeSigma"].Float(),
+                EyeAddProbability = saved["eyeAddProbability"].Float(),
+                EyeRemoveProbability = saved["eyeRemoveProbability"].Float(),
                 DisabledInheritProbability = saved["disabledInheritProbability"].Float(),
                 ExcessCoefficient = saved["excessCoefficient"].Float(),
                 DisjointCoefficient = saved["disjointCoefficient"].Float(),
@@ -240,6 +242,8 @@ namespace Eden.Persistence
                 .Add("eyeOrientationSigma", JsonValue.Of(neat.EyeOrientationSigma))
                 .Add("eyeApertureSigma", JsonValue.Of(neat.EyeApertureSigma))
                 .Add("eyeRangeSigma", JsonValue.Of(neat.EyeRangeSigma))
+                .Add("eyeAddProbability", JsonValue.Of(neat.EyeAddProbability))
+                .Add("eyeRemoveProbability", JsonValue.Of(neat.EyeRemoveProbability))
                 .Add("disabledInheritProbability", JsonValue.Of(neat.DisabledInheritProbability))
                 .Add("excessCoefficient", JsonValue.Of(neat.ExcessCoefficient))
                 .Add("disjointCoefficient", JsonValue.Of(neat.DisjointCoefficient))

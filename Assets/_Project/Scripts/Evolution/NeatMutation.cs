@@ -48,6 +48,12 @@ namespace Eden.Evolution
         /// <summary>Standard deviation of an eye's range factor change (proposed 0.1).</summary>
         public float EyeRangeSigma = 0.1f;
 
+        /// <summary>With evolving eyes, chance per child of duplicating an eye into a free slot (proposed 0.02).</summary>
+        public float EyeAddProbability = 0.02f;
+
+        /// <summary>With evolving eyes, chance per child of losing an eye, never the last one (proposed 0.01).</summary>
+        public float EyeRemoveProbability = 0.01f;
+
         /// <summary>
         /// In crossover, chance that a matching connection disabled in either parent stays disabled in the child
         /// (proposed 0.75).
@@ -122,6 +128,8 @@ namespace Eden.Evolution
             Coefficient(settings.EyeOrientationSigma, nameof(settings.EyeOrientationSigma), errors);
             Coefficient(settings.EyeApertureSigma, nameof(settings.EyeApertureSigma), errors);
             Coefficient(settings.EyeRangeSigma, nameof(settings.EyeRangeSigma), errors);
+            Probability(settings.EyeAddProbability, nameof(settings.EyeAddProbability), errors);
+            Probability(settings.EyeRemoveProbability, nameof(settings.EyeRemoveProbability), errors);
             Coefficient(settings.ExcessCoefficient, nameof(settings.ExcessCoefficient), errors);
             Coefficient(settings.DisjointCoefficient, nameof(settings.DisjointCoefficient), errors);
             Coefficient(settings.WeightDifferenceCoefficient, nameof(settings.WeightDifferenceCoefficient), errors);
@@ -155,7 +163,7 @@ namespace Eden.Evolution
             AddConnectionAttempts = settings.AddConnectionAttempts;
             DisabledInheritProbability = settings.DisabledInheritProbability;
             EyeMutation = new EyeMutation(settings.EyeMutationProbability, settings.EyeOrientationSigma,
-                settings.EyeApertureSigma, settings.EyeRangeSigma);
+                settings.EyeApertureSigma, settings.EyeRangeSigma, settings.EyeAddProbability, settings.EyeRemoveProbability);
             ExcessCoefficient = settings.ExcessCoefficient;
             DisjointCoefficient = settings.DisjointCoefficient;
             WeightDifferenceCoefficient = settings.WeightDifferenceCoefficient;
@@ -206,16 +214,28 @@ namespace Eden.Evolution
         }
     }
 
-    /// <summary>How eyes mutate: chance per trait and noise of each; the default never mutates and draws nothing.</summary>
+    /// <summary>
+    /// How eyes mutate: chance per trait and noise of each, and chances to add (duplicate) or remove an eye; the default
+    /// never mutates and draws nothing.
+    /// </summary>
     public readonly struct EyeMutation
     {
-        public EyeMutation(float probability, float orientationSigma, float apertureSigma, float rangeSigma)
+        public EyeMutation(float probability, float orientationSigma, float apertureSigma, float rangeSigma,
+            float addProbability = 0f, float removeProbability = 0f)
         {
             Probability = probability;
             OrientationSigma = orientationSigma;
             ApertureSigma = apertureSigma;
             RangeSigma = rangeSigma;
+            AddProbability = addProbability;
+            RemoveProbability = removeProbability;
         }
+
+        /// <summary>Chance per genome of duplicating an eye into a free slot.</summary>
+        public float AddProbability { get; }
+
+        /// <summary>Chance per genome of removing an eye (never the last).</summary>
+        public float RemoveProbability { get; }
 
         public float Probability { get; }
         public float OrientationSigma { get; }
@@ -223,7 +243,7 @@ namespace Eden.Evolution
         public float RangeSigma { get; }
 
         /// <summary>False for the default (fixed eyes): no draws at all.</summary>
-        public bool IsEnabled => Probability > 0f;
+        public bool IsEnabled => Probability > 0f || AddProbability > 0f || RemoveProbability > 0f;
     }
 
     /// <summary>
