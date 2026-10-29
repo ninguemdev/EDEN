@@ -163,11 +163,48 @@ namespace Eden.Persistence
                 lines.Add("occlusion=obstacles block movement, eyes and feeding;the legacy senses do not see them");
                 lines.Add("free_regions=" + world.FreeSpace.Regions.ToString(culture));
             }
+
+            lines.AddRange(WaterLines(world));
             if (Preset != null)
                 lines.Add("preset=" + Preset);
             if (ResumedFrom != null)
                 lines.AddRange(ResumedFrom.Describe());
             return lines;
+        }
+
+        /// <summary>
+        /// The water of a run, when it has any: each source (area, then capacity and recharge, or "inexhaustible"), whether
+        /// the supply is limited, and the hydration rules. Nothing for a run without water.
+        /// </summary>
+        internal static IEnumerable<string> WaterLines(SimulationConfig world)
+        {
+            if (!world.HasWater)
+                yield break;
+            var culture = CultureInfo.InvariantCulture;
+            var sources = new List<string>();
+            var limited = 0;
+            foreach (var source in world.Water)
+            {
+                var a = source.Area;
+                var area = a.MinX.ToString(culture) + " " + a.MinY.ToString(culture) + " " + a.MaxX.ToString(culture) + " " +
+                           a.MaxY.ToString(culture);
+                if (!source.Inexhaustible)
+                    limited++;
+                sources.Add(area + (source.Inexhaustible
+                    ? " inexhaustible"
+                    : " capacity " + source.Capacity.ToString(culture) + " recharge " +
+                      source.RechargePerSecond.ToString(culture)));
+            }
+
+            yield return "water=" + world.Water.Count.ToString(culture) + ";" + string.Join(";", sources);
+            yield return "water_supply=" + (limited == world.Water.Count ? "finite"
+                : limited == 0 ? "inexhaustible (control)"
+                : "mixed");
+            yield return "hydration=max " + world.MaxHydration.ToString(culture) + ";loss_per_second " +
+                         world.HydrationLossPerSecond.ToString(culture) + ";drink_rate_per_second " +
+                         world.DrinkRatePerSecond.ToString(culture) +
+                         ";drink at the edge within eat radius;shortage split as equal fractions of each ask;" +
+                         "children get the offspring share;no energy from water, no water from food;death at 0";
         }
 
         /// <summary>Name of the config's obstacle layout (none, pillars, corridor), or "custom" for hand-placed obstacles.</summary>

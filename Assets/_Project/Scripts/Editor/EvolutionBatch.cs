@@ -33,7 +33,9 @@ namespace Eden.Editor
     /// control); a NEAT run only takes a pool of NEAT genomes, which are renumbered on import. -eden-senses legacy|eyes
     /// chooses how creatures sense (eyes need NEAT; default legacy); -eden-eyes fixed|evolving lets eyes mutate (default
     /// fixed); -eden-solid on|off makes creatures solid bodies that push each other (default off); -eden-obstacles
-    /// none|pillars|corridor puts that layout in the arena (needs -eden-solid on; default none).
+    /// none|pillars|corridor puts that layout in the arena (needs -eden-solid on; default none); -eden-water
+    /// none|pond|ponds puts water sources in the arena and gives creatures hydration (needs -eden-solid on; default none),
+    /// limited and recharging unless -eden-water-supply inexhaustible (the control; default finite).
     /// -eden-seed-genomes DIR starts generation 0 of RunFromCommandLine from every genome file (see GenomeFile) in DIR
     /// instead of random weights (see GenerationalEvolution.FromSeedPool); a genome exported without a fitness of its
     /// own, or with one from another fitness profile, counts as 0. -eden-export-top N DIR writes the N best genomes of the last generation RunFromCommandLine
@@ -365,6 +367,8 @@ namespace Eden.Editor
         {
             string output = null;
             string seedGenomes = null;
+            var water = WaterLayout.None;
+            var inexhaustible = false;
             var args = Environment.GetCommandLineArgs();
             for (var i = 0; i + 1 < args.Length; i++)
             {
@@ -412,11 +416,21 @@ namespace Eden.Editor
                             value == "pillars" ? ObstacleLayout.Pillars
                             : value == "corridor" ? ObstacleLayout.Corridor : ObstacleLayout.None, settings.World);
                         break;
+                    case "-eden-water" when value == "none" || value == "pond" || value == "ponds":
+                        water = value == "pond" ? WaterLayout.Pond : value == "ponds" ? WaterLayout.Ponds : WaterLayout.None;
+                        break;
+                    case "-eden-water-supply" when value == "finite" || value == "inexhaustible":
+                        inexhaustible = value == "inexhaustible";
+                        break;
                     case "-eden-output":
                         output = value;
                         break;
                 }
             }
+
+            // After the loop, so the supply applies whatever the order of the two options.
+            if (water != WaterLayout.None)
+                settings.World.Water = WaterLayouts.Create(water, settings.World, inexhaustible: inexhaustible);
 
             seedGenomesDirectory = seedGenomes;
             return output;

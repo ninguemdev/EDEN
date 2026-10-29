@@ -19,6 +19,8 @@ namespace Eden.Domain
         public const float MaxCostExponent = 4f;
         public const int MaxSolidSubsteps = 64;
         public const int MaxObstacles = 256;
+        public const int MaxWaterSources = 64;
+        public const float MaxWater = 1e9f;
 
         /// <summary>
         /// Most separation passes after each solid-body move (they stop as soon as nothing overlaps). Bodies jammed against
@@ -75,6 +77,12 @@ namespace Eden.Domain
 
             var obstacles = s.Obstacles ?? Array.Empty<Obstacle>();
             CheckObstacles(errors, s, obstacles);
+            var water = s.Water ?? Array.Empty<WaterSource>();
+            CheckWater(errors, s, water, obstacles);
+            var barriers = new Obstacle[obstacles.Length + water.Length];
+            obstacles.CopyTo(barriers, 0);
+            for (var i = 0; i < water.Length; i++)
+                barriers[obstacles.Length + i] = water[i].Area;
 
             RequireRange(errors, nameof(s.PopulationCap), s.PopulationCap, 1, MaxPopulation);
             if (s.Reproduction && s.PopulationCap < s.InitialPopulation)
@@ -89,9 +97,9 @@ namespace Eden.Domain
             RequireRange(errors, nameof(s.BirthMutationProbability), s.BirthMutationProbability, 0f, 1f);
             RequireRange(errors, nameof(s.BirthMutationSigma), s.BirthMutationSigma, 0f, 3f);
             FreeSpace freeSpace = null;
-            if (errors.Count == 0 && obstacles.Length > 0)
+            if (errors.Count == 0 && barriers.Length > 0)
             {
-                freeSpace = new FreeSpace(s.ArenaWidth, s.ArenaHeight, s.BodyRadius, obstacles);
+                freeSpace = new FreeSpace(s.ArenaWidth, s.ArenaHeight, s.BodyRadius, barriers);
                 if (freeSpace.Regions == 0)
                     errors.Add("the obstacles leave no room for the reference body");
             }
@@ -130,7 +138,12 @@ namespace Eden.Domain
             BodyRadius = s.BodyRadius;
             SolidSubsteps = s.SolidBodies ? substeps : 1;
             Obstacles = (Obstacle[])obstacles.Clone();
+            Water = (WaterSource[])water.Clone();
+            Barriers = barriers;
             FreeSpace = freeSpace;
+            MaxHydration = s.MaxHydration;
+            HydrationLossPerSecond = s.HydrationLossPerSecond;
+            DrinkRatePerSecond = s.DrinkRatePerSecond;
             Reproduction = s.Reproduction;
             PopulationCap = s.PopulationCap;
             MaturitySeconds = s.MaturitySeconds;
@@ -221,8 +234,28 @@ namespace Eden.Domain
         /// <summary>Static obstacles solid bodies cannot enter, in the order given; empty for the open arena.</summary>
         public IReadOnlyList<Obstacle> Obstacles { get; }
 
-        /// <summary>Where the reference body can stand among the obstacles; null in the open arena.</summary>
+        /// <summary>
+        /// Water sources, in the order given; empty when the run has no water, and then creatures have no hydration.
+        /// </summary>
+        public IReadOnlyList<WaterSource> Water { get; }
+
+        /// <summary>Whether the run has water, and so hydration, drinking and death by dehydration.</summary>
+        public bool HasWater => Water.Count > 0;
+
+        /// <summary>
+        /// Everything a solid body cannot enter: the obstacles, then the water sources' areas. Only the obstacles are opaque
+        /// (see <see cref="Obstacles"/>); water is seen and reached across.
+        /// </summary>
+        public IReadOnlyList<Obstacle> Barriers { get; }
+
+        /// <summary>Where the reference body can stand among the barriers; null in the open arena.</summary>
         public FreeSpace FreeSpace { get; }
+
+        /// <summary>Hydration of a full creature (see the settings); meaningful only with water.</summary>
+        public float MaxHydration { get; }
+
+        public float HydrationLossPerSecond { get; }
+        public float DrinkRatePerSecond { get; }
 
         /// <summary>Tick at the start of which food moves; 0 when it never does.</summary>
         public long FoodShiftTicks { get; }
@@ -274,6 +307,53 @@ namespace Eden.Domain
                     errors.Add($"obstacle {i} {o} is thinner than the smallest body ({smallest} across)");
             }
         }
+
+        // Water needs solid bodies (its inside blocks them) and lies inside the arena; each source is at least as wide as
+        // the smallest body, like an obstacle, and overlaps neither an obstacle nor another source, so every stretch of
+        // its edge is shore. Reserves and rates are finite.
+        private static void CheckWater(List<string> errors, SimulationSettings s, WaterSource[] water, Obstacle[] obstacles)
+        {
+            RequirePositive(errors, nameof(s.MaxHydration), s.MaxHydration, MaxWater);
+            RequirePositive(errors, nameof(s.HydrationLossPerSecond), s.HydrationLossPerSecond, MaxWater);
+            RequirePositive(errors, nameof(s.DrinkRatePerSecond), s.DrinkRatePerSecond, MaxWater);
+            if (water.Length == 0)
+                return;
+            if (!s.SolidBodies)
+                errors.Add("water needs solid bodies");
+            if (water.Length > MaxWaterSources)
+            {
+                errors.Add($"{water.Length} water sources exceed the limit of {MaxWaterSources}");
+                return;
+            }
+
+            var smallest = 2f * s.BodyRadius * CreatureBody.Factor(-BodyGenes.MaxAbsValue);
+            for (var i = 0; i < water.Length; i++)
+            {
+                var source = water[i];
+                var a = source.Area;
+                var name = $"water source {i} {a}";
+                if (!(a.MinX >= 0f && a.MinY >= 0f && a.MaxX <= s.ArenaWidth && a.MaxY <= s.ArenaHeight))
+                    errors.Add($"{name} is not inside the arena");
+                else if (!(a.Width >= smallest && a.Height >= smallest))
+                    errors.Add($"{name} is thinner than the smallest body ({smallest} across)");
+                RequirePositive(errors, name + " capacity", source.Capacity, MaxWater);
+                RequireRange(errors, name + " recharge", source.RechargePerSecond, 0f, MaxWater);
+                foreach (var obstacle in obstacles)
+                {
+                    if (Overlap(a, obstacle))
+                        errors.Add($"{name} overlaps obstacle {obstacle}");
+                }
+
+                for (var j = 0; j < i; j++)
+                {
+                    if (Overlap(a, water[j].Area))
+                        errors.Add($"{name} overlaps water source {j}");
+                }
+            }
+        }
+
+        private static bool Overlap(Obstacle a, Obstacle b) =>
+            a.MinX < b.MaxX && b.MinX < a.MaxX && a.MinY < b.MaxY && b.MinY < a.MaxY;
 
         // Fastest possible step over the smallest possible radius, rounded up; meaningless if the values are invalid.
         private static int SubstepsFor(SimulationSettings s)

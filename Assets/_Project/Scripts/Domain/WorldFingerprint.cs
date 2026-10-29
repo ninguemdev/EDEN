@@ -57,6 +57,10 @@ namespace Eden.Domain
 
                     hash.Add(ulong.MaxValue);
                 }
+
+                // Hydration only exists with water, so a world without it hashes as before water existed.
+                if (world.Config.HasWater)
+                    hash.Add(creature.Hydration);
             }
 
             hash.Add((ulong)world.Food.Count);
@@ -67,6 +71,9 @@ namespace Eden.Domain
                 hash.Add(item.Energy);
                 hash.Add(item.IsEaten ? 1UL : 0UL);
             }
+
+            foreach (var reserve in world.WaterReserves)
+                hash.Add(reserve);
 
             return hash.Value;
         }

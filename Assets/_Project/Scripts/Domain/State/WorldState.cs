@@ -11,6 +11,7 @@ namespace Eden.Domain
     {
         private readonly List<CreatureState> creatures = new List<CreatureState>();
         private readonly List<FoodState> food = new List<FoodState>();
+        private readonly float[] waterReserves;
 
         // Eaten items that left the world, reused by AddFood; never part of the state.
         private readonly Stack<FoodState> spareFood;
@@ -19,6 +20,9 @@ namespace Eden.Domain
         {
             Config = config;
             ReferenceBody = CreatureBody.Reference(config);
+            waterReserves = new float[config.Water.Count];
+            for (var i = 0; i < waterReserves.Length; i++)
+                waterReserves[i] = config.Water[i].Capacity;
             spareFood = new Stack<FoodState>(config.InitialFood);
             WorldRandom = SeedDerivation.CreateStream(config.Seed, RandomStream.World);
             SpawnRandom = SeedDerivation.CreateStream(config.Seed, RandomStream.Spawn);
@@ -31,6 +35,7 @@ namespace Eden.Domain
         {
             Config = config;
             ReferenceBody = CreatureBody.Reference(config);
+            waterReserves = new float[config.Water.Count];
             spareFood = new Stack<FoodState>(config.InitialFood);
             Tick = tick;
             NextCreatureId = nextCreatureId;
@@ -43,11 +48,13 @@ namespace Eden.Domain
         /// Rebuilds a world saved between ticks: living creatures and uneaten food in ascending id order, below the
         /// id counters, inside the arena and within the config's limits. Everything is checked before the world is
         /// built and all problems are reported together (each body must be its genes expressed in this config, and the
-        /// energy within that body's capacity); the given objects are copied, never shared.
+        /// energy within that body's capacity; with water, each hydration within (0, full] and each source's reserve within
+        /// [0, capacity], one per source; without water, no reserves and no hydration); the given objects are copied,
+        /// never shared.
         /// </summary>
         public static WorldState Restore(SimulationConfig config, long tick, int nextCreatureId, int nextFoodId,
             Pcg32State worldRandom, Pcg32State spawnRandom, IReadOnlyList<CreatureState> creatures,
-            IReadOnlyList<FoodState> food)
+            IReadOnlyList<FoodState> food, IReadOnlyList<float> waterReserves = null)
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
@@ -72,6 +79,7 @@ namespace Eden.Domain
             {
                 CheckCreatures(config, creatures, nextCreatureId, errors);
                 CheckFood(config, food, nextFoodId, errors);
+                CheckWater(config, waterReserves, errors);
             }
 
             if (errors.Count > 0)
@@ -85,9 +93,13 @@ namespace Eden.Domain
                 {
                     Velocity = saved.Velocity, AgeTicks = saved.AgeTicks, FoodEnergyEaten = saved.FoodEnergyEaten,
                     Parent = saved.Parent, Generation = saved.Generation,
-                    ReproductionCooldownTicks = saved.ReproductionCooldownTicks, Eyes = saved.Eyes
+                    ReproductionCooldownTicks = saved.ReproductionCooldownTicks, Eyes = saved.Eyes,
+                    Hydration = saved.Hydration
                 });
             }
+
+            for (var i = 0; i < world.waterReserves.Length; i++)
+                world.waterReserves[i] = waterReserves[i];
 
             foreach (var saved in food)
                 world.food.Add(new FoodState(saved.Id, saved.Position, saved.Energy));
@@ -112,17 +124,29 @@ namespace Eden.Domain
         public IReadOnlyList<CreatureState> Creatures => creatures;
         public IReadOnlyList<FoodState> Food => food;
 
+        /// <summary>Water left in each source, in the config's order; empty without water.</summary>
+        public IReadOnlyList<float> WaterReserves => waterReserves;
+
+        /// <summary>Sets what is left in a source (the simulation's drinking and recharge rules).</summary>
+        public void SetWaterReserve(int source, float reserve) => waterReserves[source] = reserve;
+
         public void AdvanceTick() => Tick++;
 
         /// <summary>Adds a creature with neutral genes, so the <see cref="ReferenceBody"/>.</summary>
         public CreatureState AddCreature(Float2 position, float heading, float energy) =>
             AddCreature(position, heading, energy, BodyGenes.Neutral);
 
-        /// <summary>Adds a creature whose body is <paramref name="genes"/> expressed in this config.</summary>
+        /// <summary>
+        /// Adds a creature whose body is <paramref name="genes"/> expressed in this config; with water it starts fully
+        /// hydrated.
+        /// </summary>
         public CreatureState AddCreature(Float2 position, float heading, float energy, BodyGenes genes)
         {
             var body = genes.IsNeutral ? ReferenceBody : CreatureBody.Express(Config, genes);
-            var creature = new CreatureState(new CreatureId(NextCreatureId++), position, heading, energy, genes, body);
+            var creature = new CreatureState(new CreatureId(NextCreatureId++), position, heading, energy, genes, body)
+            {
+                Hydration = Config.HasWater ? Config.MaxHydration : 0f
+            };
             creatures.Add(creature);
             return creature;
         }
@@ -234,6 +258,11 @@ namespace Eden.Domain
                     errors.Add($"{name} age {creature.AgeTicks} is outside [0, {config.MaxAgeTicks})");
                 if (!(creature.FoodEnergyEaten >= 0f) || !IsFinite(creature.FoodEnergyEaten))
                     errors.Add($"{name} eaten food energy {creature.FoodEnergyEaten} must be finite and not negative");
+                if (config.HasWater ? !(creature.Hydration > 0f && creature.Hydration <= config.MaxHydration)
+                        : creature.Hydration != 0f)
+                    errors.Add(config.HasWater
+                        ? $"{name} hydration {creature.Hydration} is outside (0, {config.MaxHydration}]"
+                        : $"{name} has hydration {creature.Hydration} in a run without water");
             }
         }
 
@@ -259,6 +288,25 @@ namespace Eden.Domain
                 CheckInArena(config, item.Position, name, errors);
                 if (!(item.Energy > 0f) || !IsFinite(item.Energy))
                     errors.Add($"{name} energy {item.Energy} must be finite and positive");
+            }
+        }
+
+        private static void CheckWater(SimulationConfig config, IReadOnlyList<float> reserves, List<string> errors)
+        {
+            var count = reserves?.Count ?? 0;
+            if (count != config.Water.Count)
+            {
+                errors.Add($"{count} water reserves for {config.Water.Count} water sources");
+                return;
+            }
+
+            for (var i = 0; i < count; i++)
+            {
+                var source = config.Water[i];
+                if (!(reserves[i] >= 0f && reserves[i] <= source.Capacity))
+                    errors.Add($"water source {i} reserve {reserves[i]} is outside [0, {source.Capacity}]");
+                else if (source.Inexhaustible && reserves[i] != source.Capacity)
+                    errors.Add($"inexhaustible water source {i} holds {reserves[i]}, not its capacity");
             }
         }
 

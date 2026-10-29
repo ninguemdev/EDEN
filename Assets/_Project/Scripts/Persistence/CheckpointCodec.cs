@@ -388,6 +388,29 @@ namespace Eden.Persistence
 
                 settings.Add("obstacles", obstacles);
             }
+
+            if (s.Water != null && s.Water.Length > 0)
+            {
+                var water = JsonValue.NewArray();
+                foreach (var source in s.Water)
+                {
+                    var a = source.Area;
+                    var saved = JsonValue.NewObject()
+                        .Add("area", JsonValue.NewArray().Add(JsonValue.Of(a.MinX)).Add(JsonValue.Of(a.MinY))
+                            .Add(JsonValue.Of(a.MaxX)).Add(JsonValue.Of(a.MaxY)))
+                        .Add("capacity", JsonValue.Of(source.Capacity))
+                        .Add("rechargePerSecond", JsonValue.Of(source.RechargePerSecond));
+                    if (source.Inexhaustible)
+                        saved.Add("inexhaustible", JsonValue.Of(true));
+                    water.Add(saved);
+                }
+
+                settings.Add("water", water);
+            }
+
+            AddIfNotDefault(settings, "maxHydration", s.MaxHydration, Defaults.MaxHydration);
+            AddIfNotDefault(settings, "hydrationLossPerSecond", s.HydrationLossPerSecond, Defaults.HydrationLossPerSecond);
+            AddIfNotDefault(settings, "drinkRatePerSecond", s.DrinkRatePerSecond, Defaults.DrinkRatePerSecond);
             if (s.Reproduction)
             {
                 settings.Add("reproduction", JsonValue.NewObject()
@@ -431,6 +454,28 @@ namespace Eden.Persistence
             return obstacles;
         }
 
+        private static WaterSource[] DecodeWater(JsonValue saved)
+        {
+            if (saved == null)
+                return Array.Empty<WaterSource>();
+            saved.ArrayOf(SimulationConfig.MaxWaterSources);
+            var water = new WaterSource[saved.Count];
+            for (var i = 0; i < water.Length; i++)
+            {
+                var source = saved[i];
+                var corners = source["area"].ArrayOf(4);
+                if (corners.Count != 4)
+                    throw new CheckpointException($"{corners.Path}: a water source needs minX, minY, maxX and maxY.");
+                // Absent means limited; an explicit false does not read back the same and is refused.
+                water[i] = new WaterSource(
+                    new Obstacle(corners[0].Float(), corners[1].Float(), corners[2].Float(), corners[3].Float()),
+                    source["capacity"].Float(), source["rechargePerSecond"].Float(),
+                    source.TryGet("inexhaustible")?.Boolean() ?? false);
+            }
+
+            return water;
+        }
+
         private static SimulationSettings DecodeSettings(JsonValue saved)
         {
             var settings = new SimulationSettings
@@ -466,7 +511,12 @@ namespace Eden.Persistence
                 SolidBodies = saved.TryGet("solidBodies")?.Boolean() ?? false,
                 BodyRadius = FloatOr(saved, "bodyRadius", Defaults.BodyRadius),
                 // Absent means the open arena; an empty list does not read back the same and is refused.
-                Obstacles = DecodeObstacles(saved.TryGet("obstacles"))
+                Obstacles = DecodeObstacles(saved.TryGet("obstacles")),
+                // Absent means no water; an empty list does not read back the same and is refused.
+                Water = DecodeWater(saved.TryGet("water")),
+                MaxHydration = FloatOr(saved, "maxHydration", Defaults.MaxHydration),
+                HydrationLossPerSecond = FloatOr(saved, "hydrationLossPerSecond", Defaults.HydrationLossPerSecond),
+                DrinkRatePerSecond = FloatOr(saved, "drinkRatePerSecond", Defaults.DrinkRatePerSecond)
             };
             // Absent means off; the other reproduction values then keep their defaults and change nothing.
             var reproduction = saved.TryGet("reproduction");
@@ -602,7 +652,7 @@ namespace Eden.Persistence
                         var parent = item[1].Int(0);
                         genealogy.Add(new GenealogyEntry(new CreatureId(item[0].Int(1)),
                             parent == 0 ? (CreatureId?)null : new CreatureId(parent), item[2].Int(0), item[3].Long(0),
-                            item[4].Long(-1), (DeathCause)item[5].Int(0, (int)DeathCause.OldAge)));
+                            item[4].Long(-1), (DeathCause)item[5].Int(0, (int)DeathCause.Dehydration)));
                     }
                 }
 
@@ -1067,6 +1117,9 @@ namespace Eden.Persistence
                     saved.Add("bodyGenes", EncodeBodyGenes(creature.Genes));
                 if (creature.Eyes != null)
                     saved.Add("eyes", GenomeCodec.EncodeEyes(creature.Eyes));
+                // Hydration exists only with water, where it is never 0 between ticks.
+                if (creature.Hydration != 0f)
+                    saved.Add("hydration", JsonValue.Of(creature.Hydration));
                 creatures.Add(saved);
             }
 
@@ -1090,7 +1143,7 @@ namespace Eden.Persistence
                     .Add("kind", JsonValue.Of((int)pending.Payload.Kind)));
             }
 
-            return JsonValue.NewObject()
+            var encoded = JsonValue.NewObject()
                 .Add("tick", JsonValue.Of(world.Tick))
                 .Add("nextCreatureId", JsonValue.Of(world.NextCreatureId))
                 .Add("nextFoodId", JsonValue.Of(world.NextFoodId))
@@ -1101,6 +1154,15 @@ namespace Eden.Persistence
                 .Add("agenda", agenda)
                 .Add("nextEventSequence", JsonValue.Of(world.NextEventSequence))
                 .Add("correctedInputValues", JsonValue.Of(world.CorrectedInputValues));
+            if (world.WaterReserves.Count > 0)
+            {
+                var reserves = JsonValue.NewArray();
+                foreach (var reserve in world.WaterReserves)
+                    reserves.Add(JsonValue.Of(reserve));
+                encoded.Add("waterReserves", reserves);
+            }
+
+            return encoded;
         }
 
         // Creatures never outnumber the initial population yet (no births), and food never exceeds the initial count
@@ -1123,7 +1185,8 @@ namespace Eden.Persistence
                     Parent = value.TryGet("parent") is JsonValue parent ? new CreatureId(parent.Int(1)) : (CreatureId?)null,
                     Generation = value.TryGet("generation")?.Int(0) ?? 0,
                     ReproductionCooldownTicks = value.TryGet("reproductionCooldownTicks")?.Long(0) ?? 0L,
-                    Eyes = value.TryGet("eyes") is JsonValue eyes ? GenomeCodec.DecodeEyes(eyes, NeuralContract.Eyes) : null
+                    Eyes = value.TryGet("eyes") is JsonValue eyes ? GenomeCodec.DecodeEyes(eyes, NeuralContract.Eyes) : null,
+                    Hydration = value.TryGet("hydration")?.Float() ?? 0f
                 };
             }
 
@@ -1144,9 +1207,14 @@ namespace Eden.Persistence
                     new SimulationEvent((SimulationEventKind)value["kind"].Int(0, byte.MaxValue)));
             }
 
+            var reserveValues = saved.TryGet("waterReserves")?.ArrayOf(SimulationConfig.MaxWaterSources);
+            var reserves = new float[reserveValues?.Count ?? 0];
+            for (var i = 0; i < reserves.Length; i++)
+                reserves[i] = reserveValues[i].Float();
+
             return new SimulationSnapshot(saved["tick"].Long(0), saved["nextCreatureId"].Int(1), saved["nextFoodId"].Int(1),
                 DecodeRandom(saved["worldRandom"]), DecodeRandom(saved["spawnRandom"]), creatures, food, agenda,
-                saved["nextEventSequence"].Long(0), saved["correctedInputValues"].Long(0));
+                saved["nextEventSequence"].Long(0), saved["correctedInputValues"].Long(0), reserves);
         }
 
         private static JsonValue EncodeBrains(IReadOnlyList<BrainSlotState> brains)

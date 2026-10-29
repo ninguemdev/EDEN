@@ -31,6 +31,7 @@ namespace Eden.Presentation
         private static readonly Color SensorColor = new Color(1f, 1f, 1f, 0.06f);
         private static readonly Color TargetColor = Color.white;
         private static readonly Color ObstacleColor = new Color32(74, 88, 96, 255);
+        private static readonly Color WaterColor = new Color32(58, 120, 196, 255);
         private static readonly Color ReachColor = new Color32(240, 200, 92, 70);
         private static readonly Color ContactColor = new Color32(255, 150, 60, 255);
         private const float ContactDiameter = 0.22f;
@@ -83,6 +84,9 @@ namespace Eden.Presentation
 
         /// <summary>Obstacles drawn for the bound world.</summary>
         public int DrawnObstacles { get; private set; }
+
+        /// <summary>Water sources drawn for the bound world.</summary>
+        public int DrawnWater { get; private set; }
 
         /// <summary>Touching pairs of solid bodies marked in the last <see cref="Render"/>.</summary>
         public int DrawnContacts { get; private set; }
@@ -285,10 +289,11 @@ namespace Eden.Presentation
             RemoveStale();
         }
 
-        // The obstacles of the bound arena: static, so drawn once per world.
+        // The obstacles and water sources of the bound arena (config.Barriers: obstacles first): static, so drawn once per
+        // world.
         private void BindObstacles(SimulationConfig config)
         {
-            var count = config.Obstacles.Count;
+            var count = config.Barriers.Count;
             while (obstacles.Count < count)
                 obstacles.Add(CreateRenderer("Obstacle", transform, squareSprite, ObstacleColor, -5));
             for (var i = 0; i < obstacles.Count; i++)
@@ -297,13 +302,15 @@ namespace Eden.Presentation
                 obstacles[i].gameObject.SetActive(shown);
                 if (!shown)
                     continue;
-                var obstacle = config.Obstacles[i];
+                var obstacle = config.Barriers[i];
+                obstacles[i].color = i < config.Obstacles.Count ? ObstacleColor : WaterColor;
                 obstacles[i].transform.localPosition = new Vector3((obstacle.MinX + obstacle.MaxX) / 2f,
                     (obstacle.MinY + obstacle.MaxY) / 2f, 0f);
                 obstacles[i].transform.localScale = new Vector3(obstacle.Width, obstacle.Height, 1f);
             }
 
-            DrawnObstacles = count;
+            DrawnObstacles = config.Obstacles.Count;
+            DrawnWater = config.Water.Count;
         }
 
         // A dot where each touching pair meets, between where the two are drawn (the point on the line between the

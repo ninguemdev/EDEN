@@ -14,7 +14,8 @@ namespace Eden.Simulation
     {
         public SimulationSnapshot(long tick, int nextCreatureId, int nextFoodId, Pcg32State worldRandom,
             Pcg32State spawnRandom, IReadOnlyList<CreatureState> creatures, IReadOnlyList<FoodState> food,
-            IReadOnlyList<ScheduledEvent<SimulationEvent>> agenda, long nextEventSequence, long correctedInputValues)
+            IReadOnlyList<ScheduledEvent<SimulationEvent>> agenda, long nextEventSequence, long correctedInputValues,
+            IReadOnlyList<float> waterReserves = null)
         {
             if (creatures == null)
                 throw new ArgumentNullException(nameof(creatures));
@@ -33,6 +34,7 @@ namespace Eden.Simulation
             Agenda = Copy(agenda);
             NextEventSequence = nextEventSequence;
             CorrectedInputValues = correctedInputValues;
+            WaterReserves = waterReserves == null ? Array.Empty<float>() : Copy(waterReserves);
         }
 
         /// <summary>Next tick to run.</summary>
@@ -53,6 +55,9 @@ namespace Eden.Simulation
 
         public long NextEventSequence { get; }
         public long CorrectedInputValues { get; }
+
+        /// <summary>Water left in each source, in the config's order; empty without water.</summary>
+        public IReadOnlyList<float> WaterReserves { get; }
 
         private static T[] Copy<T>(IReadOnlyList<T> items)
         {
@@ -75,7 +80,8 @@ namespace Eden.Simulation
                     Parent = creature.Parent,
                     Generation = creature.Generation,
                     ReproductionCooldownTicks = creature.ReproductionCooldownTicks,
-                    Eyes = creature.Eyes
+                    Eyes = creature.Eyes,
+                    Hydration = creature.Hydration
                 };
 
         private static FoodState Clone(FoodState item)

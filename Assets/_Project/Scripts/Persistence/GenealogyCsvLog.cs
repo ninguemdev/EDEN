@@ -73,7 +73,8 @@ namespace Eden.Persistence
         }
 
         public static string CauseName(DeathCause cause) =>
-            cause == DeathCause.Starvation ? "starvation" : cause == DeathCause.OldAge ? "old_age" : string.Empty;
+            cause == DeathCause.Starvation ? "starvation" : cause == DeathCause.OldAge ? "old_age"
+            : cause == DeathCause.Dehydration ? "dehydration" : string.Empty;
 
         private void Write(string row)
         {

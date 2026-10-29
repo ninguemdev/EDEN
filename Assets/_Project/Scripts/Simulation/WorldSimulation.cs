@@ -23,8 +23,11 @@ namespace Eden.Simulation
         private float[][] eyeInputs = Array.Empty<float[]>();
         private CreatureAction[] actions = Array.Empty<CreatureAction>();
         private float[] foodGains = Array.Empty<float>();
+        private float[] drunk = Array.Empty<float>();
+        private float[] thirst = Array.Empty<float>();
         private readonly Contacts contacts = new Contacts();
         private EnergyFlows energy;
+        private HydrationFlows hydration;
 
         public WorldSimulation(WorldState world)
             : this(world, new TickScheduler<SimulationEvent>())
@@ -74,7 +77,7 @@ namespace Eden.Simulation
             }
 
             var world = WorldState.Restore(config, saved.Tick, saved.NextCreatureId, saved.NextFoodId, saved.WorldRandom,
-                saved.SpawnRandom, saved.Creatures, saved.Food);
+                saved.SpawnRandom, saved.Creatures, saved.Food, saved.WaterReserves);
             var agenda = TickScheduler<SimulationEvent>.Restore(saved.Agenda, saved.NextEventSequence, saved.Tick - 1);
             return new WorldSimulation(world, agenda) { CorrectedInputValues = saved.CorrectedInputValues };
         }
@@ -83,7 +86,7 @@ namespace Eden.Simulation
         public SimulationSnapshot Capture() =>
             new SimulationSnapshot(World.Tick, World.NextCreatureId, World.NextFoodId, World.WorldRandom.State,
                 World.SpawnRandom.State, World.Creatures, World.Food, agenda.SnapshotPending(), agenda.NextSequence,
-                CorrectedInputValues);
+                CorrectedInputValues, World.WaterReserves);
 
         public WorldState World { get; }
         public bool IsExtinct => World.Creatures.Count == 0;
@@ -126,6 +129,9 @@ namespace Eden.Simulation
         /// <summary>Energy flows of the last tick; they explain exactly how the creatures' total energy changed.</summary>
         public EnergyFlows LastEnergy => energy;
 
+        /// <summary>Water flows of the last tick (all zero without water); see <see cref="HydrationFlows"/>.</summary>
+        public HydrationFlows LastHydration => hydration;
+
         /// <summary>Pairs of solid bodies touching at the end of the last tick; always 0 without solid bodies.</summary>
         public int LastContacts { get; private set; }
 
@@ -142,8 +148,8 @@ namespace Eden.Simulation
 
         /// <summary>
         /// Runs one tick: agenda, observe all (checked against <see cref="ObservationLimits"/>), decide in id order,
-        /// move (as solid bodies when the config says so, see <see cref="Contacts"/>), eat, energy/age/death, births
-        /// (when the config allows reproduction), cleanup.
+        /// move (as solid bodies when the config says so, see <see cref="Contacts"/>), eat, drink (with water),
+        /// energy/hydration/age/death, births (when the config allows reproduction), cleanup.
         /// </summary>
         public void Step(ICreatureController controller)
         {
@@ -165,6 +171,7 @@ namespace Eden.Simulation
             LastFoodRespawnsDelayed = 0;
             LastContacts = 0;
             energy = default;
+            hydration = default;
             LastCorrectedInputValues = 0;
 
             if (config.FoodShifts && tick == config.FoodShiftTicks)
@@ -199,6 +206,8 @@ namespace Eden.Simulation
             }
 
             ResolveFeeding(tick, count);
+            if (config.HasWater)
+                ResolveDrinking(count);
             ApplyEnergyAndAging(tick, count);
             if (config.Reproduction)
                 ApplyBirths(tick, count);
@@ -310,10 +319,89 @@ namespace Eden.Simulation
             }
         }
 
+        // Each source in order: a limited one first recharges, up to its capacity. Then every creature whose eating reach
+        // touches the source's edge, with no obstacle in between, asks for what it can still take this tick: up to the
+        // drink rate (less what it drank elsewhere this tick), never beyond full. A source holding enough gives everyone
+        // what it asked; otherwise each gets the same fraction of its ask (what the source holds over all that was asked),
+        // so the split depends on neither ids nor order. Water gives no energy.
+        private void ResolveDrinking(int count)
+        {
+            var config = World.Config;
+            var creatures = World.Creatures;
+            var water = config.Water;
+            var perTick = config.DrinkRatePerSecond * config.TickDuration;
+            Array.Clear(drunk, 0, count);
+            for (var s = 0; s < water.Count; s++)
+            {
+                var source = water[s];
+                var reserve = World.WaterReserves[s];
+                if (!source.Inexhaustible)
+                {
+                    var recharged = Math.Min(source.Capacity, reserve + source.RechargePerSecond * config.TickDuration);
+                    hydration.Recharged += recharged - reserve;
+                    reserve = recharged;
+                }
+
+                var asked = 0.0;
+                for (var c = 0; c < count; c++)
+                {
+                    var creature = creatures[c];
+                    thirst[c] = Reaches(config, creature, source.Area)
+                        ? Math.Min(perTick - drunk[c], config.MaxHydration - creature.Hydration)
+                        : 0f;
+                    if (thirst[c] > 0f)
+                        asked += thirst[c];
+                }
+
+                if (asked > 0.0)
+                {
+                    var share = source.Inexhaustible || reserve >= asked ? 1f : (float)(reserve / asked);
+                    var given = 0.0;
+                    for (var c = 0; c < count; c++)
+                    {
+                        if (!(thirst[c] > 0f))
+                            continue;
+                        var creature = creatures[c];
+                        var before = creature.Hydration;
+                        creature.Hydration = Math.Min(config.MaxHydration, before + thirst[c] * share);
+                        drunk[c] += creature.Hydration - before;
+                        given += creature.Hydration - before;
+                    }
+
+                    hydration.Drunk += given;
+                    if (source.Inexhaustible)
+                    {
+                        hydration.DrunkFromInexhaustible += given;
+                    }
+                    else
+                    {
+                        var left = Math.Max(0f, (float)(reserve - given));
+                        hydration.TakenFromSources += reserve - left;
+                        reserve = left;
+                    }
+                }
+
+                World.SetWaterReserve(s, reserve);
+            }
+        }
+
+        // The edge of the water within the creature's eating reach, with no obstacle between its centre and that point.
+        private static bool Reaches(SimulationConfig config, CreatureState creature, Obstacle area)
+        {
+            var position = creature.Position;
+            if (area.DistanceTo(position) > creature.Body.EatRadius)
+                return false;
+            var nearest = new Float2(Math.Min(area.MaxX, Math.Max(area.MinX, position.X)),
+                Math.Min(area.MaxY, Math.Max(area.MinY, position.Y)));
+            return config.Obstacles.Count == 0 || Vision.LineOfSight(config, position, nearest);
+        }
+
         private void ApplyEnergyAndAging(long tick, int count)
         {
             var config = World.Config;
             var creatures = World.Creatures;
+            var hasWater = config.HasWater;
+            var thirstPerTick = config.HydrationLossPerSecond * config.TickDuration;
             for (var i = 0; i < count; i++)
             {
                 var creature = creatures[i];
@@ -348,14 +436,25 @@ namespace Eden.Simulation
                 creature.AgeTicks++;
                 if (creature.ReproductionCooldownTicks > 0)
                     creature.ReproductionCooldownTicks--;
+                if (hasWater)
+                {
+                    // Time takes water whatever the creature does; it cannot lose more than it holds.
+                    var held = creature.Hydration;
+                    var remaining = held - thirstPerTick;
+                    hydration.Lost += remaining < 0f ? held : thirstPerTick;
+                    creature.Hydration = remaining < 0f ? 0f : remaining;
+                }
 
                 var cause = creature.Energy <= 0f ? DeathCause.Starvation
+                    : hasWater && creature.Hydration <= 0f ? DeathCause.Dehydration
                     : creature.AgeTicks >= config.MaxAgeTicks ? DeathCause.OldAge
                     : DeathCause.None;
                 if (cause == DeathCause.None)
                     continue;
                 creature.DeathCause = cause;
                 energy.CarriedAwayByDeaths += creature.Energy;
+                if (hasWater)
+                    hydration.CarriedAwayByDeaths += creature.Hydration;
                 deaths.Add(new CreatureDeath(creature.Id, tick, cause));
             }
         }
@@ -363,7 +462,8 @@ namespace Eden.Simulation
         // Parents in id order, children appended (so id order holds). A parent must be alive, mature, out of cooldown and
         // hold the configured share of its capacity, and must keep some energy after paying. At the cap the birth is
         // refused before anything is drawn or paid. The child gets min(share of the parent's energy, its capacity);
-        // the parent loses that plus the cost: no energy is created. Placement draws angle then heading from the spawn
+        // the parent loses that plus the cost: no energy is created. With water the child also gets the same share of the
+        // parent's hydration, which the parent loses. Placement draws angle then heading from the spawn
         // stream. With solid bodies the child is conceived first, a place for its own disc is looked for next to the
         // parent and only then is anything paid; without room the birth is refused for free and the child forgotten.
         private void ApplyBirths(long tick, int count)
@@ -416,6 +516,8 @@ namespace Eden.Simulation
                 var child = World.AddOffspring(parent, new Float2(x, y), heading, transfer, genes);
                 if (Heredity != null)
                     child.Eyes = Heredity.EyesOf(childId);
+                if (config.HasWater)
+                    ShareHydration(parent, child);
                 births.Add(new CreatureBirth(child.Id, parent.Id, tick));
                 alive++;
             }
@@ -451,8 +553,19 @@ namespace Eden.Simulation
             var child = World.AddOffspring(parent, place, heading, transfer, genes);
             if (Heredity != null)
                 child.Eyes = Heredity.EyesOf(childId);
+            if (config.HasWater)
+                ShareHydration(parent, child);
             births.Add(new CreatureBirth(child.Id, parent.Id, tick));
             return true;
+        }
+
+        // The child's hydration is the parent's share for offspring, taken from the parent: no water is created.
+        private void ShareHydration(CreatureState parent, CreatureState child)
+        {
+            var share = parent.Hydration * World.Config.OffspringEnergyFraction;
+            parent.Hydration -= share;
+            child.Hydration = share;
+            hydration.Transferred += share;
         }
 
         private static float Clamp(float value, float size) => value < 0f ? 0f : value > size ? size : value;
@@ -465,6 +578,8 @@ namespace Eden.Simulation
             observations = new Observation[size];
             actions = new CreatureAction[size];
             foodGains = new float[size];
+            drunk = new float[size];
+            thirst = new float[size];
             var buffers = new float[size][];
             Array.Copy(eyeInputs, buffers, eyeInputs.Length);
             eyeInputs = buffers;
