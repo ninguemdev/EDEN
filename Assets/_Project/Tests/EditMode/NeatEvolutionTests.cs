@@ -79,7 +79,7 @@ namespace Eden.Tests.EditMode
         }
 
         [Test]
-        public void Neat_RefusesPlasticityPoolsRestoreAndSaving()
+        public void Neat_RefusesPlasticityAndMlpPools()
         {
             var plastic = Small(34);
             plastic.Plasticity = true;
@@ -87,12 +87,7 @@ namespace Eden.Tests.EditMode
 
             var pool = new[] { InitialGenomes.Population(1, 1)[0] };
             Assert.That(() => GenerationalEvolution.FromSeedPool(Small(35), pool, new[] { 1f }),
-                Throws.ArgumentException.With.Message.Contains("NEAT"));
-
-            var session = new EvolutionSession(Small(36), 1);
-            var checkpoint = new Checkpoint("evolution", "minimal", 36, "neural", session.Capture(), null);
-            Assert.That(() => CheckpointCodec.Encode(checkpoint, "0.1.0", "test", CreatedAt),
-                Throws.TypeOf<CheckpointException>().With.Message.Contains("NEAT"));
+                Throws.ArgumentException.With.Message.Contains("mlp genome"));
         }
 
         [Test]

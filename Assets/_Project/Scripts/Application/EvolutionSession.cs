@@ -72,7 +72,7 @@ namespace Eden.Application
 
             var previous = saved.Generation > 0 ? saved.LastTrainingIndividuals : null;
             var evolution = GenerationalEvolution.Restore(saved.Settings, saved.Generation, saved.Population,
-                Lineage.Restore(saved.Lineage), previous);
+                Lineage.Restore(saved.Lineage), previous, saved.Neat);
             var session = new EvolutionSession(evolution, saved.ValidationInterval);
             var plan = evolution.Plan;
             var ticksPerSecond = plan.EpisodeConfig(plan.ValidationSeed).TicksPerSecond;
@@ -82,8 +82,11 @@ namespace Eden.Application
                 if (saved.LastTrainingEpisodes == null)
                     throw new ArgumentException("The last training evaluation is missing.", nameof(saved));
                 var last = saved.Generation - 1;
-                session.LastTraining = new GenerationReport(GenerationEvaluation.FromEpisodes(last,
-                    EvaluationMode.Training, plan.TrainingSeeds(last), saved.LastTrainingEpisodes, ticksPerSecond), previous);
+                var lastEvaluation = GenerationEvaluation.FromEpisodes(last, EvaluationMode.Training, plan.TrainingSeeds(last),
+                    saved.LastTrainingEpisodes, ticksPerSecond);
+                session.LastTraining = evolution.LastTrainingSpecies == null
+                    ? new GenerationReport(lastEvaluation, previous)
+                    : new GenerationReport(lastEvaluation, previous, evolution.LastTrainingSpecies);
             }
 
             if (saved.BaselineEpisodes != null)
@@ -174,7 +177,8 @@ namespace Eden.Application
 
             return new EvolutionSnapshot(Evolution.Settings, ValidationInterval, Evolution.Generation,
                 Evolution.Individuals, Evolution.Lineage.Entries(), LastTraining?.Individuals,
-                LastTraining?.Evaluation.Episodes, baselines, training, validation, TotalTicks, Phase, Job.Capture());
+                LastTraining?.Evaluation.Episodes, baselines, training, validation, TotalTicks, Phase, Job.Capture(),
+                Evolution.CaptureNeat());
         }
 
         /// <summary>

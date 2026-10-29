@@ -303,7 +303,7 @@ namespace Eden.Evolution
             return order;
         }
 
-        private static int Tournament(IReadOnlyList<float> fitness, int size, IRandomSource random)
+        internal static int Tournament(IReadOnlyList<float> fitness, int size, IRandomSource random)
         {
             var winner = (int)random.NextUInt((uint)fitness.Count);
             for (var i = 1; i < size; i++)
