@@ -117,6 +117,7 @@ namespace Eden.Presentation
         private CreatureDeath? selectedDeath;
         private BirthRefusal? selectedRefusal;
         private ArenaTally arenaTally;
+        private WorldAudit audit;
         private float hudTimer;
         private float networkTimer;
         private LabBenchmark benchmark;
@@ -149,6 +150,9 @@ namespace Eden.Presentation
 
         /// <summary>Totals of the physical arena since the shared world started or was loaded.</summary>
         public ArenaTally ArenaTally => arenaTally;
+
+        /// <summary>Energy and water of the shared world since it was started or loaded; null in evolution mode.</summary>
+        public WorldAudit Audit => audit;
 
         /// <summary>
         /// World rules of the lab, as edited in the Inspector (or by -eden-reproduction); a preset sets the population and
@@ -208,8 +212,25 @@ namespace Eden.Presentation
         public bool TryGetHeldAction(CreatureId creature, out CreatureAction action) =>
             controller.TryGetLastAction(creature, out action);
 
-        /// <summary>Starts a new run of the given choice (what the Start button does).</summary>
+        /// <summary>
+        /// Starts a new run of the given choice (what the Start button does). A scenario that cannot be set up (invalid
+        /// rules, or creatures or food that do not fit) is refused before anything changes: the current run goes on,
+        /// the choice goes back to it and <see cref="StartProblem"/> says why.
+        /// </summary>
         public void StartExperiment(LabChoice choice)
+        {
+            var previous = Simulation != null ? CurrentChoice() : (LabChoice?)null;
+            UseChoice(choice);
+            if (!TryStartRun() && previous.HasValue)
+            {
+                UseChoice(previous.Value);
+                hud?.ShowChoice(previous.Value, Evolution != null);
+                RefreshHud();
+            }
+        }
+
+        // The run's choice fields; nothing starts.
+        private void UseChoice(LabChoice choice)
         {
             mode = choice.Mode;
             preset = Mathf.Clamp(choice.Preset, 0, ExperimentPreset.All.Count - 1);
@@ -225,12 +246,34 @@ namespace Eden.Presentation
             genomeDirectory = choice.GenomeDirectory;
             compositionText = choice.CompositionText;
             compositionFrozen = choice.CompositionFrozen;
-            StartRun();
         }
 
         /// <summary>Restarts the current choice from its seed; evolution mode starts a new evolution.</summary>
-        public void StartRun()
+        public void StartRun() => TryStartRun();
+
+        /// <summary>Why the last start was refused (the scenario cannot be set up), or null after a start that worked.</summary>
+        public string StartProblem { get; private set; }
+
+        // Checks the scenario first. Refused with a run going: nothing changes. Refused at launch, with nothing to keep:
+        // the control arena starts instead, and the problem stays shown.
+        private bool TryStartRun()
         {
+            var problem = ScenarioProblem();
+            StartProblem = problem;
+            if (problem != null)
+            {
+                Debug.LogWarning($"EDEN: scenario refused ({problem})");
+                if (Simulation != null)
+                {
+                    RefreshHud();
+                    return false;
+                }
+
+                scenario = new ScenarioSettings();
+                solidBodies = false;
+                obstacles = ObstacleLayout.None;
+            }
+
             CloseMetricsLog();
             Selected = null;
             selectedDeath = null;
@@ -247,6 +290,52 @@ namespace Eden.Presentation
             worldView.Bind(Simulation.World);
             hud?.ShowChoice(CurrentChoice(), Evolution != null);
             RefreshHud();
+            return problem == null;
+        }
+
+        // Why the chosen scenario cannot start, or null: the rules are validated and the first world (an episode's in
+        // evolution mode) is built and dropped, so creatures and food that do not fit are found before anything changes.
+        private string ScenarioProblem()
+        {
+            try
+            {
+                if (mode == LabMode.IsolatedEvolution)
+                    WorldFactory.CreateInitial(new EvaluationPlan(EvolutionRunSettings()).EpisodeConfig(0));
+                else
+                    WorldFactory.CreateInitial(new SimulationConfig(SharedRunSettings()));
+                return null;
+            }
+            catch (ScenarioInfeasibleException error)
+            {
+                return error.Message;
+            }
+            catch (ArgumentException error)
+            {
+                return error.Message;
+            }
+        }
+
+        // The shared world's settings: the preset's, with the scenario, and the evolved population's size when it is used.
+        // A composition sets its own population when it starts.
+        private SimulationSettings SharedRunSettings()
+        {
+            var runSettings = Preset.SharedWorld(settings, (ulong)seed);
+            ApplyArena(runSettings);
+            if (brain == LabBrainKind.Evolved)
+                runSettings.InitialPopulation =
+                    (Evolution.LastTraining?.Individuals ?? Evolution.Evolution.Individuals).Count;
+            return runSettings;
+        }
+
+        private EvolutionSettings EvolutionRunSettings()
+        {
+            var evolutionSettings = Preset.Evolution((ulong)seed);
+            evolutionSettings.ExpressedBodyGenes = evolvingBody ? BodyGeneSet.All : BodyGeneSet.None;
+            evolutionSettings.Algorithm = neat || eyes || evolvingEyes ? EvolutionAlgorithm.Neat : EvolutionAlgorithm.Mlp;
+            evolutionSettings.Senses = eyes || evolvingEyes ? Senses.Eyes : Senses.Legacy;
+            evolutionSettings.EvolvingEyes = evolvingEyes;
+            AppliedScenario().Apply(evolutionSettings);
+            return evolutionSettings;
         }
 
         /// <summary>Goes back from the shared world to the evolution where it stopped.</summary>
@@ -392,6 +481,8 @@ namespace Eden.Presentation
             sharedSettings = saved.SharedWorld?.Settings;
             sharedGenomes = genomes;
             composition = loadedComposition;
+            audit = mode == LabMode.SharedWorld ? new WorldAudit(world.World) : null;
+            StartProblem = null;
             genealogy = lineage;
             sharedIndividuals = individuals;
             sharedGeneration = session?.LastTraining?.Summary.Generation ?? 0;
@@ -784,6 +875,7 @@ namespace Eden.Presentation
             }
 
             arenaTally = arenaTally.Add(Simulation);
+            audit?.Add(Simulation);
             var refused = Simulation.LastRefusedBirths;
             for (var i = 0; i < refused.Count; i++)
             {
@@ -811,14 +903,12 @@ namespace Eden.Presentation
             MetricsDirectory = null;
             if (brain != LabBrainKind.Evolved)
                 sharedIndividuals = null;
-            var runSettings = Preset.SharedWorld(settings, (ulong)seed);
-            ApplyArena(runSettings);
+            var runSettings = SharedRunSettings();
             if (brain == LabBrainKind.Evolved)
             {
                 var source = Evolution.LastTraining;
                 sharedIndividuals = source?.Individuals ?? Evolution.Evolution.Individuals;
                 sharedGeneration = source?.Summary.Generation ?? 0;
-                runSettings.InitialPopulation = sharedIndividuals.Count;
             }
 
             composition = null;
@@ -843,6 +933,7 @@ namespace Eden.Presentation
             controller = CreateController(config, brain, sharedGenomes, out var name);
             BrainName = name;
             metrics = new MetricsRecorder(config, config.TicksPerSecond);
+            audit = new WorldAudit(Simulation.World);
             if (writeMetrics)
                 OpenMetricsLog(config);
         }
@@ -892,12 +983,8 @@ namespace Eden.Presentation
             EvolutionDirectory = null;
             sharedIndividuals = null;
             sharedGenomes = null;
-            var evolutionSettings = Preset.Evolution((ulong)seed);
-            evolutionSettings.ExpressedBodyGenes = evolvingBody ? BodyGeneSet.All : BodyGeneSet.None;
-            evolutionSettings.Algorithm = neat || eyes || evolvingEyes ? EvolutionAlgorithm.Neat : EvolutionAlgorithm.Mlp;
-            evolutionSettings.Senses = eyes || evolvingEyes ? Senses.Eyes : Senses.Legacy;
-            evolutionSettings.EvolvingEyes = evolvingEyes;
-            AppliedScenario().Apply(evolutionSettings);
+            audit = null;
+            var evolutionSettings = EvolutionRunSettings();
             Evolution = CreateEvolution(evolutionSettings);
             BrainName = EvolutionBrainName(Evolution);
             if (writeMetrics)
@@ -1025,10 +1112,11 @@ namespace Eden.Presentation
                 return;
             var evolving = mode == LabMode.IsolatedEvolution;
             hud.ShowPlayback(Clock.IsPaused, Clock.IsUnpaced);
-            hud.ShowRun(evolving
-                ? LabText.Evolution(Evolution, Clock, Preset, RunDirectory)
-                : LabText.Run(Simulation, Clock, BrainName, Preset, metrics, RunDirectory, SharedSource(), arenaTally,
-                    composition));
+            hud.ShowRun((StartProblem == null ? string.Empty : LabText.StartRefused(StartProblem) + "\n") +
+                        (evolving
+                            ? LabText.Evolution(Evolution, Clock, Preset, RunDirectory)
+                            : LabText.Run(Simulation, Clock, BrainName, Preset, metrics, RunDirectory, SharedSource(),
+                                arenaTally, composition, audit)));
             hud.ShowEvolution(evolving || sharedIndividuals != null ? Evolution : null);
             hud.ShowInspector(Selected.HasValue ? DescribeSelected(Selected.Value) : null);
             hud.SetExportAvailable(ResolveExportableGenome() != null);

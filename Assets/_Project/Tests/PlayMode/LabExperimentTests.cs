@@ -463,6 +463,35 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator AnInfeasibleScenario_IsRefusedInTheHud_AndTheRunGoesOn()
+        {
+            yield return StartFromControls(LabMode.SharedWorld, preset: 0, seed: 4);
+            var running = runner.Simulation;
+            var tick = running.World.Tick;
+            yield return Press("faster-button");
+            yield return WaitUntil(() => running.World.Tick > tick, 10f);
+            StringAssert.Contains("Energia em", runner.Hud.RunText, "the audit of the shared world");
+            StringAssert.Contains("esforço (inclui empurrar)", runner.Hud.RunText);
+            Assert.That(runner.Audit.LargestError(running.World), Is.LessThan(0.1));
+
+            // 128 bodies cannot fit a 6 × 6 arena.
+            runner.StartExperiment(new LabChoice(LabMode.SharedWorld, 2, 4, LabBrainKind.Heuristic, solidBodies: true,
+                scenario: new ScenarioSettings { ArenaSide = 6f }));
+            yield return null;
+            StringAssert.Contains("Infeasible scenario: only", runner.StartProblem);
+            StringAssert.Contains("of 128 creatures fit", runner.StartProblem);
+            StringAssert.StartsWith("CENÁRIO INVIÁVEL", runner.Hud.RunText);
+            Assert.That(runner.Simulation, Is.SameAs(running), "the run shown goes on");
+            Assert.That(runner.Preset.Name, Is.EqualTo("minimal"), "the choice goes back to the run");
+            Assert.That(runner.Scenario.ArenaSide, Is.EqualTo(50f));
+            Assert.That(runner.Hud.Root.Q<DropdownField>("preset-field").index, Is.Zero);
+
+            yield return StartFromControls(LabMode.SharedWorld, preset: 1, seed: 4);
+            Assert.That(runner.StartProblem, Is.Null, "a start that works clears it");
+            Assert.That(runner.Hud.RunText, Does.Not.Contain("CENÁRIO INVIÁVEL"));
+        }
+
+        [UnityTest]
         public IEnumerator Controls_SaveAndLoadAnEvolutionInTheMiddleOfAnEpisode()
         {
             UseTemporaryCheckpoint();
@@ -613,7 +642,7 @@ namespace Eden.Tests.PlayMode
 
             runner.CloseLogs();
             var metrics = File.ReadAllLines(Path.Combine(directory, "metrics.csv"));
-            Assert.That(metrics.Last(), Does.EndWith(",1"), "the extinction closes a metrics window");
+            Assert.That(metrics.Last().Split(',')[Array.IndexOf(metrics[0].Split(','), "extinct")], Is.EqualTo("1"), "the extinction closes a metrics window");
             var genealogy = File.ReadAllLines(Path.Combine(directory, "genealogy.csv"));
             Assert.That(genealogy.Last(), Is.EqualTo($"{runner.ExtinctionTick},extinction,,,,"));
             Assert.That(genealogy.Count(r => r.Contains(",founder,")), Is.EqualTo(32));
