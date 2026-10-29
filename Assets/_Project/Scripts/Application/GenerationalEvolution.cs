@@ -282,7 +282,8 @@ namespace Eden.Application
             var history = InnovationHistory.Restore(neat.Innovations);
             if (history.Contract != Plan.Contract || history.Generation != generation)
                 throw new ArgumentException($"The innovation history is at generation {history.Generation} of " +
-                                            $"{history.Contract.Id}, the evolution at {generation}.", nameof(neat));
+                                            $"{history.Contract.Id}, the evolution at {generation} of " +
+                                            $"{Plan.Contract.Id}.", nameof(neat));
             var restored = NeatSpeciation.Restore(neatRules, neat.Species, neat.NextSpeciesId);
             foreach (var species in restored.Species)
                 CheckNumbered(species.Representative, history, $"species {species.Id}");

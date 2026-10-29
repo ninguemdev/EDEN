@@ -586,6 +586,7 @@ namespace Eden.Simulation
         }
 
         // Scratch buffer for the eye inputs of the creature at index i this tick, created once per index.
-        private float[] EyeInputs(int index) => eyeInputs[index] ??= new float[NeuralContract.Eyes.InputCount];
+        private float[] EyeInputs(int index) =>
+            eyeInputs[index] ??= new float[Sensors.EyeContract(World.Config).InputCount];
     }
 }

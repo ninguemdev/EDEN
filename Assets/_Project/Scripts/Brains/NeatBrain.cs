@@ -7,7 +7,8 @@ namespace Eden.Brains
     /// <summary>
     /// Feed-forward NEAT network built from a <see cref="Genome"/>'s <see cref="NeatNetwork"/>: the bias node reads 1,
     /// input node 1 + i reads input i of the genome's contract (the <see cref="Observation"/> values for
-    /// <see cref="NeuralContract.Legacy"/>, its <see cref="Observation.EyeInputs"/> for <see cref="NeuralContract.Eyes"/>,
+    /// <see cref="NeuralContract.Legacy"/>, its <see cref="Observation.EyeInputs"/> for <see cref="NeuralContract.Eyes"/>
+    /// and <see cref="NeuralContract.EyesWater"/>,
     /// both under the <see cref="ObservationLimits"/> policy), and every hidden and output node is tanh of
     /// the sum of its enabled incoming connections, added in innovation order. Disabled connections carry nothing; a node
     /// without enabled inputs reads tanh(0) = 0, so an unconnected output gives the neutral action of a zero network:
@@ -37,12 +38,12 @@ namespace Eden.Brains
             var network = genome.Neat ??
                           throw new ArgumentException($"NeatBrain needs a NEAT genome, got a {genome.Network} one.",
                               nameof(genome));
-            if (network.Contract != NeuralContract.Legacy && network.Contract != NeuralContract.Eyes)
+            if (network.Contract != NeuralContract.Legacy && !network.Contract.HasEyes)
                 throw new ArgumentException($"NeatBrain cannot read contract {network.Contract.Id}.", nameof(genome));
 
             Genome = genome;
             var contract = network.Contract;
-            eyes = contract == NeuralContract.Eyes;
+            eyes = contract.HasEyes;
             input = new float[contract.InputCount];
             var hidden = network.HiddenNodes;
             var first = NeatNetwork.FirstHiddenNodeId(contract);
@@ -125,10 +126,14 @@ namespace Eden.Brains
             var sanitized = ObservationLimits.Sanitize(observation, out _);
             if (!eyes)
                 sanitized.CopyTo(input, 0);
-            else if (sanitized.EyeInputs != null)
-                Array.Copy(sanitized.EyeInputs, input, input.Length);
-            else
+            else if (sanitized.EyeInputs == null)
                 throw new InvalidOperationException("A brain of the eye senses needs a creature with eyes.");
+            else if (sanitized.EyeInputs.Length != input.Length)
+                throw new InvalidOperationException(
+                    $"A brain of {Genome.Contract.Id} cannot read {sanitized.EyeInputs.Length} eye inputs: it needs a world " +
+                    (Genome.Contract.SensesWater ? "with water." : "without water."));
+            else
+                Array.Copy(sanitized.EyeInputs, input, input.Length);
             nodeValues[NeatNetwork.BiasNodeId] = 1f;
             for (var i = 0; i < input.Length; i++)
                 nodeValues[NeatNetwork.InputNodeId(i)] = input[i];

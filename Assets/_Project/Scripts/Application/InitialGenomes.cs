@@ -42,14 +42,14 @@ namespace Eden.Application
             NeatPopulation(experimentSeed, count, expressed, weightLimit, NeuralContract.Legacy);
 
         /// <summary>
-        /// As above for any contract; with <see cref="NeuralContract.Eyes"/> every founder has the founder's eyes
+        /// As above for any contract; with an eye contract every founder has the founder's eyes
         /// (<see cref="EyeSet.Founder"/>: one frontal eye), which draw nothing.
         /// </summary>
         public static Genome[] NeatPopulation(ulong experimentSeed, int count, BodyGeneSet expressed, float weightLimit,
             NeuralContract contract)
         {
             BodyGenes.RequireSet(expressed);
-            var eyes = contract == NeuralContract.Eyes ? EyeSet.Founder : null;
+            var eyes = contract.HasEyes ? EyeSet.Founder : null;
             var genomes = new Genome[count];
             for (var i = 0; i < count; i++)
             {

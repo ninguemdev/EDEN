@@ -84,7 +84,7 @@ namespace Eden.Presentation
 
         private readonly NeuralSnapshot networkSnapshot = new NeuralSnapshot();
         private readonly NeatSnapshot neatSnapshot = new NeatSnapshot();
-        private readonly float[] observedEyes = new float[NeuralContract.Eyes.InputCount];
+        private float[] observedEyes = Array.Empty<float>();
         private readonly List<CreatureId> touching = new List<CreatureId>();
         private readonly Stopwatch budgetWatch = new Stopwatch();
         private BrainController controller;
@@ -1055,7 +1055,13 @@ namespace Eden.Presentation
                     continue;
                 observation = Sensors.Observe(Simulation.World, creature);
                 if (creature.Eyes != null)
+                {
+                    var count = Sensors.EyeContract(Simulation.World.Config).InputCount;
+                    if (observedEyes.Length != count)
+                        observedEyes = new float[count];
                     observation = Sensors.WithEyes(observation, Simulation.World, creature, observedEyes);
+                }
+
                 return true;
             }
 

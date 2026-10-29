@@ -396,19 +396,24 @@ namespace Eden.Presentation
                 : "Leitura atual dos olhos (ainda não é uma entrada do cérebro)");
             if (inputs == null)
                 return;
-            text.AppendLine($"energia {inputs[0]:0.00}  idade {inputs[1]:0.00}  vel. frente {inputs[2]:0.00}  esq. {inputs[3]:0.00}");
+            var contract = NeuralContract.OfEyeInputs(inputs.Length);
+            text.AppendLine($"energia {inputs[0]:0.00}  idade {inputs[1]:0.00}  vel. frente {inputs[2]:0.00}  esq. {inputs[3]:0.00}" +
+                            (contract.SensesWater ? $"  hidratação {inputs[NeuralContract.HydrationInput]:0.00}" : ""));
             for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
             {
                 if (!eyes.Has(slot))
                     continue;
-                text.AppendLine($"olho {slot}: " + Seen(inputs, slot, EyeChannel.FoodVisible, "comida") + " · " +
-                                Seen(inputs, slot, EyeChannel.BarrierVisible, "barreira"));
+                text.AppendLine($"olho {slot}: " + Seen(contract, inputs, slot, EyeChannel.FoodVisible, "comida") + " · " +
+                                Seen(contract, inputs, slot, EyeChannel.BarrierVisible, "barreira") +
+                                (contract.SensesWater
+                                    ? " · " + Seen(contract, inputs, slot, EyeChannel.WaterVisible, "água")
+                                    : ""));
             }
         }
 
-        private static string Seen(float[] inputs, int slot, EyeChannel visible, string what)
+        private static string Seen(NeuralContract contract, float[] inputs, int slot, EyeChannel visible, string what)
         {
-            var at = NeuralContract.EyeInputIndex(slot, visible);
+            var at = contract.EyeInput(slot, visible);
             return inputs[at] > 0f
                 ? $"{what} sen {inputs[at + 1]:0.00} cos {inputs[at + 2]:0.00} prox. {inputs[at + 3]:0.00}"
                 : what + " não vista";

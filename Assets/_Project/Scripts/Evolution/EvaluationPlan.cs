@@ -107,7 +107,10 @@ namespace Eden.Evolution
         /// <summary>Food nearest within a circle and four wall distances (<see cref="NeuralContract.Legacy"/>).</summary>
         Legacy = 0,
 
-        /// <summary>Only what eyes' cones and ranges reach (<see cref="NeuralContract.Eyes"/>).</summary>
+        /// <summary>
+        /// Only what eyes' cones and ranges reach (<see cref="NeuralContract.Eyes"/>; with water,
+        /// <see cref="NeuralContract.EyesWater"/>, which also sees water and feels hydration).
+        /// </summary>
         Eyes = 1
     }
 
@@ -185,6 +188,7 @@ namespace Eden.Evolution
             ExperimentSeed = settings.ExperimentSeed;
             Algorithm = settings.Algorithm;
             Senses = settings.Senses;
+            Contract = Senses == Senses.Eyes ? NeuralContract.ForEyes(validated.HasWater) : NeuralContract.Legacy;
             EvolvingEyes = settings.EvolvingEyes;
             ExpressedBodyGenes = settings.ExpressedBodyGenes;
             Plasticity = settings.Plasticity;
@@ -208,8 +212,11 @@ namespace Eden.Evolution
         /// <summary>Whether eyes are inherited with mutation (otherwise every eye stays the founders').</summary>
         public bool EvolvingEyes { get; }
 
-        /// <summary>What the brains read and write: <see cref="NeuralContract.Eyes"/> with eyes, else the legacy contract.</summary>
-        public NeuralContract Contract => Senses == Senses.Eyes ? NeuralContract.Eyes : NeuralContract.Legacy;
+        /// <summary>
+        /// What the brains read and write: with eyes, <see cref="NeuralContract.EyesWater"/> in a world with water and
+        /// <see cref="NeuralContract.Eyes"/> without; else the legacy contract, which neither sees water nor feels thirst.
+        /// </summary>
+        public NeuralContract Contract { get; }
 
         /// <summary>Body genes that shape the episode creature; <see cref="BodyGeneSet.None"/> is the fixed body.</summary>
         public BodyGeneSet ExpressedBodyGenes { get; }

@@ -22,13 +22,24 @@ namespace Eden.Domain
         BarrierVisible = 5,
         BarrierSin = 6,
         BarrierCos = 7,
-        BarrierProximity = 8
+        BarrierProximity = 8,
+
+        /// <summary>1 when part of a water source lies inside the cone and range with a free line to it; only in
+        /// <see cref="NeuralContract.EyesWater"/>.</summary>
+        WaterVisible = 9,
+        WaterSin = 10,
+        WaterCos = 11,
+        WaterProximity = 12
     }
 
     /// <summary>Number of <see cref="EyeChannel"/> values per eye.</summary>
     public static class EyeChannels
     {
+        /// <summary>Channels per eye in <see cref="NeuralContract.Eyes"/>: present, food and barrier.</summary>
         public const int Count = 9;
+
+        /// <summary>Channels per eye in <see cref="NeuralContract.EyesWater"/>: those of <see cref="Count"/>, then water.</summary>
+        public const int WithWater = 13;
     }
 
     /// <summary>One brain input or output: an id that keeps a single meaning forever, and a name for people.</summary>
@@ -90,19 +101,41 @@ namespace Eden.Domain
         /// from a present eye that sees nothing (present 1). There is no wall radar and no circular food sense: only what
         /// an eye's cone and range reach. Same outputs as <see cref="Legacy"/>.
         /// </summary>
-        public static readonly NeuralContract Eyes = new NeuralContract(EyesId, EyesInputs(),
-            new[] { new NeuralChannel(0, "Thrust"), new NeuralChannel(1, "Turn"), new NeuralChannel(2, "Strafe") });
+        public static readonly NeuralContract Eyes = new NeuralContract(EyesId, EyesInputs(false),
+            new[] { new NeuralChannel(0, "Thrust"), new NeuralChannel(1, "Turn"), new NeuralChannel(2, "Strafe") },
+            EyeChannels.Count);
 
-        private static readonly NeuralContract[] Known = { Legacy, Eyes };
+        /// <summary>Id of <see cref="EyesWater"/>.</summary>
+        public const string EyesWaterId = "eyes-water-v1";
+
+        /// <summary>Id of the hydration channel (hydration / max hydration, [0, 1]); no other contract used 12.</summary>
+        public const int HydrationChannelId = 12;
+
+        /// <summary>Position of the hydration channel in <see cref="EyesWater"/>, right after the body channels.</summary>
+        public const int HydrationInput = EyesBodyInputs;
+
+        /// <summary>
+        /// Eyes in a world with water: the body channels of <see cref="Eyes"/>, then hydration
+        /// (<see cref="HydrationChannelId"/>), then, for each eye slot, the channels of <see cref="Eyes"/> with the same
+        /// ids followed by the water channels (<see cref="EyeChannel.WaterVisible"/> to
+        /// <see cref="EyeChannel.WaterProximity"/>, ids within the slot's stride). Positions differ from
+        /// <see cref="Eyes"/>, so its genomes do not read this contract. Same outputs.
+        /// </summary>
+        public static readonly NeuralContract EyesWater = new NeuralContract(EyesWaterId, EyesInputs(true),
+            new[] { new NeuralChannel(0, "Thrust"), new NeuralChannel(1, "Turn"), new NeuralChannel(2, "Strafe") },
+            EyeChannels.WithWater);
+
+        private static readonly NeuralContract[] Known = { Legacy, Eyes, EyesWater };
 
         private readonly NeuralChannel[] inputs;
         private readonly NeuralChannel[] outputs;
 
-        private NeuralContract(string id, NeuralChannel[] inputs, NeuralChannel[] outputs)
+        private NeuralContract(string id, NeuralChannel[] inputs, NeuralChannel[] outputs, int channelsPerEye = 0)
         {
             Id = id;
             this.inputs = inputs;
             this.outputs = outputs;
+            ChannelsPerEye = channelsPerEye;
             RequireUniqueIds(inputs, nameof(inputs));
             RequireUniqueIds(outputs, nameof(outputs));
         }
@@ -112,6 +145,33 @@ namespace Eden.Domain
         public IReadOnlyList<NeuralChannel> Outputs => outputs;
         public int InputCount => inputs.Length;
         public int OutputCount => outputs.Length;
+
+        /// <summary>Whether this contract senses through eyes (its genomes carry an <see cref="EyeSet"/>).</summary>
+        public bool HasEyes => ChannelsPerEye > 0;
+
+        /// <summary>Whether its brains feel their hydration and their eyes see water.</summary>
+        public bool SensesWater => ChannelsPerEye == EyeChannels.WithWater;
+
+        /// <summary>Inputs per eye slot; 0 without eyes.</summary>
+        public int ChannelsPerEye { get; }
+
+        /// <summary>Inputs about the body itself, before the eye slots; meaningful only with eyes.</summary>
+        public int BodyInputs => SensesWater ? EyesBodyInputs + 1 : EyesBodyInputs;
+
+        /// <summary>The eye contract of a world: <see cref="EyesWater"/> when it has water, else <see cref="Eyes"/>.</summary>
+        public static NeuralContract ForEyes(bool water) => water ? EyesWater : Eyes;
+
+        /// <summary>The eye contract whose input vector has this length, or null.</summary>
+        public static NeuralContract OfEyeInputs(int inputCount) =>
+            inputCount == Eyes.InputCount ? Eyes : inputCount == EyesWater.InputCount ? EyesWater : null;
+
+        /// <summary>Position of one channel of an eye slot in this contract's input vector.</summary>
+        public int EyeInput(int slot, EyeChannel channel)
+        {
+            if ((int)channel < 0 || (int)channel >= ChannelsPerEye)
+                throw new ArgumentOutOfRangeException(nameof(channel), $"{Id} has no eye channel {channel}.");
+            return BodyInputs + CheckSlot(slot) * ChannelsPerEye + (int)channel;
+        }
 
         /// <summary>Index of the input channel with this id, or -1 when this contract has no such channel.</summary>
         public int InputIndexOf(int channelId) => IndexOf(inputs, channelId);
@@ -142,8 +202,7 @@ namespace Eden.Domain
             EyeChannelBase + CheckSlot(slot) * EyeChannelStride + (int)channel;
 
         /// <summary>Position of one channel of an eye slot in the input vector of <see cref="Eyes"/>.</summary>
-        public static int EyeInputIndex(int slot, EyeChannel channel) =>
-            EyesBodyInputs + CheckSlot(slot) * EyeChannels.Count + (int)channel;
+        public static int EyeInputIndex(int slot, EyeChannel channel) => Eyes.EyeInput(slot, channel);
 
         private static int CheckSlot(int slot)
         {
@@ -152,17 +211,21 @@ namespace Eden.Domain
             return slot;
         }
 
-        private static NeuralChannel[] EyesInputs()
+        private static NeuralChannel[] EyesInputs(bool water)
         {
-            var channels = new NeuralChannel[EyesBodyInputs + EyeSet.MaxEyes * EyeChannels.Count];
+            var body = water ? EyesBodyInputs + 1 : EyesBodyInputs;
+            var perEye = water ? EyeChannels.WithWater : EyeChannels.Count;
+            var channels = new NeuralChannel[body + EyeSet.MaxEyes * perEye];
             for (var i = 0; i < EyesBodyInputs; i++)
                 channels[i] = new NeuralChannel(i, ObservationLimits.Name(i));
+            if (water)
+                channels[EyesBodyInputs] = new NeuralChannel(HydrationChannelId, "Hydration");
             for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
             {
-                for (var c = 0; c < EyeChannels.Count; c++)
+                for (var c = 0; c < perEye; c++)
                 {
                     var channel = (EyeChannel)c;
-                    channels[EyesBodyInputs + slot * EyeChannels.Count + c] =
+                    channels[body + slot * perEye + c] =
                         new NeuralChannel(EyeChannelBase + slot * EyeChannelStride + c, $"Eye{slot}{channel}");
                 }
             }

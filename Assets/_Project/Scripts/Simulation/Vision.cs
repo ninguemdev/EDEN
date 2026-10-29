@@ -13,7 +13,8 @@ namespace Eden.Simulation
     /// Directions are given in the body's frame (sine positive to the left, cosine 1 straight ahead).
     /// <see cref="SimulationConfig.Obstacles"/> are opaque: food behind one is not seen (see <see cref="LineOfSight"/>),
     /// and each is a barrier the eye sees, like the border, at its nearest point inside the cone and range. Creatures
-    /// hide nothing.
+    /// hide nothing. In a world with water (<see cref="NeuralContract.EyesWater"/>) an eye also sees the nearest point of
+    /// a water source inside its cone and range unless an obstacle hides it; water hides nothing and is not a barrier.
     /// </summary>
     public static class Vision
     {
@@ -26,7 +27,17 @@ namespace Eden.Simulation
         /// <paramref name="eyes"/> into <paramref name="buffer"/> at <paramref name="offset"/>: all zeros for an empty
         /// slot, otherwise present = 1 and what the eye sees.
         /// </summary>
-        public static void See(WorldState world, CreatureState creature, EyeSet eyes, int slot, float[] buffer, int offset)
+        public static void See(WorldState world, CreatureState creature, EyeSet eyes, int slot, float[] buffer, int offset) =>
+            See(world, creature, eyes, slot, buffer, offset, false);
+
+        /// <summary>
+        /// As above; with <paramref name="water"/> it writes the <see cref="EyeChannels.WithWater"/> channels of
+        /// <see cref="NeuralContract.EyesWater"/>, the last four for the nearest water the eye sees. Water is not
+        /// opaque, so it hides neither food nor barriers, but obstacles hide water: a water point counts only with a free
+        /// line to it.
+        /// </summary>
+        public static void See(WorldState world, CreatureState creature, EyeSet eyes, int slot, float[] buffer, int offset,
+            bool water)
         {
             if (world == null)
                 throw new ArgumentNullException(nameof(world));
@@ -34,10 +45,11 @@ namespace Eden.Simulation
                 throw new ArgumentNullException(nameof(creature));
             if (eyes == null)
                 throw new ArgumentNullException(nameof(eyes));
-            if (buffer == null || offset < 0 || offset > buffer.Length - EyeChannels.Count)
+            var channels = water ? EyeChannels.WithWater : EyeChannels.Count;
+            if (buffer == null || offset < 0 || offset > buffer.Length - channels)
                 throw new ArgumentOutOfRangeException(nameof(offset));
 
-            Array.Clear(buffer, offset, EyeChannels.Count);
+            Array.Clear(buffer, offset, channels);
             if (!eyes.Has(slot))
                 return;
             var eye = eyes[slot];
@@ -68,6 +80,15 @@ namespace Eden.Simulation
                 WriteDirection(buffer, offset + (int)EyeChannel.BarrierSin, wall, origin, wallDistance, axisX, axisY,
                     forwardX, forwardY);
                 buffer[offset + (int)EyeChannel.BarrierProximity] = Clamp01(1f - wallDistance / range);
+            }
+
+            if (water && NearestWater(world.Config, origin, axis, eye.Aperture * 0.5f, cosHalf, axisX, axisY, range,
+                    out var pond, out var pondDistance))
+            {
+                buffer[offset + (int)EyeChannel.WaterVisible] = 1f;
+                WriteDirection(buffer, offset + (int)EyeChannel.WaterSin, pond, origin, pondDistance, axisX, axisY,
+                    forwardX, forwardY);
+                buffer[offset + (int)EyeChannel.WaterProximity] = Clamp01(1f - pondDistance / range);
             }
         }
 
@@ -187,6 +208,51 @@ namespace Eden.Simulation
             }
 
             return found;
+        }
+
+        // The nearest water point inside the sector, chosen among the same candidates as an obstacle's (each source's point
+        // nearest the eye when it lies in the cone, and where the edge rays first hit it), keeping only those with a free
+        // line past the obstacles. A source hidden at those points counts as unseen even if a sliver of it shows elsewhere.
+        private static bool NearestWater(SimulationConfig config, Float2 origin, float axis, float half, float cosHalf,
+            float axisX, float axisY, float range, out Float2 position, out float bestDistance)
+        {
+            position = default;
+            bestDistance = float.MaxValue;
+            var found = false;
+            var water = config.Water;
+            var occluded = config.Obstacles.Count > 0;
+            for (var i = 0; i < water.Count; i++)
+            {
+                var area = water[i].Area;
+                var nearest = new Float2(Math.Min(area.MaxX, Math.Max(area.MinX, origin.X)),
+                    Math.Min(area.MaxY, Math.Max(area.MinY, origin.Y)));
+                ConsiderVisible(config, occluded, nearest, origin, axisX, axisY, cosHalf, range, ref position,
+                    ref bestDistance, ref found);
+                for (var edge = -1; edge <= 1; edge += 2)
+                {
+                    var angle = axis + edge * half;
+                    var dirX = MathF.Cos(angle);
+                    var dirY = MathF.Sin(angle);
+                    var t = RayToObstacle(origin, dirX, dirY, area);
+                    if (t < float.MaxValue)
+                        ConsiderVisible(config, occluded, new Float2(origin.X + dirX * t, origin.Y + dirY * t), origin,
+                            axisX, axisY, cosHalf, range, ref position, ref bestDistance, ref found);
+                }
+            }
+
+            return found;
+        }
+
+        private static void ConsiderVisible(SimulationConfig config, bool occluded, Float2 point, Float2 origin, float axisX,
+            float axisY, float cosHalf, float range, ref Float2 position, ref float bestDistance, ref bool found)
+        {
+            if (!InCone(origin, axisX, axisY, cosHalf, range, point, out var distance) || distance >= bestDistance)
+                return;
+            if (occluded && !LineOfSight(config, origin, point))
+                return;
+            position = point;
+            bestDistance = distance;
+            found = true;
         }
 
         private static void Consider(Float2 point, Float2 origin, float axisX, float axisY, float cosHalf, float range,
