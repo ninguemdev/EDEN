@@ -75,6 +75,12 @@ namespace Eden.Evolution
         /// </summary>
         public int NormalizationThreshold = 20;
 
+        /// <summary>
+        /// Compatibility weight c4 of the eye difference (experimental EDEN extension). 0, the default, keeps species purely
+        /// neural, as in NEAT.
+        /// </summary>
+        public float EyeCompatibilityCoefficient;
+
         /// <summary>Genomes closer than this distance to a species' representative join it (proposed 3).</summary>
         public float CompatibilityThreshold = 3f;
 
@@ -133,6 +139,7 @@ namespace Eden.Evolution
             Coefficient(settings.ExcessCoefficient, nameof(settings.ExcessCoefficient), errors);
             Coefficient(settings.DisjointCoefficient, nameof(settings.DisjointCoefficient), errors);
             Coefficient(settings.WeightDifferenceCoefficient, nameof(settings.WeightDifferenceCoefficient), errors);
+            Coefficient(settings.EyeCompatibilityCoefficient, nameof(settings.EyeCompatibilityCoefficient), errors);
             if (settings.NormalizationThreshold < 0 || settings.NormalizationThreshold > NeatNetwork.MaxConnections)
                 errors.Add($"{nameof(settings.NormalizationThreshold)} must be in [0, {NeatNetwork.MaxConnections}] " +
                            $"(was {settings.NormalizationThreshold})");
@@ -168,6 +175,7 @@ namespace Eden.Evolution
             DisjointCoefficient = settings.DisjointCoefficient;
             WeightDifferenceCoefficient = settings.WeightDifferenceCoefficient;
             NormalizationThreshold = settings.NormalizationThreshold;
+            EyeCompatibilityCoefficient = settings.EyeCompatibilityCoefficient;
             CompatibilityThreshold = settings.CompatibilityThreshold;
             StagnationGenerations = settings.StagnationGenerations;
             ProtectedSpecies = settings.ProtectedSpecies;
@@ -193,6 +201,7 @@ namespace Eden.Evolution
         public float DisjointCoefficient { get; }
         public float WeightDifferenceCoefficient { get; }
         public int NormalizationThreshold { get; }
+        public float EyeCompatibilityCoefficient { get; }
         public float CompatibilityThreshold { get; }
         public int StagnationGenerations { get; }
         public int ProtectedSpecies { get; }
