@@ -769,7 +769,7 @@ namespace Eden.Presentation
 
                 return EvolutionSession.FromSeedPool(evolutionSettings, genomes, fitness);
             }
-            catch (CheckpointException error)
+            catch (Exception error) when (error is CheckpointException || error is ArgumentException)
             {
                 Debug.LogWarning($"EDEN: genome pool not used ({error.Message})");
                 ShowGenomeExportStatus(LabText.GenomePoolFailed(error.Message));

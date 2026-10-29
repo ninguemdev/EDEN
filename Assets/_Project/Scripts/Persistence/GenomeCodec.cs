@@ -57,9 +57,11 @@ namespace Eden.Persistence
     /// <summary>
     /// JSON form of one exported genome (schema version 2), independent of <see cref="CheckpointCodec"/>: a genome file
     /// is read standalone, with no surrounding checkpoint to imply what the network is, so unlike a checkpoint's
-    /// internal genome encoding it always writes and checks the kind of network, its neural contract and topology, and
-    /// the profile of its fitness. Schema 1 files (before those fields) are read as MLP genomes of the legacy contract
-    /// scored by <see cref="Fitness.Profile"/> "food-energy-per-second-v1", the only ones that existed.
+    /// internal genome encoding it always writes and checks the kind of network, its neural contract and shape, and
+    /// the profile of its fitness. An MLP is written as <c>topology</c> and flat <c>weights</c>; a NEAT network as
+    /// <c>connections</c>, each <c>[innovation, from, to, weight, enabled]</c> in innovation order (its nodes follow from
+    /// the contract and the connections). Schema 1 files (before those fields) are read as MLP genomes of the legacy
+    /// contract scored by <see cref="Fitness.Profile"/> "food-energy-per-second-v1", the only ones that existed.
     /// </summary>
     public static class GenomeCodec
     {
@@ -71,10 +73,6 @@ namespace Eden.Persistence
             if (record == null)
                 throw new ArgumentNullException(nameof(record));
             var genome = record.Genome;
-            var weights = JsonValue.NewArray();
-            for (var w = 0; w < genome.WeightCount; w++)
-                weights.Add(JsonValue.Of(genome.GetWeight(w)));
-
             var root = JsonValue.NewObject()
                 .Add("format", JsonValue.Of(Format))
                 .Add("schemaVersion", JsonValue.Of(SchemaVersion))
@@ -82,12 +80,23 @@ namespace Eden.Persistence
                 .Add("savedUtc", JsonValue.Of(savedUtc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)))
                 .Add("genomeSchema", JsonValue.Of(Genome.CurrentSchemaVersion))
                 .Add("network", JsonValue.Of(genome.Network))
-                .Add("contract", JsonValue.Of(genome.Contract.Id))
-                .Add("topology", JsonValue.NewArray()
-                    .Add(JsonValue.Of(genome.Topology.Inputs))
-                    .Add(JsonValue.Of(genome.Topology.Hidden))
-                    .Add(JsonValue.Of(genome.Topology.Outputs)))
-                .Add("weights", weights);
+                .Add("contract", JsonValue.Of(genome.Contract.Id));
+            if (genome.Neat == null)
+            {
+                var weights = JsonValue.NewArray();
+                for (var w = 0; w < genome.WeightCount; w++)
+                    weights.Add(JsonValue.Of(genome.GetWeight(w)));
+                root.Add("topology", JsonValue.NewArray()
+                        .Add(JsonValue.Of(genome.Topology.Inputs))
+                        .Add(JsonValue.Of(genome.Topology.Hidden))
+                        .Add(JsonValue.Of(genome.Topology.Outputs)))
+                    .Add("weights", weights);
+            }
+            else
+            {
+                root.Add("connections", EncodeConnections(genome.Neat));
+            }
+
             if (!genome.Body.IsNeutral)
                 root.Add("body", EncodeBodyGenes(genome.Body));
             if (!genome.Plasticity.IsFixed)
@@ -128,32 +137,24 @@ namespace Eden.Persistence
                                               "the newest this build reads; open it with a newer EDEN.");
 
             var network = schema >= 2 ? root["network"].String() : Genome.MlpNetwork;
-            if (network != Genome.MlpNetwork)
+            if (network != Genome.MlpNetwork && network != NeatNetwork.Kind)
                 throw new CheckpointException($"Network kind \"{network}\" is not supported by this build (only " +
-                                              $"\"{Genome.MlpNetwork}\").");
+                                              $"\"{Genome.MlpNetwork}\" and \"{NeatNetwork.Kind}\").");
             var contractId = schema >= 2 ? root["contract"].String() : NeuralContract.LegacyId;
             if (!NeuralContract.TryFind(contractId, out var contract))
                 throw new CheckpointException($"Neural contract \"{contractId}\" is unknown to this build; open it " +
                                               "with a newer EDEN.");
-            if (contract != NeuralContract.Legacy)
-                throw new CheckpointException($"An {Genome.MlpNetwork} genome uses contract {NeuralContract.LegacyId}, " +
-                                              $"not {contract.Id}.");
 
-            var expected = NetworkTopology.Mlp12x16x3;
-            var topology = root["topology"].ArrayOf(3);
-            if (topology.Count != 3 || topology[0].Int() != expected.Inputs || topology[1].Int() != expected.Hidden ||
-                topology[2].Int() != expected.Outputs)
-                throw new CheckpointException($"{topology.Path}: only the {expected} network is supported.");
+            Genome genome;
+            try
+            {
+                genome = network == Genome.MlpNetwork ? DecodeMlp(root, contract) : DecodeNeat(root, contract);
+            }
+            catch (ArgumentException error)
+            {
+                throw new CheckpointException("Not a valid genome: " + error.Message, error);
+            }
 
-            var values = root["weights"].ArrayOf(expected.ParameterCount);
-            if (values.Count != expected.ParameterCount)
-                throw new CheckpointException($"{values.Path}: {expected} needs {expected.ParameterCount} weights.");
-            var weights = new float[values.Count];
-            for (var w = 0; w < weights.Length; w++)
-                weights[w] = values[w].Float();
-
-            var genome = new Genome(expected, weights, DecodeBodyGenes(root.TryGet("body")),
-                DecodePlasticity(root.TryGet("plasticity")));
             float? fitness = root.TryGet("fitness")?.AnyFloat();
             var savedProfile = root.TryGet("fitnessProfile");
             if (savedProfile != null && !fitness.HasValue)
@@ -170,6 +171,65 @@ namespace Eden.Persistence
             }
 
             return new GenomeRecord(genome, fitness, source, profile);
+        }
+
+        private static Genome DecodeMlp(JsonValue root, NeuralContract contract)
+        {
+            if (contract != NeuralContract.Legacy)
+                throw new CheckpointException($"An {Genome.MlpNetwork} genome uses contract {NeuralContract.LegacyId}, " +
+                                              $"not {contract.Id}.");
+            var expected = NetworkTopology.Mlp12x16x3;
+            var topology = root["topology"].ArrayOf(3);
+            if (topology.Count != 3 || topology[0].Int() != expected.Inputs || topology[1].Int() != expected.Hidden ||
+                topology[2].Int() != expected.Outputs)
+                throw new CheckpointException($"{topology.Path}: only the {expected} network is supported.");
+
+            var values = root["weights"].ArrayOf(expected.ParameterCount);
+            if (values.Count != expected.ParameterCount)
+                throw new CheckpointException($"{values.Path}: {expected} needs {expected.ParameterCount} weights.");
+            var weights = new float[values.Count];
+            for (var w = 0; w < weights.Length; w++)
+                weights[w] = values[w].Float();
+            return new Genome(expected, weights, DecodeBodyGenes(root.TryGet("body")),
+                DecodePlasticity(root.TryGet("plasticity")));
+        }
+
+        // A NEAT network has no plasticity coefficients; the network itself checks its connections.
+        private static Genome DecodeNeat(JsonValue root, NeuralContract contract)
+        {
+            var plasticity = root.TryGet("plasticity");
+            if (plasticity != null)
+                throw new CheckpointException($"{plasticity.Path}: NEAT networks have no lifetime plasticity.");
+            var saved = root["connections"].ArrayOf(NeatNetwork.MaxConnections);
+            var connections = new NeatConnection[saved.Count];
+            for (var c = 0; c < connections.Length; c++)
+            {
+                var gene = saved[c].ArrayOf(5);
+                if (gene.Count != 5)
+                    throw new CheckpointException($"{gene.Path}: expected [innovation, from, to, weight, enabled].");
+                connections[c] = new NeatConnection(gene[0].Int(0), gene[1].Int(0), gene[2].Int(0), gene[3].Float(),
+                    gene[4].Boolean());
+                if (c > 0 && connections[c].Innovation <= connections[c - 1].Innovation)
+                    throw new CheckpointException($"{gene.Path}: connections are written in increasing innovation order.");
+            }
+
+            return new Genome(new NeatNetwork(contract, connections), DecodeBodyGenes(root.TryGet("body")));
+        }
+
+        private static JsonValue EncodeConnections(NeatNetwork network)
+        {
+            var values = JsonValue.NewArray();
+            foreach (var gene in network.Connections)
+            {
+                values.Add(JsonValue.NewArray()
+                    .Add(JsonValue.Of(gene.Innovation))
+                    .Add(JsonValue.Of(gene.From))
+                    .Add(JsonValue.Of(gene.To))
+                    .Add(JsonValue.Of(gene.Weight))
+                    .Add(JsonValue.Of(gene.Enabled)));
+            }
+
+            return values;
         }
 
         private static JsonValue EncodeBodyGenes(BodyGenes genes)

@@ -103,8 +103,11 @@ namespace Eden.Tests.EditMode
             var genome = new Genome(NetworkTopology.Mlp12x16x3, Weights(9));
             var text = GenomeCodec.Encode(new GenomeRecord(genome, 2f), "0.1.0", SavedAt);
 
+            Assert.That(() => GenomeCodec.Decode(text.Replace("\"network\": \"mlp\"", "\"network\": \"lstm\"")),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("lstm"));
             Assert.That(() => GenomeCodec.Decode(text.Replace("\"network\": \"mlp\"", "\"network\": \"neat\"")),
-                Throws.TypeOf<CheckpointException>().With.Message.Contains("neat"));
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("connections"),
+                "MLP content labelled as NEAT has no connections");
             Assert.That(() => GenomeCodec.Decode(text.Replace("legacy-12-3-v1", "eyes-v9")),
                 Throws.TypeOf<CheckpointException>().With.Message.Contains("eyes-v9"));
             Assert.That(() => GenomeCodec.Decode(WithoutMember(text, "network")),
@@ -130,6 +133,57 @@ namespace Eden.Tests.EditMode
             var decoded = GenomeCodec.Decode(GenomeCodec.Encode(other, "0.1.0", SavedAt));
             Assert.That(decoded.FitnessProfile, Is.EqualTo("water-and-food-v1"), "kept as history");
             Assert.That(decoded.FitnessFor(Fitness.Profile), Is.Null);
+        }
+
+        [Test]
+        public void NeatGenome_RoundTripsWithHiddenNodesDisabledGenesAndBody()
+        {
+            var contract = NeuralContract.Legacy;
+            var output = NeatNetwork.OutputNodeId(contract, 1);
+            var hidden = NeatNetwork.FirstHiddenNodeId(contract);
+            var minimal = NeatNetwork.CreateMinimal(contract, new Pcg32(3, 3), 1f).Connections;
+            var genes = new NeatConnection[minimal.Count + 2];
+            for (var i = 0; i < minimal.Count; i++)
+                genes[i] = minimal[i];
+            genes[4] = genes[4].WithEnabled(false); // input 0 → output 1, split by the hidden node
+            genes[minimal.Count] = new NeatConnection(39, genes[4].From, hidden, 1f, true);
+            genes[minimal.Count + 1] = new NeatConnection(40, hidden, output, genes[4].Weight, true);
+            var genome = new Genome(new NeatNetwork(contract, genes), new BodyGenes(0f, -0.5f, 0.25f, 0f));
+
+            var text = GenomeCodec.Encode(new GenomeRecord(genome, 1.5f, new GenomeSource(4, 5, 6)), "0.1.0", SavedAt);
+            Assert.That(text, Does.Contain("\"network\": \"neat\"").And.Contain("\"connections\"")
+                .And.Not.Contain("\"topology\"").And.Not.Contain("\"weights\""));
+            Assert.That(text, Does.Contain("[4,1,14,").And.Contain(",false]"), "[innovation, from, to, weight, enabled]");
+
+            var decoded = GenomeCodec.Decode(text);
+            Assert.That(decoded.Genome.HasSameContent(genome), Is.True);
+            Assert.That(decoded.Genome.Neat.HiddenNodes, Is.EqualTo(new[] { hidden }));
+            Assert.That(decoded.Fitness, Is.EqualTo(1.5f));
+            Assert.That(GenomeCodec.Encode(decoded, "0.1.0", SavedAt), Is.EqualTo(text), "re-encodes to the same text");
+        }
+
+        [Test]
+        public void NeatGenome_InvalidFilesAreRefusedAsGenomeErrors()
+        {
+            var contract = NeuralContract.Legacy;
+            var genome = new Genome(NeatNetwork.CreateMinimal(contract, new Pcg32(4, 3), 1f));
+            var text = GenomeCodec.Encode(new GenomeRecord(genome), "0.1.0", SavedAt);
+            var first = $"[0,0,{NeatNetwork.OutputNodeId(contract, 0)},";
+
+            Assert.That(text, Does.Contain(first));
+            Assert.That(() => GenomeCodec.Decode(text.Replace(first, $"[0,{NeatNetwork.OutputNodeId(contract, 0)},1,")),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("Not a valid genome"), "output into input");
+            Assert.That(() => GenomeCodec.Decode(text.Replace(first, "[45,0,13,")),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("innovation order"));
+            Assert.That(() => GenomeCodec.Decode(text.Replace("\"contract\"", "\"plasticity\": [0.5,0.1],\n  \"contract\"")),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("plasticity"));
+
+            var mlp = GenomeCodec.Encode(new GenomeRecord(new Genome(NetworkTopology.Mlp12x16x3, Weights(11))), "0.1.0", SavedAt);
+            var weightsAt = mlp.IndexOf("\"weights\": [", StringComparison.Ordinal) + "\"weights\": [".Length;
+            var outOfRange = mlp.Substring(0, weightsAt) + "7," + mlp.Substring(mlp.IndexOf(',', weightsAt) + 1);
+            Assert.That(() => GenomeCodec.Decode(outOfRange),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("Not a valid genome"),
+                "a bad MLP weight is a genome error too, not an ArgumentException");
         }
 
         // The same file as schema 1 wrote it: no network, contract or fitness profile.

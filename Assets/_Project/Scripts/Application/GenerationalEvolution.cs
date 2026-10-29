@@ -198,6 +198,8 @@ namespace Eden.Application
                 if (!lineage.Contains(member.Id) || lineage.BirthGeneration(member.Id) != member.BirthGeneration ||
                     member.BirthGeneration > generation || !SameIds(lineage.ParentIds(member.Id), member.ParentIds))
                     throw new ArgumentException($"Individual {member.Id} does not match its lineage.", name);
+                if (member.Genome.Network != Genome.MlpNetwork)
+                    throw new ArgumentException($"Individual {member.Id} has a {member.Genome.Network} genome.", name);
                 if (!member.Genome.Topology.Equals(NetworkTopology.Mlp12x16x3))
                     throw new ArgumentException($"Individual {member.Id} has a {member.Genome.Topology} genome.", name);
             }
