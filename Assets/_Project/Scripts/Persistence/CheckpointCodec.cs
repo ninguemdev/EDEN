@@ -557,6 +557,18 @@ namespace Eden.Persistence
                     sharedWorld.Add("bornGenomes", genomes);
                 }
 
+                if (shared.Composition != null)
+                {
+                    var entries = JsonValue.NewArray();
+                    foreach (var entry in shared.Composition.Entries)
+                        entries.Add(EncodeGenome(entry.Genome, JsonValue.NewObject()
+                            .Add("count", JsonValue.Of(entry.Count))
+                            .Add("source", JsonValue.Of(entry.Source))));
+                    sharedWorld.Add("composition", JsonValue.NewObject()
+                        .Add("frozen", JsonValue.Of(shared.Composition.Frozen))
+                        .Add("entries", entries));
+                }
+
                 if (shared.Genealogy.Count > 0)
                 {
                     // [id, parent (0: founder), generation, birth tick, death tick (-1: alive), death cause]
@@ -656,9 +668,32 @@ namespace Eden.Persistence
                     }
                 }
 
+                GenomeComposition composition = null;
+                var composed = saved.TryGet("composition");
+                if (composed != null)
+                {
+                    var values = composed["entries"].ArrayOf(SimulationConfig.MaxPopulation);
+                    var entries = new List<CompositionEntry>(values.Count);
+                    for (var i = 0; i < values.Count; i++)
+                        entries.Add(new CompositionEntry(DecodeGenome(values[i]),
+                            values[i]["count"].Int(1, SimulationConfig.MaxPopulation), values[i]["source"].String()));
+                    try
+                    {
+                        composition = new GenomeComposition(entries, composed["frozen"].Boolean());
+                    }
+                    catch (ArgumentException error)
+                    {
+                        throw new CheckpointException($"{composed.Path}: {error.Message}", error);
+                    }
+
+                    if (composition.Total != settings.InitialPopulation)
+                        throw new CheckpointException($"{composed.Path}: {composition.Total} founders for a world of " +
+                                                      $"{settings.InitialPopulation}.");
+                }
+
                 shared = new SharedWorldSnapshot(settings,
                     DecodeWorld(saved["world"], most, settings.InitialFood, new SimulationConfig(settings)),
-                    DecodeBrains(saved["brains"]), genomes, genealogy);
+                    DecodeBrains(saved["brains"]), genomes, genealogy, composition);
             }
             else if (!state["sharedWorld"].IsNull)
             {

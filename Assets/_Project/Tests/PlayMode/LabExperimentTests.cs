@@ -6,7 +6,9 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using Eden.Brains;
 using Eden.Domain;
+using Eden.Application;
 using Eden.Evolution;
+using Eden.Persistence;
 using Eden.Presentation;
 using Eden.Simulation;
 using NUnit.Framework;
@@ -419,6 +421,45 @@ namespace Eden.Tests.PlayMode
             episode = runner.Simulation.World.Config;
             Assert.That((episode.ArenaWidth, episode.InitialFood, episode.Water.Count), Is.EqualTo((50f, 32, 0)),
                 "back to the control and the episodes' own food");
+        }
+
+        [UnityTest]
+        public IEnumerator Controls_AComposition_PutsExactCopiesInTheArena_AndARefusalSaysWhy()
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "eden-composition-" + Guid.NewGuid().ToString("N"));
+            runDirectories.Add(directory);
+            Directory.CreateDirectory(directory);
+            var a = InitialGenomes.RandomFor(SimulationConfig.CreateDefault(1), new CreatureId(1));
+            var b = new Genome(NeatNetwork.CreateMinimal(NeuralContract.Legacy, new Pcg32(3, 1), 1f),
+                new BodyGenes(0.5f, 0f, 0f, 0f));
+            GenomeFile.Save(Path.Combine(directory, "a.json"), new GenomeRecord(a, 1f), "0.1.0", DateTime.UtcNow);
+            GenomeFile.Save(Path.Combine(directory, "b.json"), new GenomeRecord(b, 2f), "0.1.0", DateTime.UtcNow);
+
+            var root = runner.Hud.Root;
+            root.Q<DropdownField>("brain-field").value = LabHud.BrainChoices[(int)LabBrainKind.Composition];
+            yield return null;
+            Assert.That(root.Q<VisualElement>("composition-panel").resolvedStyle.display, Is.EqualTo(DisplayStyle.Flex));
+            root.Q<TextField>("seed-genomes-field").value = directory;
+            root.Q<TextField>("composition-field").value = "a*20; #1*5";
+            root.Q<DropdownField>("arena-field").index = 2;
+            yield return Press("start-button");
+
+            var world = runner.Simulation.World;
+            Assert.That(runner.BrainKind, Is.EqualTo(LabBrainKind.Composition));
+            Assert.That(world.Creatures.Count, Is.EqualTo(25));
+            Assert.That(world.Config.Reproduction, Is.False, "frozen by default");
+            Assert.That(world.Creatures.Count(c => c.Genes.Equals(b.Body)), Is.EqualTo(5), "#1 is b, the best");
+            StringAssert.Contains("Composição: a.json ×20 + b.json ×5 = 25 criaturas", runner.Hud.RunText);
+            StringAssert.Contains("congelados", runner.Hud.RunText);
+            runner.Select(new CreatureId(22));
+            yield return null;
+            StringAssert.Contains("Composição: b.json, cópia 2 de 5", runner.Hud.InspectorText);
+
+            root.Q<TextField>("composition-field").value = "c*3";
+            yield return Press("start-button");
+            Assert.That(runner.BrainKind, Is.EqualTo(LabBrainKind.Heuristic), "a composition that cannot be read is not used");
+            StringAssert.Contains("Composição não usada", runner.GenomeExportStatus);
+            StringAssert.Contains("no genome named c", runner.GenomeExportStatus);
         }
 
         [UnityTest]
