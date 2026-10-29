@@ -109,7 +109,8 @@ namespace Eden.Presentation
                             $"{CandidateLabel(session)} ({episode.Candidate + 1}/{job.CandidateCount}), " +
                             $"seed {episode.SeedIndex + 1}/{job.SeedCount}");
             text.AppendLine($"Episódio {episode.Tick * (double)episode.Simulation.World.Config.TickDuration:0.0} s " +
-                            $"de {plan.EpisodeSeconds:0} s  ·  episódios {job.CompletedEpisodes}/{job.TotalEpisodes}");
+                            $"de {plan.Stages[episode.Stage].EpisodeSeconds:0} s  ·  episódios {job.CompletedEpisodes}/{job.TotalEpisodes}");
+            AppendStage(text, plan, episode);
             AppendSpeed(text, clock);
             text.AppendLine($"Preset {PresetLabel(preset)}  ·  Seed do experimento {plan.ExperimentSeed}  ·  " +
                             $"validação a cada {session.ValidationInterval} gerações em {plan.ValidationSeedCount} seeds separadas");
@@ -119,6 +120,7 @@ namespace Eden.Presentation
             text.AppendLine("Arena dos episódios: " + ArenaLabel(episode.Simulation.World.Config));
             text.AppendLine(Supply(episode.Simulation.World.Config, 1));
 
+            AppendStageSummary(text, plan, session.LastTraining);
             var last = session.LastTraining?.Summary;
             var structure = session.LastTraining?.Neat;
             if (last != null && structure != null)
@@ -171,10 +173,108 @@ namespace Eden.Presentation
             var episode = job.Current;
             return $"Episódio isolado: {PhaseLabel(session.Phase)} · geração {job.Generation} · " +
                    $"seed {episode.SeedIndex + 1} de {job.SeedCount}\n" +
-                   $"{episode.Tick * (double)config.TickDuration:0.0} s de {session.Plan.EpisodeSeconds:0} s · " +
+                   $"{episode.Tick * (double)config.TickDuration:0.0} s de {session.Plan.Stages[episode.Stage].EpisodeSeconds:0} s · " +
                    (session.CurrentIndividual == null
                        ? "cérebro de referência"
-                       : "fitness = comida ingerida / duração do episódio");
+                       : session.Plan.Profile.IsLegacy
+                           ? "fitness = comida ingerida / duração do episódio"
+                           : $"nota do perfil {session.Plan.Profile.Id}") +
+                   (StageLabel(session.Plan, episode.Stage) is string label ? "\n" + label : string.Empty);
+        }
+
+        /// <summary>
+        /// "Etapa 1 — busca (sem gasto)" or "Etapa 2 — recursos" in a two-stage profile, "Recursos equilibrados" alone;
+        /// null for the legacy profile.
+        /// </summary>
+        public static string StageLabel(EvaluationPlan plan, int stage)
+        {
+            var evaluated = plan.Stages[stage];
+            if (evaluated.IsSearch)
+                return "Etapa 1 — busca (sem gasto)";
+            if (evaluated.Reward.Scoring == StageScoring.FoodEnergyPerSecond)
+                return null;
+            return plan.Stages.Count > 1 ? "Etapa 2 — recursos" : "Recursos equilibrados";
+        }
+
+        // The stage of the episode shown and what its scoring measured so far.
+        private static void AppendStage(StringBuilder text, EvaluationPlan plan, IsolatedEpisode episode)
+        {
+            var label = StageLabel(plan, episode.Stage);
+            if (label == null)
+                return;
+            text.AppendLine($"{label}  ·  perfil {plan.Profile.Id} ({plan.Profile.ParameterHash})");
+            var tracker = episode.Tracker;
+            if (tracker == null)
+                return;
+            var tickSeconds = (double)episode.Simulation.World.Config.TickDuration;
+            if (episode.Layout != null)
+            {
+                var layout = episode.Layout;
+                var reached = new List<string>();
+                for (var i = 0; i < tracker.Collected.Count; i++)
+                {
+                    var target = tracker.Collected[i];
+                    reached.Add($"{i + 1}º {(layout.IsWater(target) ? "água" : "comida")} em " +
+                                $"{tracker.CollectionTicks[i] * tickSeconds:0.0} s (rapidez {tracker.Speeds[i]:0.00})");
+                }
+
+                text.AppendLine($"Alvos {tracker.Collected.Count}/{layout.TargetCount} (comida {layout.Food.Count}, " +
+                                $"água {layout.Water.Count})  ·  arena {layout.Config.ArenaWidth:0} × {layout.Config.ArenaHeight:0}");
+                if (reached.Count > 0)
+                    text.AppendLine("Ordem: " + string.Join("; ", reached));
+                if (tracker.Collected.Count < layout.TargetCount)
+                    text.AppendLine($"Próximo alvo: caminho {tracker.BestDistance:0.0} (melhor no trecho) de " +
+                                    $"{tracker.SegmentDistance:0.0}  ·  aproximação " +
+                                    $"{StageScores.Approach(tracker.SegmentDistance, tracker.BestDistance):0.00}");
+                text.AppendLine($"Gasto que seria cobrado: {tracker.UnchargedEnergy:0.0}");
+            }
+            else
+            {
+                text.AppendLine($"Energia absorvida {tracker.AbsorbedEnergy:0.0} (desperdiçada {tracker.WastedEnergy:0.0})  ·  " +
+                                $"água bebida {tracker.Drunk:0.0}");
+            }
+        }
+
+        // Median and spread of each stage's score in the last training generation, with a warning for a stage whose
+        // scores barely differ (it hardly takes part in selection).
+        private static void AppendStageSummary(StringBuilder text, EvaluationPlan plan, GenerationReport report)
+        {
+            if (plan.Profile.IsLegacy || report == null)
+                return;
+            var candidates = report.Evaluation.Candidates;
+            var parts = new List<string>();
+            var flat = new List<string>();
+            for (var k = 0; k < plan.Stages.Count; k++)
+            {
+                var scores = new List<float>();
+                foreach (var candidate in candidates)
+                {
+                    if (Fitness.IsValid(candidate.StageFitness[k]))
+                        scores.Add(candidate.StageFitness[k]);
+                }
+
+                if (scores.Count == 0)
+                    continue;
+                scores.Sort();
+                var median = Quantile(scores, 0.5);
+                var spread = Quantile(scores, 0.75) - Quantile(scores, 0.25);
+                var name = plan.Stages[k].IsSearch ? "S1 busca" : plan.Stages.Count > 1 ? "S2 recursos" : "recursos";
+                parts.Add($"{name} mediana {median:0.000} (IQR {spread:0.000})");
+                if (spread < 0.02)
+                    flat.Add(name);
+            }
+
+            text.AppendLine($"Etapas g{report.Evaluation.Generation}: " + string.Join("  ·  ", parts));
+            if (flat.Count > 0)
+                text.AppendLine("Aviso: etapa sem poder de separação (IQR < 0,02): " + string.Join(", ", flat));
+        }
+
+        private static float Quantile(List<float> sorted, double q)
+        {
+            var position = q * (sorted.Count - 1);
+            var low = (int)Math.Floor(position);
+            var high = Math.Min(sorted.Count - 1, low + 1);
+            return (float)(sorted[low] + (sorted[high] - sorted[low]) * (position - low));
         }
 
         /// <summary>

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Eden.Domain;
 using Eden.Simulation;
@@ -312,6 +313,24 @@ namespace Eden.Presentation
             DrawnObstacles = config.Obstacles.Count;
             DrawnWater = config.Water.Count;
         }
+
+        /// <summary>
+        /// Shows which water targets of a search episode were reached (dimmed); food targets disappear when reached.
+        /// The bound world must be the episode's (its water sources are the ponds, in target order).
+        /// </summary>
+        public void ShowReachedWater(SearchLayout layout, Func<int, bool> reached)
+        {
+            if (layout == null)
+                return;
+            for (var w = 0; w < layout.Water.Count; w++)
+            {
+                var index = DrawnObstacles + w;
+                if (index < obstacles.Count)
+                    obstacles[index].color = reached(layout.Food.Count + w) ? ReachedWaterColor : WaterColor;
+            }
+        }
+
+        private static readonly Color ReachedWaterColor = new Color32(58, 120, 196, 90);
 
         // A dot where each touching pair meets, between where the two are drawn (the point on the line between the
         // centres at the first body's radius); no dots without solid bodies.

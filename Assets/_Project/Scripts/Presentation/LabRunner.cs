@@ -58,6 +58,8 @@ namespace Eden.Presentation
     /// a shared world by composition with -eden-brain composition -eden-genomes DIR -eden-composition "a.json*20;#2*5"
     /// [-eden-composition-mode frozen|descendants] (see <see cref="GenomeComposition.Parse"/>),
     /// -eden-training sequential|parallel,
+    /// the reward profile as in the batch (see <see cref="ProfileChoice"/>): -eden-profile legacy|two-stage|resources and
+    /// the -eden-stage1-* options,
     /// -eden-seed N,
     /// -eden-select ID, -eden-max, and for a measured run
     /// -eden-benchmark SECONDS [-eden-benchmark-warmup SECONDS] [-eden-benchmark-output DIR] (see <see cref="LabBenchmark"/>).
@@ -88,6 +90,7 @@ namespace Eden.Presentation
         [Tooltip("Obstacles of the arena (shared world and episodes); any layout but None makes the bodies solid.")]
         [SerializeField] private ObstacleLayout obstacles;
         private ScenarioSettings scenario = new ScenarioSettings();
+        private ProfileChoice profileChoice = new ProfileChoice();
 
         /// <summary>Brain name of a shared world by composition (its genomes may mix MLP and NEAT brains).</summary>
         public const string CompositionBrainName = "composition";
@@ -250,6 +253,7 @@ namespace Eden.Presentation
             compositionText = choice.CompositionText;
             compositionFrozen = choice.CompositionFrozen;
             parallelTraining = choice.ParallelTraining;
+            profileChoice = choice.Profile?.Clone() ?? new ProfileChoice();
         }
 
         /// <summary>Restarts the current choice from its seed; evolution mode starts a new evolution.</summary>
@@ -338,7 +342,9 @@ namespace Eden.Presentation
             evolutionSettings.Algorithm = neat || eyes || evolvingEyes ? EvolutionAlgorithm.Neat : EvolutionAlgorithm.Mlp;
             evolutionSettings.Senses = eyes || evolvingEyes ? Senses.Eyes : Senses.Legacy;
             evolutionSettings.EvolvingEyes = evolvingEyes;
-            AppliedScenario().Apply(evolutionSettings);
+            var applied = AppliedScenario();
+            applied.Apply(evolutionSettings);
+            profileChoice.Apply(evolutionSettings, applied);
             return evolutionSettings;
         }
 
@@ -351,6 +357,7 @@ namespace Eden.Presentation
             mode = LabMode.IsolatedEvolution;
             sharedGenomes = null;
             ReadArena(Evolution.Evolution.Settings.World, Evolution.Evolution.Settings.EpisodeSeconds);
+            profileChoice = ProfileChoice.Read(Evolution.Evolution.Settings);
             parallelTraining = Evolution.EvaluationWorkers > 1;
             ClearSelection();
             ShowEpisode();
@@ -472,6 +479,7 @@ namespace Eden.Presentation
             neat = session != null && session.Evolution.Plan.Algorithm == EvolutionAlgorithm.Neat;
             eyes = session != null && session.Evolution.Plan.Senses == Senses.Eyes;
             evolvingEyes = session != null && session.Evolution.Plan.EvolvingEyes;
+            profileChoice = ProfileChoice.Read(session?.Evolution.Settings);
             if (loadedMode == LabMode.IsolatedEvolution)
                 ReadArena(session.Evolution.Settings.World, session.Evolution.Settings.EpisodeSeconds);
             else
@@ -796,6 +804,9 @@ namespace Eden.Presentation
                 ShowEpisode();
 
             worldView.Render(Simulation.World, Selected, Clock.TickFraction);
+            var shownEpisode = EvolutionShown?.Job.Current;
+            if (shownEpisode?.Layout != null && shownEpisode.Simulation == Simulation)
+                worldView.ShowReachedWater(shownEpisode.Layout, shownEpisode.Tracker.IsCollected);
             if (Selected.HasValue)
             {
                 networkTimer += Time.unscaledDeltaTime;
@@ -1348,6 +1359,17 @@ namespace Eden.Presentation
                     case "-eden-select" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var id):
                         select = id;
                         break;
+                    default:
+                        try
+                        {
+                            profileChoice.TryRead(arguments[i], value);
+                        }
+                        catch (ArgumentException error)
+                        {
+                            Debug.LogWarning("EDEN: " + error.Message);
+                        }
+
+                        break;
                 }
             }
 
@@ -1443,7 +1465,7 @@ namespace Eden.Presentation
 
         private LabChoice CurrentChoice() =>
             new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes, solidBodies, obstacles,
-                scenario.Clone(), genomeDirectory, compositionText, compositionFrozen, parallelTraining);
+                scenario.Clone(), genomeDirectory, compositionText, compositionFrozen, parallelTraining, profileChoice);
 
         // The lab's scenario with its arena choice, the same for the shared world and the evolution's episodes.
         private ScenarioSettings AppliedScenario()

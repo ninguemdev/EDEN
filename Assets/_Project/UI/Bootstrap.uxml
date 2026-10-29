@@ -32,6 +32,17 @@
                         <ui:FloatField name="scenario-initial-energy-field" label="Energia inicial" class="lab-field" />
                     </ui:Foldout>
                     <ui:DropdownField name="training-field" label="Treino" class="lab-field" tooltip="Paralelo usa a CPU para avaliar mundos independentes. Use Máx. para acelerar o treino; a arena mostra um dos episódios." />
+                    <ui:DropdownField name="profile-field" label="Perfil" class="lab-field" tooltip="Como cada genoma é pontuado. Duas etapas: busca sem gasto (alimento e água) + recursos equilibrados." />
+                    <ui:Foldout name="profile-foldout" text="Etapa 1 — busca" value="false" class="lab-field">
+                        <ui:FloatField name="profile-weight-field" label="Peso da busca (%)" class="lab-field" />
+                        <ui:FloatField name="profile-seconds-field" label="Duração da busca (s)" class="lab-field" />
+                        <ui:IntegerField name="profile-food-field" label="Alvos de comida" class="lab-field" />
+                        <ui:IntegerField name="profile-water-field" label="Alvos de água" class="lab-field" />
+                        <ui:FloatField name="profile-distance-field" label="Distância mínima" class="lab-field" />
+                        <ui:FloatField name="profile-alpha-field" label="Crédito de aproximação (α)" class="lab-field" />
+                        <ui:FloatField name="profile-beta-field" label="Parte da rapidez (β)" class="lab-field" />
+                        <ui:DropdownField name="profile-obstacles-field" label="Obstáculos da busca" class="lab-field" />
+                    </ui:Foldout>
                     <ui:IntegerField name="seed-field" label="Seed" value="1" class="lab-field" />
                     <ui:VisualElement class="lab-row">
                         <ui:TextField name="seed-genomes-field" label="Pool de genomas" class="lab-field" style="flex-grow: 1;" />

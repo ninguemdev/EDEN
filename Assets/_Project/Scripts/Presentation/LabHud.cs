@@ -15,8 +15,9 @@ namespace Eden.Presentation
             bool neat = false, bool eyes = false, bool evolvingEyes = false, bool solidBodies = false,
             ObstacleLayout obstacles = ObstacleLayout.None, ScenarioSettings scenario = null, string genomeDirectory = null,
             string compositionText = null, bool compositionFrozen = true,
-            bool parallelTraining = false)
+            bool parallelTraining = false, ProfileChoice profile = null)
         {
+            Profile = profile?.Clone();
             Scenario = scenario;
             GenomeDirectory = genomeDirectory;
             CompositionText = compositionText;
@@ -77,6 +78,9 @@ namespace Eden.Presentation
 
         /// <summary>Episodes of the evolution are evaluated on CPU workers (isolated evolution only).</summary>
         public bool ParallelTraining { get; }
+
+        /// <summary>How the evolution scores genomes; null for the legacy profile (the control).</summary>
+        public ProfileChoice Profile { get; }
     }
 
     /// <summary>
@@ -92,6 +96,12 @@ namespace Eden.Presentation
         public static readonly string[] BodyChoices = { "Fixo (controle)", "Evolutivo (4 genes)" };
         public static readonly string[] AlgorithmChoices = { "MLP fixa (controle)", "NEAT (topologia evolui)" };
         public static readonly string[] TrainingChoices = { "Sequencial", "Paralelo (CPU)" };
+
+        /// <summary>In <see cref="ProfileKind"/> order.</summary>
+        public static readonly string[] ProfileChoices =
+            { "Legado (controle)", "Duas etapas (busca + recursos)", "Recursos equilibrados" };
+
+        public static readonly string[] SearchObstacleChoices = { "Nenhum", "Pilares", "Corredor" };
         public static readonly string[] SensesChoices =
             { "Legados (círculo + radar)", "Olhos fixos (requer NEAT)", "Olhos evolutivos (requer NEAT)" };
 
@@ -158,6 +168,16 @@ namespace Eden.Presentation
         private TextField compositionField;
         private DropdownField compositionModeField;
         private DropdownField trainingField;
+        private DropdownField profileField;
+        private Foldout profileFoldout;
+        private FloatField profileWeightField;
+        private FloatField profileSecondsField;
+        private IntegerField profileFoodField;
+        private IntegerField profileWaterField;
+        private FloatField profileDistanceField;
+        private FloatField profileAlphaField;
+        private FloatField profileBetaField;
+        private DropdownField profileObstaclesField;
         private Label networkTitle;
         private Label networkLegend;
         private IntegerField seedField;
@@ -346,6 +366,7 @@ namespace Eden.Presentation
                 compositionField.SetValueWithoutNotify(choice.CompositionText);
             compositionModeField.SetValueWithoutNotify(CompositionModeChoices[choice.CompositionFrozen ? 0 : 1]);
             trainingField.SetValueWithoutNotify(TrainingChoices[choice.ParallelTraining ? 1 : 0]);
+            ShowProfile(choice.Profile ?? new ProfileChoice());
             seedField.SetValueWithoutNotify(choice.Seed);
             UpdateBrainField();
             resumeButton.style.display = evolutionAvailable && choice.Mode == LabMode.SharedWorld
@@ -374,7 +395,37 @@ namespace Eden.Presentation
                 sensesField.index >= 1, sensesField.index == 2, arena >= 1,
                 arena == 2 ? ObstacleLayout.Pillars : arena == 3 ? ObstacleLayout.Corridor : ObstacleLayout.None,
                 ReadScenario(), seedGenomesField.value?.Trim(), compositionField.value, compositionModeField.index != 1,
-                trainingField.index == 1);
+                trainingField.index == 1, ReadProfile());
+        }
+
+        private ProfileChoice ReadProfile()
+        {
+            var profile = new ProfileChoice { Kind = (ProfileKind)Math.Max(0, profileField.index) };
+            var options = profile.TwoStage;
+            options.SearchWeight = profileWeightField.value / 100.0;
+            options.SearchSeconds = profileSecondsField.value;
+            options.FoodTargets = profileFoodField.value;
+            options.WaterTargets = profileWaterField.value;
+            options.MinDistance = profileDistanceField.value;
+            options.Alpha = profileAlphaField.value;
+            options.Beta = profileBetaField.value;
+            options.SearchObstacles = (ObstacleLayout)Math.Max(0, profileObstaclesField.index);
+            return profile;
+        }
+
+        private void ShowProfile(ProfileChoice profile)
+        {
+            var options = profile.TwoStage;
+            profileField.SetValueWithoutNotify(ProfileChoices[(int)profile.Kind]);
+            profileWeightField.SetValueWithoutNotify((float)(options.SearchWeight * 100.0));
+            profileSecondsField.SetValueWithoutNotify(options.SearchSeconds);
+            profileFoodField.SetValueWithoutNotify(options.FoodTargets);
+            profileWaterField.SetValueWithoutNotify(options.WaterTargets);
+            profileDistanceField.SetValueWithoutNotify((float)options.MinDistance);
+            profileAlphaField.SetValueWithoutNotify((float)options.Alpha);
+            profileBetaField.SetValueWithoutNotify((float)options.Beta);
+            profileObstaclesField.SetValueWithoutNotify(SearchObstacleChoices[(int)options.SearchObstacles]);
+            profileFoldout.style.display = profile.Kind == ProfileKind.TwoStage ? DisplayStyle.Flex : DisplayStyle.None;
         }
 
         // The scenario fields; a food count of 0 keeps the mode's own (the preset's or the episodes'), and a size that is
@@ -490,6 +541,7 @@ namespace Eden.Presentation
             algorithmField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             sensesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             trainingField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+            profileField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             var composing = modeField.index == (int)LabMode.SharedWorld &&
                             Array.IndexOf(BrainChoices, brainField.value) == (int)LabBrainKind.Composition;
             seedGenomesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution || composing);
@@ -542,6 +594,55 @@ namespace Eden.Presentation
                 {
                     var value = change.newValue;
                     if (float.IsNaN(value) || value > max || value < 0f || (value == 0f && !zeroAllowed))
+                        field.SetValueWithoutNotify(change.previousValue);
+                });
+                return field;
+            }
+        }
+
+        // The search-stage fields start at the profile defaults; out-of-range values go back to the previous one.
+        private void BindProfile(VisualElement root)
+        {
+            var defaults = new TwoStageOptions();
+            profileField = root.Q<DropdownField>("profile-field");
+            profileField.choices = new List<string>(ProfileChoices);
+            profileField.index = 0;
+            profileFoldout = root.Q<Foldout>("profile-foldout");
+            profileField.RegisterValueChangedCallback(_ =>
+                profileFoldout.style.display = profileField.index == (int)ProfileKind.TwoStage
+                    ? DisplayStyle.Flex
+                    : DisplayStyle.None);
+            profileFoldout.style.display = DisplayStyle.None;
+            profileWeightField = Between("profile-weight-field", (float)(defaults.SearchWeight * 100), 1f, 99f);
+            profileSecondsField = Between("profile-seconds-field", defaults.SearchSeconds, 1f, EvaluationPlan.MaxEpisodeSeconds);
+            profileDistanceField = Between("profile-distance-field", (float)defaults.MinDistance, 0f, 500f);
+            profileAlphaField = Between("profile-alpha-field", (float)defaults.Alpha, 0f, 0.99f);
+            profileBetaField = Between("profile-beta-field", (float)defaults.Beta, 0f, 1f);
+            profileFoodField = Count("profile-food-field", defaults.FoodTargets);
+            profileWaterField = Count("profile-water-field", defaults.WaterTargets);
+            profileObstaclesField = root.Q<DropdownField>("profile-obstacles-field");
+            profileObstaclesField.choices = new List<string>(SearchObstacleChoices);
+            profileObstaclesField.index = (int)defaults.SearchObstacles;
+
+            FloatField Between(string name, float initial, float min, float max)
+            {
+                var field = root.Q<FloatField>(name);
+                field.SetValueWithoutNotify(initial);
+                field.RegisterValueChangedCallback(change =>
+                {
+                    if (float.IsNaN(change.newValue) || change.newValue < min || change.newValue > max)
+                        field.SetValueWithoutNotify(change.previousValue);
+                });
+                return field;
+            }
+
+            IntegerField Count(string name, int initial)
+            {
+                var field = root.Q<IntegerField>(name);
+                field.SetValueWithoutNotify(initial);
+                field.RegisterValueChangedCallback(change =>
+                {
+                    if (change.newValue < 0 || change.newValue > SearchTargets.MaxTargets)
                         field.SetValueWithoutNotify(change.previousValue);
                 });
                 return field;
@@ -619,6 +720,7 @@ namespace Eden.Presentation
             trainingField = root.Q<DropdownField>("training-field");
             trainingField.choices = new List<string>(TrainingChoices);
             trainingField.index = 0;
+            BindProfile(root);
             // Eyes need NEAT: choosing eyes picks NEAT, and choosing the MLP control goes back to the legacy senses.
             sensesField.RegisterValueChangedCallback(change =>
             {

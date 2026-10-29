@@ -241,6 +241,14 @@ O gráfico abaixo do painel mostra, por geração, a mediana do treino com a fai
 
 Para ver a população no mundo compartilhado, escolha *Mundo compartilhado* com o cérebro *População evoluída*: a evolução fica parada, cada criatura é um indivíduo da última geração avaliada (com a sua linhagem no inspetor) e o botão **Voltar à evolução** continua de onde parou. O experimento do laboratório é exportado em `EvolutionRuns\<data>-lab-seed<n>-<preset>\`, no mesmo formato descrito abaixo. Com a mesma seed e o mesmo preset, as gerações e os números são os mesmos de uma execução sem a cena, em qualquer velocidade.
 
+### Perfil de duas etapas: busca e recursos
+
+O perfil `two-stage-search-v1` pontua cada genoma em duas etapas, em toda geração: **recursos** (o mundo do experimento, com comida e água, nota em [0, 1] por sobrevivência 50%, reposição útil 30% e reservas finais 20%) e **busca** (arena própria, sem gasto de energia nem de hidratação, com alvos fixos de comida e água longe uns dos outros). A nota é 30% busca e 70% recursos. Na busca, cada alvo coletado vale mais que qualquer aproximação; a rapidez só pesa 30% de cada coleta e o crédito de aproximação é limitado a meio alvo. O fitness legado (energia por segundo) continua gravado em todo episódio. O perfil legado `food-energy-per-second-v1` segue como padrão e produz os mesmos arquivos de sempre.
+
+No laboratório, escolha **Perfil → Duas etapas** (o painel *Etapa 1 — busca* ajusta peso, duração, alvos, distância mínima, α e β), **Iniciar**. Use sentidos de olhos com NEAT. O episódio observado mostra a etapa, os alvos coletados em ordem e a aproximação; o resumo mostra a mediana e a dispersão de cada etapa, com aviso quando uma etapa não separa os genomas, e o gráfico ganha as séries S1 e S2.
+
+No batch e no player: `-eden-profile legacy|two-stage|resources`, `-eden-stage1-weight`, `-eden-stage1-seconds` (padrão 120), `-eden-stage1-distance` (30), `-eden-stage1-arena` e `-eden-stage1-max-arena` (a arena cresce até os alvos caberem), `-eden-stage1-obstacles none|pillars|corridor`, `-eden-stage1-food`, `-eden-stage1-water`, `-eden-stage1-alpha`, `-eden-stage1-beta` e `-eden-stage1-seeds`. Valores inválidos são recusados. Fora do perfil legado, o experimento ganha uma linha `stage=` por etapa e o arquivo `stages.csv` (nota, fitness legado e componentes de cada episódio); os checkpoints usam o schema 8, e genomas desse perfil não semeiam execuções de outro perfil.
+
 ### Sem a cena
 
 Para rodar: menu **EDEN → Evolution → Run 20 generations (seed 1)** no Editor (o Editor fica ocupado durante a execução, cerca de 20 s) ou, com o Editor fechado:

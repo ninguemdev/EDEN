@@ -20,6 +20,8 @@ namespace Eden.Presentation
         public static readonly Color TrainingBestColor = new Color32(0xD9, 0x59, 0x26, 255);
         public static readonly Color ValidationMedianColor = new Color32(0x19, 0x9E, 0x70, 255);
         public static readonly Color ChampionColor = new Color32(0xC9, 0x85, 0x00, 255);
+        public static readonly Color SearchStageColor = new Color32(0xB0, 0x6A, 0xD8, 255);
+        public static readonly Color ResourcesStageColor = new Color32(0x6F, 0xB8, 0x3A, 255);
 
         private const float LeftGutter = 34f;
         private const float RightGutter = 92f;
@@ -210,6 +212,18 @@ namespace Eden.Presentation
                 ValidationMedianColor, true);
             DrawSeries(painter, plot, validation.Count, v => validation[v].Generation, v => validation[v].ChampionFitness,
                 ChampionColor, true);
+
+            // Stage medians (S1 search, S2 resources) of a profile with stages, for the generations this session saw.
+            var stages = session.StageMedians;
+            if (stages.Count == 0)
+                return;
+            var offset = training.Count - stages.Count;
+            for (var k = 0; k < session.Plan.Stages.Count; k++)
+            {
+                var stage = k;
+                DrawSeries(painter, plot, stages.Count, i => training[offset + i].Generation, i => stages[i][stage],
+                    session.Plan.Stages[stage].IsSearch ? SearchStageColor : ResourcesStageColor, false);
+            }
         }
 
         private void DrawReference(Painter2D painter, Rect plot, CandidateEvaluation baseline)
@@ -265,7 +279,8 @@ namespace Eden.Presentation
         /// <summary>Legend in text ink with a colored mark per series (identity never by color alone).</summary>
         public static string Legend() =>
             Mark(TrainingMedianColor) + " mediana treino (faixa: quartis)   " + Mark(TrainingBestColor) + " melhor treino\n" +
-            Mark(ValidationMedianColor) + " mediana validação   " + Mark(ChampionColor) + " campeão na validação   ┄ referências";
+            Mark(ValidationMedianColor) + " mediana validação   " + Mark(ChampionColor) + " campeão na validação   ┄ referências\n" +
+            Mark(SearchStageColor) + " S1 busca   " + Mark(ResourcesStageColor) + " S2 recursos (só com perfil de etapas)";
 
         private static string Mark(Color color) => $"<color=#{ColorUtility.ToHtmlStringRGB(color)}>■</color>";
     }
