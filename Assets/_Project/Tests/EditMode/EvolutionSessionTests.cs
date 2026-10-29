@@ -144,6 +144,21 @@ namespace Eden.Tests.EditMode
         }
 
         [Test]
+        public void Session_FromSeedPool_BeginsTrainingFromTheSeededPopulation()
+        {
+            var pool = InitialGenomes.Population(99, 3);
+            var poolFitness = new[] { 1f, 2f, 3f };
+            var session = EvolutionSession.FromSeedPool(Small(5), pool, poolFitness, 2);
+
+            Assert.That(session.Phase, Is.EqualTo(EvolutionPhase.Training));
+            Assert.That(session.Evolution.Generation, Is.Zero);
+            Assert.That(session.Evolution.Population.Count, Is.EqualTo(6));
+            Assert.That(session.CurrentIndividual, Is.Not.Null);
+            foreach (var individual in session.Evolution.Individuals)
+                Assert.That(individual.ParentIds, Is.Empty);
+        }
+
+        [Test]
         public void Evolution_RejectsEvaluationsOfAnotherGenerationOrMode()
         {
             var evolution = new GenerationalEvolution(Small(9));

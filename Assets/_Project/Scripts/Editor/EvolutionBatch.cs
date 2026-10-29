@@ -16,7 +16,8 @@ namespace Eden.Editor
     /// Runs generational experiments in isolated episodes without a scene and exports them to
     /// persistentDataPath/EvolutionRuns/&lt;UTC&gt;-… (or -eden-output DIR). From the command line:
     /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.RunFromCommandLine
-    ///   [-eden-seed N] [-eden-generations N] [-eden-food N] [-eden-body GENES] [-eden-output DIR] -logFile -
+    ///   [-eden-seed N] [-eden-generations N] [-eden-food N] [-eden-body GENES] [-eden-output DIR]
+    ///   [-eden-seed-genomes DIR] [-eden-export-top N DIR] -logFile -
     /// Unity.exe -batchmode -projectPath . -executeMethod Eden.Editor.EvolutionBatch.RunBatteryFromCommandLine
     ///   [-eden-seed N] [-eden-runs N] [-eden-generations N] [-eden-validation-interval N] [-eden-food N]
     ///   [-eden-output DIR] -logFile -
@@ -29,6 +30,10 @@ namespace Eden.Editor
     /// -eden-body takes the expressed body genes: none (the fixed body, default), all, or a comma list of
     /// size, speed, sensor, efficiency; -eden-plasticity on|off turns lifetime plasticity on (default off). The battery
     /// commands accept both.
+    /// -eden-seed-genomes DIR starts generation 0 of RunFromCommandLine from every genome file (see GenomeFile) in DIR
+    /// instead of random weights (see GenerationalEvolution.FromSeedPool); a genome exported without a fitness of its
+    /// own counts as 0. -eden-export-top N DIR writes the N best genomes of the last generation RunFromCommandLine
+    /// trained to DIR (see GenomeFile), one file per genome, ranked by their training fitness.
     /// Settings not given keep the proposed defaults of <see cref="EvolutionSettings"/> and <see cref="BatterySettings"/>.
     /// </summary>
     public static class EvolutionBatch
@@ -38,7 +43,7 @@ namespace Eden.Editor
         [MenuItem("EDEN/Evolution/Run 20 generations (seed 1)")]
         public static void RunFromMenu()
         {
-            Run(new EvolutionSettings { ExperimentSeed = 1 }, DefaultGenerations, null);
+            Run(new EvolutionSettings { ExperimentSeed = 1 }, DefaultGenerations, null, null, null);
         }
 
         public static void RunFromCommandLine()
@@ -47,8 +52,8 @@ namespace Eden.Editor
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
                 var battery = new BatterySettings { Generations = DefaultGenerations };
-                var output = ReadArguments(settings, battery);
-                Run(settings, battery.Generations, output);
+                var output = ReadArguments(settings, battery, out var seedGenomes);
+                Run(settings, battery.Generations, output, seedGenomes, ReadExportTop());
             });
         }
 
@@ -58,7 +63,7 @@ namespace Eden.Editor
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
                 var battery = new BatterySettings();
-                var output = ReadArguments(settings, battery);
+                var output = ReadArguments(settings, battery, out _);
                 RunBattery(settings, battery, output);
             });
         }
@@ -69,7 +74,7 @@ namespace Eden.Editor
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
                 var battery = new BatterySettings();
-                var output = ReadArguments(settings, battery);
+                var output = ReadArguments(settings, battery, out _);
                 ComparePresets(settings, battery, ReadPresets(), output);
             });
         }
@@ -80,7 +85,7 @@ namespace Eden.Editor
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
                 var battery = new BatterySettings();
-                var output = ReadArguments(settings, battery);
+                var output = ReadArguments(settings, battery, out _);
                 ComparePlasticity(settings, battery, ReadFoodShift(), output);
             });
         }
@@ -91,34 +96,82 @@ namespace Eden.Editor
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
                 var battery = new BatterySettings();
-                var output = ReadArguments(settings, battery);
+                var output = ReadArguments(settings, battery, out _);
                 AblateBody(settings, battery, ReadVariants(), output);
             });
         }
 
-        private static void Run(EvolutionSettings settings, int generations, string output)
+        private static void Run(EvolutionSettings settings, int generations, string output, string seedGenomesDirectory,
+            (int Count, string Directory)? exportTop)
         {
             if (generations < 1)
                 throw new ArgumentOutOfRangeException(nameof(generations), "At least one generation is required.");
 
-            var evolution = new GenerationalEvolution(settings);
+            GenerationalEvolution evolution;
+            if (seedGenomesDirectory == null)
+            {
+                evolution = new GenerationalEvolution(settings);
+            }
+            else
+            {
+                SplitPool(seedGenomesDirectory, out var pool, out var poolFitness);
+                evolution = GenerationalEvolution.FromSeedPool(settings, pool, poolFitness);
+            }
+
             var directory = output ?? DefaultDirectory($"seed{settings.ExperimentSeed}");
             var header = new ExperimentHeader(settings, 0, UnityEngine.Application.version, DateTime.UtcNow);
             var started = DateTime.UtcNow;
+            GenerationReport report = null;
 
             using (var log = new EvolutionCsvLog(directory, header))
             {
                 for (var g = 0; g < generations; g++)
                 {
-                    var report = evolution.Advance();
+                    report = evolution.Advance();
                     log.Append(report);
                     LogSummary(0, report.Summary);
                 }
             }
 
+            if (exportTop.HasValue)
+                ExportTop(report, settings.ExperimentSeed, exportTop.Value.Count, exportTop.Value.Directory);
+
             Debug.Log(string.Format(CultureInfo.InvariantCulture,
                 "EDEN evolution finished: generations={0}, seconds={1:0.0}, output={2}",
                 generations, (DateTime.UtcNow - started).TotalSeconds, directory));
+        }
+
+        // A genome exported without its own fitness ranks last among real scores rather than always losing ties.
+        private static void SplitPool(string directory, out Genome[] genomes, out float[] fitness)
+        {
+            var pool = GenomeFile.LoadPool(directory);
+            genomes = new Genome[pool.Length];
+            fitness = new float[pool.Length];
+            for (var i = 0; i < pool.Length; i++)
+            {
+                genomes[i] = pool[i].Genome;
+                fitness[i] = pool[i].Fitness ?? 0f;
+            }
+        }
+
+        private static void ExportTop(GenerationReport report, ulong experimentSeed, int count, string directory)
+        {
+            var candidates = report.Evaluation.Candidates;
+            var fitness = new float[candidates.Count];
+            for (var i = 0; i < fitness.Length; i++)
+                fitness[i] = candidates[i].MeanFitness;
+            var ranking = Reproduction.Rank(fitness);
+            var exported = Math.Min(count, report.Individuals.Count);
+            for (var i = 0; i < exported; i++)
+            {
+                var individual = report.Individuals[ranking[i]];
+                var record = new GenomeRecord(individual.Genome, fitness[ranking[i]],
+                    new GenomeSource(experimentSeed, report.Evaluation.Generation, individual.Id));
+                GenomeFile.Save(Path.Combine(directory, $"genome-rank{i + 1}-id{individual.Id}.json"), record,
+                    UnityEngine.Application.version, DateTime.UtcNow);
+            }
+
+            Debug.Log($"EDEN exported top {exported} genomes to {directory}");
         }
 
         private static void RunBattery(EvolutionSettings settings, BatterySettings battery, string output)
@@ -302,15 +355,20 @@ namespace Eden.Editor
             return ExperimentPreset.All;
         }
 
-        private static string ReadArguments(EvolutionSettings settings, BatterySettings battery)
+        private static string ReadArguments(EvolutionSettings settings, BatterySettings battery,
+            out string seedGenomesDirectory)
         {
             string output = null;
+            string seedGenomes = null;
             var args = Environment.GetCommandLineArgs();
             for (var i = 0; i + 1 < args.Length; i++)
             {
                 var value = args[i + 1];
                 switch (args[i])
                 {
+                    case "-eden-seed-genomes":
+                        seedGenomes = value;
+                        break;
                     case "-eden-seed":
                         settings.ExperimentSeed = ulong.Parse(value, NumberStyles.None, CultureInfo.InvariantCulture);
                         break;
@@ -338,7 +396,21 @@ namespace Eden.Editor
                 }
             }
 
+            seedGenomesDirectory = seedGenomes;
             return output;
+        }
+
+        /// <summary>-eden-export-top N DIR, or null when not given.</summary>
+        private static (int Count, string Directory)? ReadExportTop()
+        {
+            var args = Environment.GetCommandLineArgs();
+            for (var i = 0; i + 2 < args.Length; i++)
+            {
+                if (args[i] == "-eden-export-top")
+                    return (Integer(args[i + 1]), args[i + 2]);
+            }
+
+            return null;
         }
 
         private static void RunAndExit(Action run)

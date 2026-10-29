@@ -137,6 +137,51 @@ namespace Eden.Evolution
             return children;
         }
 
+        /// <summary>
+        /// Generation 0 built from an imported pool instead of random weights (e.g. the best individuals exported from
+        /// another experiment): the best <c>min(pool.Count, rules.PopulationSize)</c> genomes, by
+        /// <paramref name="poolFitness"/>, cloned unchanged, then the rest of <see cref="ReproductionRules.PopulationSize"/>
+        /// filled by tournament selection within the pool and mutation — the same selection and mutation <see cref="Breed"/>
+        /// uses for an ordinary generation, except the elite count is however much of the pool fits, never
+        /// <see cref="ReproductionRules.EliteCount"/> (a pool curated by hand is not a generation to thin out the same way).
+        /// Returns genomes only: every one becomes a fresh, parentless founder of generation 0 (see <see cref="Lineage.Founders"/>),
+        /// whichever experiment and generation it was exported from.
+        /// </summary>
+        public static Genome[] Seed(ReproductionRules rules, IReadOnlyList<Genome> pool, IReadOnlyList<float> poolFitness,
+            GaussianSampler random)
+        {
+            if (rules == null)
+                throw new ArgumentNullException(nameof(rules));
+            if (pool == null)
+                throw new ArgumentNullException(nameof(pool));
+            if (poolFitness == null)
+                throw new ArgumentNullException(nameof(poolFitness));
+            if (pool.Count == 0 || pool.Count != poolFitness.Count)
+                throw new ArgumentException("Every pool genome needs exactly one fitness value.", nameof(poolFitness));
+            if (random == null)
+                throw new ArgumentNullException(nameof(random));
+            for (var i = 0; i < pool.Count; i++)
+            {
+                if (pool[i] == null)
+                    throw new ArgumentException($"Pool genome {i} is null.", nameof(pool));
+            }
+
+            var ranking = Rank(poolFitness);
+            var eliteCount = Math.Min(pool.Count, rules.PopulationSize);
+            var genomes = new Genome[rules.PopulationSize];
+            for (var e = 0; e < eliteCount; e++)
+                genomes[e] = pool[ranking[e]];
+
+            for (var c = eliteCount; c < genomes.Length; c++)
+            {
+                var parent = Tournament(poolFitness, rules.TournamentSize, random.Source);
+                genomes[c] = Mutate(pool[parent], rules.MutationProbability, rules.MutationSigma, rules.MutableBodyGenes,
+                    rules.MutablePlasticity, random, out _);
+            }
+
+            return genomes;
+        }
+
         /// <summary>Weights-only mutation: body genes are copied unchanged.</summary>
         public static Genome Mutate(Genome parent, float probability, float sigma, GaussianSampler random, out int mutated) =>
             Mutate(parent, probability, sigma, BodyGeneSet.None, random, out mutated);

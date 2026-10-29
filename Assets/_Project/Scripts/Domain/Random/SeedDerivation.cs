@@ -19,7 +19,13 @@ namespace Eden.Domain
         Genome = 6,
 
         /// <summary>Per-creature streams for the mutation of an offspring born in a shared world (by child id).</summary>
-        Birth = 7
+        Birth = 7,
+
+        /// <summary>
+        /// Builds generation 0 of an experiment seeded from an imported genome pool (<see cref="Eden.Evolution.Reproduction.Seed"/>);
+        /// used at most once per experiment, so it never derives sub-streams by index.
+        /// </summary>
+        SeededGeneration = 8
     }
 
     /// <summary>
