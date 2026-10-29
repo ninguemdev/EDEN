@@ -183,8 +183,13 @@ namespace Eden.Presentation
 
         public static string SpeciesPending() => "Espécie: definida ao fim da geração";
 
+        /// <param name="sensed">What the creature senses now (with its eye inputs when it has eyes).</param>
+        /// <param name="decided">
+        /// For a creature with eyes, the observation its brain used for the action it holds, when known; shown apart from
+        /// the current reading, which is the observer's, not the brain's input.
+        /// </param>
         public static string Creature(CreatureState creature, Observation sensed, CreatureAction action,
-            string brainName, SimulationConfig config)
+            string brainName, SimulationConfig config, Observation? decided = null)
         {
             var text = new StringBuilder();
             text.AppendLine($"Criatura {creature.Id}");
@@ -201,6 +206,15 @@ namespace Eden.Presentation
             text.AppendLine();
             AppendBody(text, creature, config);
             text.AppendLine();
+            if (creature.Eyes != null)
+            {
+                AppendEyes(text, creature, config, sensed, decided);
+                text.AppendLine();
+                text.AppendLine("Ação mantida");
+                text.Append($"propulsão {action.Thrust:0.00}  giro {action.Turn:0.00}  lateral {action.Strafe:0.00}");
+                return text.ToString();
+            }
+
             text.AppendLine("Sensores (entrada do cérebro)");
             text.AppendLine($"energia {sensed.Energy:0.00}  idade {sensed.Age:0.00}");
             text.AppendLine($"vel. frente {sensed.VelocityForward:0.00}  esq. {sensed.VelocityLeft:0.00}");
@@ -252,9 +266,62 @@ namespace Eden.Presentation
                 text.AppendLine($"alcance {body.SensorRange:0.0} (×{body.SensorRange / config.SensorRange:0.00})");
             }
 
+            if (creature.Eyes != null)
+            {
+                var eyes = EyeCost.PerSecond(body, creature.Eyes);
+                text.AppendLine($"Gasto/s: repouso {body.MetabolismPerSecond + eyes:0.00} (metabolismo " +
+                                $"{body.MetabolismPerSecond:0.00} + olhos {eyes:0.000}), propulsão máxima " +
+                                $"+{body.MovementCostPerSecond:0.00}, giro máximo +{body.MovementCostPerSecond * config.TurnCostFraction:0.00}");
+                return;
+            }
+
             var resting = body.MetabolismPerSecond + body.SensorCostPerSecond;
             text.AppendLine($"Gasto/s: repouso {resting:0.00} (metabolismo {body.MetabolismPerSecond:0.00} + sensor " +
                             $"{body.SensorCostPerSecond:0.00}), propulsão máxima +{body.MovementCostPerSecond:0.00}");
+        }
+
+        // Each slot's eye and upkeep, then what each eye reported: in the last decision when known, otherwise now.
+        private static void AppendEyes(StringBuilder text, CreatureState creature, SimulationConfig config,
+            Observation sensed, Observation? decided)
+        {
+            var eyes = creature.Eyes;
+            text.AppendLine($"Olhos ({eyes.Count} de {EyeSet.MaxEyes}; sem círculo de comida nem radar de paredes)");
+            for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+            {
+                if (!eyes.Has(slot))
+                {
+                    text.AppendLine($"olho {slot}: ausente");
+                    continue;
+                }
+
+                var eye = eyes[slot];
+                text.AppendLine($"olho {slot}: direção {eye.Orientation * 180f / MathF.PI:+0;-0;0}°  abertura " +
+                                $"{eye.Aperture * 180f / MathF.PI:0}°  alcance {creature.Body.SensorRange * eye.Range:0.0}  " +
+                                $"gasto {EyeCost.PerSecond(creature.Body, eye):0.000}/s");
+            }
+
+            var inputs = decided?.EyeInputs ?? sensed.EyeInputs;
+            text.AppendLine(decided?.EyeInputs != null
+                ? "Entrada do cérebro na última decisão"
+                : "Leitura atual dos olhos (ainda não é uma entrada do cérebro)");
+            if (inputs == null)
+                return;
+            text.AppendLine($"energia {inputs[0]:0.00}  idade {inputs[1]:0.00}  vel. frente {inputs[2]:0.00}  esq. {inputs[3]:0.00}");
+            for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+            {
+                if (!eyes.Has(slot))
+                    continue;
+                text.AppendLine($"olho {slot}: " + Seen(inputs, slot, EyeChannel.FoodVisible, "comida") + " · " +
+                                Seen(inputs, slot, EyeChannel.BarrierVisible, "barreira"));
+            }
+        }
+
+        private static string Seen(float[] inputs, int slot, EyeChannel visible, string what)
+        {
+            var at = NeuralContract.EyeInputIndex(slot, visible);
+            return inputs[at] > 0f
+                ? $"{what} sen {inputs[at + 1]:0.00} cos {inputs[at + 2]:0.00} prox. {inputs[at + 3]:0.00}"
+                : what + " não vista";
         }
 
         /// <summary>

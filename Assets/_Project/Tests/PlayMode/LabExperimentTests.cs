@@ -257,6 +257,51 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Controls_EvolveWithEyes_DrawTheCones_AndInspectWhatTheEyesGave()
+        {
+            var sensesField = runner.Hud.Root.Q<DropdownField>("senses-field");
+            var algorithmField = runner.Hud.Root.Q<DropdownField>("algorithm-field");
+            Assert.That(sensesField.value, Is.EqualTo(LabHud.SensesChoices[0]), "the legacy senses are the default");
+            sensesField.index = 1;
+            Assert.That(algorithmField.index, Is.EqualTo(1), "eyes pick NEAT");
+            algorithmField.index = 0;
+            Assert.That(sensesField.index, Is.EqualTo(0), "the MLP control goes back to the legacy senses");
+
+            var root = runner.Hud.Root;
+            root.Q<DropdownField>("mode-field").index = (int)LabMode.IsolatedEvolution;
+            root.Q<DropdownField>("preset-field").index = 0;
+            root.Q<IntegerField>("seed-field").value = 8;
+            sensesField.index = 1;
+            yield return Press("start-button");
+            Assert.That(runner.Eyes, Is.True);
+            Assert.That(runner.Evolution.Plan.Senses, Is.EqualTo(Senses.Eyes));
+            Assert.That(runner.Evolution.Plan.Algorithm, Is.EqualTo(EvolutionAlgorithm.Neat));
+            Assert.That(runner.Simulation.World.Creatures[0].Eyes, Is.EqualTo(EyeSet.Founder));
+
+            if (!runner.Clock.IsPaused)
+                yield return Press("pause-button");
+            runner.SelectNeighbor(+1);
+            yield return null;
+            StringAssert.Contains("Olhos (1 de 4", runner.Hud.InspectorText);
+            StringAssert.Contains("olho 0: direção 0°  abertura 120°", runner.Hud.InspectorText);
+            StringAssert.Contains("olho 1: ausente", runner.Hud.InspectorText);
+            StringAssert.Contains("Leitura atual dos olhos", runner.Hud.InspectorText, "before any decision");
+            Assert.That(runner.View.DrawnEyeCones, Is.EqualTo(1), "the selected creature's cone");
+            Assert.That(runner.View.TryGetDrawnBody(runner.Selected.Value, out _, out var disc), Is.True);
+            Assert.That(disc, Is.Zero, "no circular sensor disc for eyes");
+
+            yield return Press("step-button");
+            yield return Press("step-button");
+            Assert.That(runner.Evolution.Job.Current.Tick, Is.EqualTo(2));
+            runner.RefreshNetwork();
+            yield return WaitSeconds(0.4f); // the inspector text refreshes at 4 Hz
+            StringAssert.Contains("Entrada do cérebro na última decisão", runner.Hud.InspectorText);
+            StringAssert.Contains("+ olhos", runner.Hud.InspectorText, "the eyes' upkeep in the costs");
+            Assert.That(runner.Hud.NeatNetworkShown, Is.True, "an eye brain is a NEAT network");
+            Assert.That(runner.NeatNetwork.NodeCount, Is.EqualTo(1 + 40 + 3), "bias, 40 eye-contract inputs, 3 outputs");
+        }
+
+        [UnityTest]
         public IEnumerator Controls_SaveAndLoadAnEvolutionInTheMiddleOfAnEpisode()
         {
             UseTemporaryCheckpoint();
