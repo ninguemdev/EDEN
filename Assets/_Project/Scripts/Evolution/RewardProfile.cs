@@ -9,7 +9,22 @@ namespace Eden.Evolution
     public enum StageScoring
     {
         /// <summary>Food energy eaten per configured episode second (<see cref="Fitness.FromFood"/>), unbounded.</summary>
-        FoodEnergyPerSecond = 0
+        FoodEnergyPerSecond = 0,
+
+        /// <summary>
+        /// Balanced resources with water: survival, useful replenishment of energy and hydration (waste never counts) and
+        /// final reserves, weighted into [0, 1] (<see cref="StageScores.BalancedResources"/>).
+        /// </summary>
+        BalancedResources = 1,
+
+        /// <summary>The balanced resources scoring of a world without water: energy alone, normalised on its own.</summary>
+        BalancedResourcesDry = 2,
+
+        /// <summary>
+        /// A search stage: needs frozen, fixed targets, scored by targets reached, speed and the best approach to the next
+        /// one, in [0, 1] (<see cref="StageScores.Search"/>). The stage runs under search rules.
+        /// </summary>
+        Search = 3
     }
 
     /// <summary>A measured quantity a stage reports per episode, with its unit and the range its values must fall in.</summary>
@@ -44,6 +59,12 @@ namespace Eden.Evolution
             {
                 case StageScoring.FoodEnergyPerSecond:
                     return FoodEnergy;
+                case StageScoring.BalancedResources:
+                    return Balanced;
+                case StageScoring.BalancedResourcesDry:
+                    return BalancedDry;
+                case StageScoring.Search:
+                    return SearchComponents;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(scoring), scoring, "Unknown stage scoring.");
             }
@@ -56,6 +77,39 @@ namespace Eden.Evolution
             new RewardComponent("survived_seconds", "simulated_seconds", 0, double.PositiveInfinity),
             new RewardComponent("final_energy", "energy", 0, double.PositiveInfinity)
         };
+
+        private static readonly RewardComponent[] Balanced =
+        {
+            new RewardComponent("survival", "fraction", 0, 1),
+            new RewardComponent("energy_replenished", "fraction", 0, 1),
+            new RewardComponent("hydration_replenished", "fraction", 0, 1),
+            new RewardComponent("reserves", "fraction", 0, 1),
+            new RewardComponent("absorbed_energy", "energy", 0, double.PositiveInfinity),
+            new RewardComponent("wasted_energy", "energy", 0, double.PositiveInfinity),
+            new RewardComponent("drunk", "hydration", 0, double.PositiveInfinity)
+        };
+
+        private static readonly RewardComponent[] BalancedDry =
+        {
+            new RewardComponent("survival", "fraction", 0, 1),
+            new RewardComponent("energy_replenished", "fraction", 0, 1),
+            new RewardComponent("reserves", "fraction", 0, 1),
+            new RewardComponent("absorbed_energy", "energy", 0, double.PositiveInfinity),
+            new RewardComponent("wasted_energy", "energy", 0, double.PositiveInfinity)
+        };
+
+        private static readonly RewardComponent[] SearchComponents =
+        {
+            new RewardComponent("collected", "targets", 0, SearchTargetLimit),
+            new RewardComponent("collected_food", "targets", 0, SearchTargetLimit),
+            new RewardComponent("collected_water", "targets", 0, SearchTargetLimit),
+            new RewardComponent("speed", "fraction", 0, 1),
+            new RewardComponent("approach", "fraction", 0, 1),
+            new RewardComponent("score_without_aid", "fraction", 0, 1),
+            new RewardComponent("uncharged_energy", "energy", 0, double.PositiveInfinity)
+        };
+
+        private const double SearchTargetLimit = 16;
     }
 
     /// <summary>One part of a reward profile: its scoring, its weight in the total and the components it reports.</summary>
@@ -256,6 +310,30 @@ namespace Eden.Evolution
                 text.Append("parameter ").Append(parameter.Name).Append(' ').Append(parameter.Value.ToString("R", culture))
                     .Append('\n');
             return text.ToString();
+        }
+
+        /// <summary>The value of the parameter called <paramref name="name"/>, or <paramref name="fallback"/> without one.</summary>
+        public double Parameter(string name, double fallback)
+        {
+            foreach (var parameter in Parameters)
+            {
+                if (parameter.Name == name)
+                    return parameter.Value;
+            }
+
+            return fallback;
+        }
+
+        /// <summary>Index of the stage scored by <paramref name="scoring"/>, or -1.</summary>
+        public int StageOf(StageScoring scoring)
+        {
+            for (var i = 0; i < Stages.Count; i++)
+            {
+                if (Stages[i].Scoring == scoring)
+                    return i;
+            }
+
+            return -1;
         }
 
         /// <summary>Whether <paramref name="id"/> and <paramref name="hash"/> name this profile run.</summary>

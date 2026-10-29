@@ -37,9 +37,10 @@ namespace Eden.Evolution
         /// profile) when there are none.
         /// </param>
         /// <param name="stage">Index of the plan stage the episode ran (0 for a single-stage plan).</param>
+        /// <param name="score">The stage's score; null for the legacy scoring, whose score is the legacy fitness.</param>
         public EpisodeResult(EvaluationMode mode, int generation, int candidate, int seedIndex, ulong episodeSeed,
             long episodeTicks, float episodeSeconds, float foodEnergy, long survivedTicks, bool survived, float finalEnergy,
-            IReadOnlyList<float> components = null, int stage = 0)
+            IReadOnlyList<float> components = null, int stage = 0, float? score = null)
         {
             Components = components;
             Stage = stage;
@@ -53,7 +54,9 @@ namespace Eden.Evolution
             SurvivedTicks = survivedTicks;
             Survived = survived;
             FinalEnergy = finalEnergy;
-            Fitness = Evolution.Fitness.FromFood(foodEnergy, episodeSeconds);
+            LegacyFitness = Evolution.Fitness.FromFood(foodEnergy, episodeSeconds);
+            Fitness = score ?? LegacyFitness;
+            HasScore = score.HasValue;
         }
 
         public EvaluationMode Mode { get; }
@@ -74,7 +77,15 @@ namespace Eden.Evolution
         public long EpisodeTicks { get; }
 
         public float FoodEnergy { get; }
+
+        /// <summary>Score of the episode in its stage's scoring (the legacy fitness for the legacy scoring).</summary>
         public float Fitness { get; }
+
+        /// <summary>Food energy per configured second (<see cref="Evolution.Fitness.FromFood"/>), recorded in every scoring.</summary>
+        public float LegacyFitness { get; }
+
+        /// <summary>Whether <see cref="Fitness"/> was given by a scoring other than the legacy one.</summary>
+        public bool HasScore { get; }
 
         /// <summary>Ticks the creature lived (its age at the end or at death).</summary>
         public long SurvivedTicks { get; }

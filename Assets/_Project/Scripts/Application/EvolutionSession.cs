@@ -148,6 +148,14 @@ namespace Eden.Application
         /// <summary>Training summary of every completed generation, in order.</summary>
         public IReadOnlyList<GenerationSummary> Training => training;
 
+        /// <summary>
+        /// Median score of each stage over the candidates, per training generation since this session started or was
+        /// restored (the last of <see cref="Training"/>); empty for the legacy profile.
+        /// </summary>
+        public IReadOnlyList<IReadOnlyList<float>> StageMedians => stageMedians;
+
+        private readonly List<IReadOnlyList<float>> stageMedians = new List<IReadOnlyList<float>>();
+
         /// <summary>Every validated generation, in order.</summary>
         public IReadOnlyList<ValidationPoint> Validation => validation;
 
@@ -216,6 +224,8 @@ namespace Eden.Application
                 case EvolutionPhase.Training:
                     LastTraining = Evolution.Advance(Job.Result);
                     training.Add(LastTraining.Summary);
+                    if (!Plan.Profile.IsLegacy)
+                        stageMedians.Add(MediansOf(LastTraining.Evaluation));
                     ReportCompleted?.Invoke(LastTraining);
                     if (LastTraining.Summary.Generation % ValidationInterval != 0)
                         BeginTraining();
@@ -295,6 +305,28 @@ namespace Eden.Application
             }
 
             throw new InvalidOperationException($"Individual {id} was not evaluated.");
+        }
+
+        private static IReadOnlyList<float> MediansOf(GenerationEvaluation evaluation)
+        {
+            var stages = evaluation.Candidates[0].StageFitness.Count;
+            var medians = new float[stages];
+            for (var k = 0; k < stages; k++)
+            {
+                var scores = new List<float>();
+                foreach (var candidate in evaluation.Candidates)
+                {
+                    if (Fitness.IsValid(candidate.StageFitness[k]))
+                        scores.Add(candidate.StageFitness[k]);
+                }
+
+                scores.Sort();
+                medians[k] = scores.Count == 0 ? float.NaN
+                    : scores.Count % 2 == 1 ? scores[scores.Count / 2]
+                    : (scores[scores.Count / 2 - 1] + scores[scores.Count / 2]) / 2f;
+            }
+
+            return medians;
         }
     }
 }

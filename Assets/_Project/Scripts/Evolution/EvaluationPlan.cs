@@ -176,11 +176,13 @@ namespace Eden.Evolution
         private readonly ulong trainingRoot;
         private readonly ulong[] validationSeeds;
 
-        internal EvaluationStage(int index, RewardStage reward, SimulationConfig episodeTemplate, float episodeSeconds,
-            int trainingSeedsPerGeneration, ulong trainingRoot, ulong validationRoot, int validationSeedCount)
+        internal EvaluationStage(int index, RewardStage reward, SimulationConfig episodeTemplate, SearchWorld search,
+            float episodeSeconds, int trainingSeedsPerGeneration, ulong trainingRoot, ulong validationRoot,
+            int validationSeedCount)
         {
             Index = index;
             Reward = reward;
+            Search = search;
             this.episodeTemplate = episodeTemplate;
             EpisodeSeconds = episodeSeconds;
             EpisodeTicks = Math.Max(1L, (long)Math.Round((double)episodeSeconds * episodeTemplate.TicksPerSecond));
@@ -198,6 +200,12 @@ namespace Eden.Evolution
         public RewardStage Reward { get; }
 
         public string Name => Reward.Name;
+
+        /// <summary>The targets and arena of a search stage (which runs under search rules); null for the others.</summary>
+        public SearchWorld Search { get; }
+
+        public bool IsSearch => Search != null;
+
         public float EpisodeSeconds { get; }
 
         /// <summary>Configured episode length in ticks; an episode always counts as this long, even after a death.</summary>
@@ -207,7 +215,11 @@ namespace Eden.Evolution
         public int ValidationSeedCount => validationSeeds.Length;
 
         /// <summary>World configuration of one isolated episode (single creature) of the stage for a seed.</summary>
-        public SimulationConfig EpisodeConfig(ulong episodeSeed) => episodeTemplate.WithSeed(episodeSeed);
+        public SimulationConfig EpisodeConfig(ulong episodeSeed) =>
+            Search?.Layout(episodeSeed).Config ?? episodeTemplate.WithSeed(episodeSeed);
+
+        /// <summary>The stage world for what does not depend on the seed (tick rate, reference body, capacity).</summary>
+        public SimulationConfig TemplateConfig => episodeTemplate;
 
         internal ulong TrainingSeed(int generation, int index)
         {
@@ -286,15 +298,22 @@ namespace Eden.Evolution
             // Every episode of a stage differs only by its seed: the validated rules (and their free-space grid) are
             // built once per stage.
             var templates = new SimulationConfig[further.Count + 1];
-            templates[0] = Template(settings.World);
-            for (var i = 1; i < templates.Length; i++)
-                templates[i] = Template(further[i - 1].World);
+            var searches = new SearchWorld[templates.Length];
+            for (var i = 0; i < templates.Length; i++)
+            {
+                var world = i == 0 ? settings.World : further[i - 1].World;
+                if (settings.Profile.Stages[i].Scoring == StageScoring.Search)
+                    searches[i] = SearchWorld.Choose(world, RewardProfiles.TargetsOf(settings.Profile),
+                        i == 0 ? settings.EpisodeSeconds : further[i - 1].EpisodeSeconds,
+                        settings.Profile.Parameter(RewardProfiles.FeasibleFraction, 0.5), $"stage {i + 1}", errors);
+                templates[i] = searches[i]?.Template ?? Template(world);
+            }
 
             Senses = settings.Senses;
-            Contract = ContractOf(Senses, templates[0]);
+            Contract = ContractOf(Senses, templates[0], searches[0]);
             for (var i = 1; i < templates.Length; i++)
             {
-                var contract = ContractOf(Senses, templates[i]);
+                var contract = ContractOf(Senses, templates[i], searches[i]);
                 if (contract.Id != Contract.Id)
                     errors.Add($"stage {i + 1} reads the neural contract {contract.Id} and stage 1 reads {Contract.Id}; " +
                                "a genome needs the same contract in every stage");
@@ -320,7 +339,7 @@ namespace Eden.Evolution
             for (var i = 0; i < stages.Length; i++)
             {
                 var stage = i == 0 ? null : further[i - 1];
-                stages[i] = new EvaluationStage(i, Profile.Stages[i], templates[i],
+                stages[i] = new EvaluationStage(i, Profile.Stages[i], templates[i], searches[i],
                     stage?.EpisodeSeconds ?? settings.EpisodeSeconds,
                     stage?.TrainingSeedsPerGeneration ?? settings.TrainingSeedsPerGeneration,
                     staged ? SplitMix64.Output(trainingRoot, StageTag + (ulong)i) : trainingRoot,
@@ -469,7 +488,9 @@ namespace Eden.Evolution
             return new SimulationConfig(world);
         }
 
-        private static NeuralContract ContractOf(Senses senses, SimulationConfig world) =>
-            senses == Senses.Eyes ? NeuralContract.ForEyes(world.HasWater) : NeuralContract.Legacy;
+        // A search world gets its water targets per episode, so its contract follows the targets.
+        private static NeuralContract ContractOf(Senses senses, SimulationConfig world, SearchWorld search) =>
+            senses != Senses.Eyes ? NeuralContract.Legacy
+            : NeuralContract.ForEyes(search != null ? search.Targets.Water > 0 : world.HasWater);
     }
 }
