@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Eden.Domain;
 
 namespace Eden.Evolution
 {
@@ -13,6 +14,7 @@ namespace Eden.Evolution
         private readonly int[] hiddenNodes;
         private readonly int[] connections;
         private readonly int[] enabledConnections;
+        private readonly int[] eyes;
 
         public NeatGenerationSummary(IReadOnlyList<Individual> individuals, IReadOnlyList<int> speciesOf)
         {
@@ -26,7 +28,10 @@ namespace Eden.Evolution
             hiddenNodes = new int[count];
             connections = new int[count];
             enabledConnections = new int[count];
+            eyes = new int[count];
             var sizes = new Dictionary<int, int>();
+            var eyesSeen = 0;
+            double aperture = 0.0, range = 0.0, eyesTotal = 0.0;
             for (var i = 0; i < count; i++)
             {
                 var network = individuals[i].Genome.Neat ??
@@ -41,7 +46,25 @@ namespace Eden.Evolution
                 MeanHiddenNodes += hiddenNodes[i];
                 MeanConnections += connections[i];
                 MeanEnabledConnections += enabledConnections[i];
+                var set = individuals[i].Genome.Eyes;
+                if (set == null)
+                    continue;
+                HasEyes = true;
+                eyes[i] = set.Count;
+                eyesTotal += set.Count;
+                for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+                {
+                    if (!set.Has(slot))
+                        continue;
+                    aperture += set[slot].Aperture;
+                    range += set[slot].Range;
+                    eyesSeen++;
+                }
             }
+
+            MeanEyes = HasEyes ? (float)(eyesTotal / count) : float.NaN;
+            MeanEyeApertureDegrees = eyesSeen > 0 ? (float)(aperture / eyesSeen * 180.0 / Math.PI) : float.NaN;
+            MeanEyeRange = eyesSeen > 0 ? (float)(range / eyesSeen) : float.NaN;
 
             MeanHiddenNodes /= count;
             MeanConnections /= count;
@@ -57,6 +80,20 @@ namespace Eden.Evolution
         public int MaxHiddenNodes { get; }
         public float MeanConnections { get; }
         public float MeanEnabledConnections { get; }
+
+        /// <summary>Whether the genomes have eyes (the eye senses).</summary>
+        public bool HasEyes { get; }
+
+        /// <summary>Mean number of eyes per genome; NaN without the eye senses.</summary>
+        public float MeanEyes { get; }
+
+        /// <summary>Mean aperture of all eyes, degrees; NaN when there is no eye.</summary>
+        public float MeanEyeApertureDegrees { get; }
+
+        /// <summary>Mean range factor of all eyes; NaN when there is no eye.</summary>
+        public float MeanEyeRange { get; }
+
+        public int EyesOf(int candidate) => eyes[candidate];
 
         /// <summary>Species id of each individual, in candidate order.</summary>
         public IReadOnlyList<int> Species => species;

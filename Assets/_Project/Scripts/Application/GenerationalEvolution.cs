@@ -150,7 +150,8 @@ namespace Eden.Application
                 : new NeatEvolutionState(innovations.Capture(), speciation.Capture(), speciation.NextSpeciesId, lastSpecies);
 
         private BodyMutation BodyMutationRules =>
-            new BodyMutation(Plan.ExpressedBodyGenes, Rules.MutationProbability, Rules.MutationSigma);
+            new BodyMutation(Plan.ExpressedBodyGenes, Rules.MutationProbability, Rules.MutationSigma,
+                Plan.EvolvingEyes ? neatRules.EyeMutation : default);
 
         /// <summary>Ids, parents and birth generations of every individual created so far.</summary>
         public Lineage Lineage { get; }

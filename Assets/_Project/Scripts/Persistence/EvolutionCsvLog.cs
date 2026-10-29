@@ -28,10 +28,11 @@ namespace Eden.Persistence
             "mean_fitness,mean_food_energy,survival_rate,mean_survived_seconds,mean_final_energy";
 
         public const string NeatGenerationsHeader =
-            "generation,species,largest_species,mean_hidden_nodes,max_hidden_nodes,mean_connections,mean_enabled_connections";
+            "generation,species,largest_species,mean_hidden_nodes,max_hidden_nodes,mean_connections,mean_enabled_connections," +
+            "mean_eyes,mean_eye_aperture_degrees,mean_eye_range";
 
         public const string NeatIndividualsHeader =
-            "generation,candidate,individual_id,species,hidden_nodes,connections,enabled_connections";
+            "generation,candidate,individual_id,species,hidden_nodes,connections,enabled_connections,eyes";
 
         private readonly ExportTally tally = new ExportTally();
         private CsvFile neatGenerations;
@@ -154,7 +155,10 @@ namespace Eden.Persistence
                 Number(neat.MeanHiddenNodes),
                 neat.MaxHiddenNodes.ToString(culture),
                 Number(neat.MeanConnections),
-                Number(neat.MeanEnabledConnections));
+                Number(neat.MeanEnabledConnections),
+                Number(neat.MeanEyes),
+                Number(neat.MeanEyeApertureDegrees),
+                Number(neat.MeanEyeRange));
         }
 
         public static string FormatNeatIndividual(GenerationReport report, int candidate)
@@ -168,7 +172,8 @@ namespace Eden.Persistence
                 neat.Species[candidate].ToString(culture),
                 neat.HiddenNodesOf(candidate).ToString(culture),
                 neat.ConnectionsOf(candidate).ToString(culture),
-                neat.EnabledConnectionsOf(candidate).ToString(culture));
+                neat.EnabledConnectionsOf(candidate).ToString(culture),
+                neat.HasEyes ? neat.EyesOf(candidate).ToString(culture) : string.Empty);
         }
 
         public void Dispose()

@@ -42,10 +42,11 @@ namespace Eden.Persistence
                 ["neat-generations.csv"] = Units(
                     ("generation", Generation), ("species", Count), ("largest_species", Count),
                     ("mean_hidden_nodes", Count), ("max_hidden_nodes", Count), ("mean_connections", Count),
-                    ("mean_enabled_connections", Count)),
+                    ("mean_enabled_connections", Count), ("mean_eyes", Count), ("mean_eye_aperture_degrees", "degree"),
+                    ("mean_eye_range", "factor_of_sensor_range")),
                 ["neat-individuals.csv"] = Units(
                     ("generation", Generation), ("candidate", Index), ("individual_id", Id), ("species", Id),
-                    ("hidden_nodes", Count), ("connections", Count), ("enabled_connections", Count))
+                    ("hidden_nodes", Count), ("connections", Count), ("enabled_connections", Count), ("eyes", Count))
             };
 
         private const string Energy = "energy";

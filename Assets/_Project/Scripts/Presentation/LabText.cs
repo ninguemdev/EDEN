@@ -100,6 +100,10 @@ namespace Eden.Presentation
                 text.AppendLine($"NEAT g{last.Generation}: {structure.SpeciesCount} espécie(s), maior com " +
                                 $"{structure.LargestSpecies}  ·  nós ocultos {structure.MeanHiddenNodes:0.0} em média " +
                                 $"(máx. {structure.MaxHiddenNodes})  ·  conexões habilitadas {structure.MeanEnabledConnections:0.0}");
+                if (structure.HasEyes)
+                    text.AppendLine($"Olhos g{last.Generation} ({(plan.EvolvingEyes ? "evolutivos" : "fixos")}): " +
+                                    $"{structure.MeanEyes:0.0} por genoma  ·  abertura média {structure.MeanEyeApertureDegrees:0}°  ·  " +
+                                    $"alcance médio ×{structure.MeanEyeRange:0.00}");
             }
             else if (last != null)
             {

@@ -187,6 +187,8 @@ namespace Eden.Persistence
                 settings.Add("algorithm", JsonValue.Of(AlgorithmName(s.Algorithm))).Add("neat", EncodeNeat(s.Neat));
             if (s.Senses == Senses.Eyes)
                 settings.Add("senses", JsonValue.Of("eyes"));
+            if (s.EvolvingEyes)
+                settings.Add("evolvingEyes", JsonValue.Of(true));
             return settings;
         }
 
@@ -205,6 +207,10 @@ namespace Eden.Persistence
                 AddConnectionProbability = saved["addConnectionProbability"].Float(),
                 ToggleProbability = saved["toggleProbability"].Float(),
                 AddConnectionAttempts = saved["addConnectionAttempts"].Int(),
+                EyeMutationProbability = saved["eyeMutationProbability"].Float(),
+                EyeOrientationSigma = saved["eyeOrientationSigma"].Float(),
+                EyeApertureSigma = saved["eyeApertureSigma"].Float(),
+                EyeRangeSigma = saved["eyeRangeSigma"].Float(),
                 DisabledInheritProbability = saved["disabledInheritProbability"].Float(),
                 ExcessCoefficient = saved["excessCoefficient"].Float(),
                 DisjointCoefficient = saved["disjointCoefficient"].Float(),
@@ -230,6 +236,10 @@ namespace Eden.Persistence
                 .Add("addConnectionProbability", JsonValue.Of(neat.AddConnectionProbability))
                 .Add("toggleProbability", JsonValue.Of(neat.ToggleProbability))
                 .Add("addConnectionAttempts", JsonValue.Of(neat.AddConnectionAttempts))
+                .Add("eyeMutationProbability", JsonValue.Of(neat.EyeMutationProbability))
+                .Add("eyeOrientationSigma", JsonValue.Of(neat.EyeOrientationSigma))
+                .Add("eyeApertureSigma", JsonValue.Of(neat.EyeApertureSigma))
+                .Add("eyeRangeSigma", JsonValue.Of(neat.EyeRangeSigma))
                 .Add("disabledInheritProbability", JsonValue.Of(neat.DisabledInheritProbability))
                 .Add("excessCoefficient", JsonValue.Of(neat.ExcessCoefficient))
                 .Add("disjointCoefficient", JsonValue.Of(neat.DisjointCoefficient))
@@ -313,6 +323,9 @@ namespace Eden.Persistence
                     throw new CheckpointException($"{senses.Path}: unknown senses \"{senses.String()}\".");
                 settings.Senses = Senses.Eyes;
             }
+
+            // Absent means fixed eyes; an explicit false does not read back the same and is refused.
+            settings.EvolvingEyes = saved.TryGet("evolvingEyes")?.Boolean() ?? false;
 
             // They validate every value and report all problems together.
             new EvaluationPlan(settings);

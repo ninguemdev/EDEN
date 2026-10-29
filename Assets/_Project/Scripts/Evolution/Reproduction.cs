@@ -284,6 +284,51 @@ namespace Eden.Evolution
             return new BodyGenes(values[0], values[1], values[2], values[3]);
         }
 
+        /// <summary>
+        /// Eyes mutated by <paramref name="rules"/>: for each slot holding an eye, in slot order, its orientation, aperture
+        /// and range in that order, each with one coin and, when it mutates, one Gaussian sample. Orientation wraps around
+        /// ±π; aperture and range stay within the <see cref="Eye"/> limits. Slots keep their identity: an eye never moves
+        /// to another slot, and empty slots stay empty and draw nothing. Disabled rules return the same set and draw
+        /// nothing.
+        /// </summary>
+        public static EyeSet MutateEyes(EyeSet eyes, EyeMutation rules, GaussianSampler random)
+        {
+            if (eyes == null)
+                throw new ArgumentNullException(nameof(eyes));
+            if (random == null)
+                throw new ArgumentNullException(nameof(random));
+            if (!rules.IsEnabled)
+                return eyes;
+            var slots = new Eye?[EyeSet.MaxEyes];
+            for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+            {
+                if (!eyes.Has(slot))
+                    continue;
+                var eye = eyes[slot];
+                var orientation = eye.Orientation;
+                if (random.Source.NextFloat() < rules.Probability)
+                    orientation = Wrap(orientation + (float)(rules.OrientationSigma * random.NextStandard()));
+                var aperture = eye.Aperture;
+                if (random.Source.NextFloat() < rules.Probability)
+                    aperture = Math.Min(Eye.MaxAperture, Math.Max(Eye.MinAperture,
+                        aperture + (float)(rules.ApertureSigma * random.NextStandard())));
+                var range = eye.Range;
+                if (random.Source.NextFloat() < rules.Probability)
+                    range = Math.Min(Eye.MaxRange, Math.Max(Eye.MinRange, range + (float)(rules.RangeSigma * random.NextStandard())));
+                slots[slot] = new Eye(orientation, aperture, range);
+            }
+
+            return new EyeSet(slots);
+        }
+
+        // An angle brought back into [-π, π].
+        private static float Wrap(float angle)
+        {
+            const float turn = 2f * MathF.PI;
+            var wrapped = angle - turn * MathF.Floor((angle + MathF.PI) / turn);
+            return wrapped < -MathF.PI ? -MathF.PI : wrapped > MathF.PI ? MathF.PI : wrapped;
+        }
+
         // One coin, plus a Gaussian sample scaled to [0, max] when it mutates; the result stays within [0, max].
         private static float MutateWithin(float value, float max, float probability, float sigma, GaussianSampler random)
         {

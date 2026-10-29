@@ -59,6 +59,12 @@ namespace Eden.Evolution
         /// </summary>
         public Senses Senses = Senses.Legacy;
 
+        /// <summary>
+        /// With eyes: whether orientation, aperture and range of each eye are inherited and mutate (<see cref="NeatSettings"/>
+        /// gives how). Off keeps every eye as the founders' (the fixed-eye control).
+        /// </summary>
+        public bool EvolvingEyes;
+
         /// <summary>Genomes per generation (proposed 64).</summary>
         public int PopulationSize = 64;
 
@@ -166,6 +172,8 @@ namespace Eden.Evolution
                 errors.Add($"{nameof(settings.Senses)} is unknown ({(int)settings.Senses})");
             if (settings.Senses == Senses.Eyes && settings.Algorithm != EvolutionAlgorithm.Neat)
                 errors.Add("eyes need NEAT; the MLP control keeps the legacy senses");
+            if (settings.EvolvingEyes && settings.Senses != Senses.Eyes)
+                errors.Add("evolving eyes need the eye senses");
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid evolution settings: " + string.Join("; ", errors));
 
@@ -177,6 +185,7 @@ namespace Eden.Evolution
             ExperimentSeed = settings.ExperimentSeed;
             Algorithm = settings.Algorithm;
             Senses = settings.Senses;
+            EvolvingEyes = settings.EvolvingEyes;
             ExpressedBodyGenes = settings.ExpressedBodyGenes;
             Plasticity = settings.Plasticity;
             EpisodeSeconds = settings.EpisodeSeconds;
@@ -195,6 +204,9 @@ namespace Eden.Evolution
         public EvolutionAlgorithm Algorithm { get; }
 
         public Senses Senses { get; }
+
+        /// <summary>Whether eyes are inherited with mutation (otherwise every eye stays the founders').</summary>
+        public bool EvolvingEyes { get; }
 
         /// <summary>What the brains read and write: <see cref="NeuralContract.Eyes"/> with eyes, else the legacy contract.</summary>
         public NeuralContract Contract => Senses == Senses.Eyes ? NeuralContract.Eyes : NeuralContract.Legacy;
