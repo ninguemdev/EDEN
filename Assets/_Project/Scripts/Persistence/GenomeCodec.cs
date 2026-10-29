@@ -95,6 +95,8 @@ namespace Eden.Persistence
             else
             {
                 root.Add("connections", EncodeConnections(genome.Neat));
+                if (genome.Eyes != null)
+                    root.Add("eyes", EncodeEyes(genome.Eyes));
             }
 
             if (!genome.Body.IsNeutral)
@@ -201,7 +203,67 @@ namespace Eden.Persistence
             if (plasticity != null)
                 throw new CheckpointException($"{plasticity.Path}: NEAT networks have no lifetime plasticity.");
             return new Genome(new NeatNetwork(contract, DecodeConnections(root["connections"])),
-                DecodeBodyGenes(root.TryGet("body")));
+                DecodeBodyGenes(root.TryGet("body")), DecodeEyes(root.TryGet("eyes"), contract));
+        }
+
+        /// <summary>The eyes present, each <c>[slot, orientation, aperture, range]</c> in slot order (empty: no eye).</summary>
+        internal static JsonValue EncodeEyes(EyeSet eyes)
+        {
+            var values = JsonValue.NewArray();
+            for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+            {
+                if (!eyes.Has(slot))
+                    continue;
+                var eye = eyes[slot];
+                values.Add(JsonValue.NewArray()
+                    .Add(JsonValue.Of(slot))
+                    .Add(JsonValue.Of(eye.Orientation))
+                    .Add(JsonValue.Of(eye.Aperture))
+                    .Add(JsonValue.Of(eye.Range)));
+            }
+
+            return values;
+        }
+
+        /// <summary>
+        /// Eyes as written by <see cref="EncodeEyes"/>: required for <see cref="NeuralContract.Eyes"/>, refused for any
+        /// other contract; slots in increasing order and eyes within their limits.
+        /// </summary>
+        internal static EyeSet DecodeEyes(JsonValue saved, NeuralContract contract)
+        {
+            if (contract != NeuralContract.Eyes)
+            {
+                if (saved != null)
+                    throw new CheckpointException($"{saved.Path}: only a genome of {NeuralContract.EyesId} has eyes.");
+                return null;
+            }
+
+            if (saved == null)
+                throw new CheckpointException($"A genome of {NeuralContract.EyesId} needs its eyes.");
+            var values = saved.ArrayOf(EyeSet.MaxEyes);
+            var slots = new Eye?[EyeSet.MaxEyes];
+            var previous = -1;
+            for (var i = 0; i < values.Count; i++)
+            {
+                var item = values[i].ArrayOf(4);
+                if (item.Count != 4)
+                    throw new CheckpointException($"{item.Path}: expected [slot, orientation, aperture, range].");
+                var slot = item[0].Int(0, EyeSet.MaxEyes - 1);
+                if (slot <= previous)
+                    throw new CheckpointException($"{item.Path}: eye slots are written once, in increasing order.");
+                try
+                {
+                    slots[slot] = new Eye(item[1].Float(), item[2].Float(), item[3].Float());
+                }
+                catch (ArgumentOutOfRangeException error)
+                {
+                    throw new CheckpointException($"{item.Path}: {error.Message}", error);
+                }
+
+                previous = slot;
+            }
+
+            return new EyeSet(slots);
         }
 
         /// <summary>Connection genes as written by <see cref="EncodeConnections"/>, checked for size and order.</summary>

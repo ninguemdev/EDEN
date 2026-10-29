@@ -36,6 +36,12 @@ namespace Eden.Domain
         /// <summary>Traits and costs expressed from <see cref="Genes"/> when the creature was created; fixed for life.</summary>
         public CreatureBody Body { get; }
 
+        /// <summary>
+        /// The eyes it was born with, fixed for life: a creature with eyes senses through
+        /// <see cref="NeuralContract.Eyes"/> (even with every slot empty). Null for the legacy senses.
+        /// </summary>
+        public EyeSet Eyes { get; set; }
+
         public Float2 Position { get; set; }
         public Float2 Velocity { get; set; }
 

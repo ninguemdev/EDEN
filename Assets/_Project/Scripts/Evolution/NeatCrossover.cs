@@ -18,7 +18,7 @@ namespace Eden.Evolution
         /// better ranked). For every matching connection, in innovation order, one coin chooses which parent gives the
         /// weight and enabled state; if the connection is disabled in either parent, a second coin keeps it disabled
         /// with <see cref="NeatRules.DisabledInheritProbability"/> and enables it otherwise. Disjoint and excess
-        /// connections come from the fitter parent unchanged, and so do the body genes.
+        /// connections come from the fitter parent unchanged, and so do the body genes and the eyes.
         /// </summary>
         public static Genome Cross(Genome fitter, Genome other, NeatRules rules, IRandomSource random)
         {
@@ -50,7 +50,7 @@ namespace Eden.Evolution
                 genes[i] = gene;
             }
 
-            return new Genome(new NeatNetwork(a.Contract, genes), fitter.Body);
+            return new Genome(new NeatNetwork(a.Contract, genes), fitter.Body, fitter.Eyes);
         }
 
         /// <summary>

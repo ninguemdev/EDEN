@@ -22,6 +22,7 @@ namespace Eden.Application
         private int[] fromSlots = Array.Empty<int>();
         private int[] toSlots = Array.Empty<int>();
         private readonly float[] outputs = new float[NeuralContract.Legacy.OutputCount];
+        private int firstOutput;
 
         public bool HasData { get; private set; }
         public CreatureId Creature { get; private set; }
@@ -49,9 +50,8 @@ namespace Eden.Application
         {
             get
             {
-                var first = NeatNetwork.OutputNodeId(NeuralContract.Legacy, 0);
                 for (var o = 0; o < outputs.Length; o++)
-                    outputs[o] = values[first + o];
+                    outputs[o] = values[firstOutput + o];
                 return MlpBrain.ToAction(outputs);
             }
         }
@@ -130,6 +130,7 @@ namespace Eden.Application
             for (var o = 0; o < contract.OutputCount; o++)
                 columns[SlotOf(NeatNetwork.OutputNodeId(contract, o))] = outputColumn;
             ColumnCount = outputColumn + 1;
+            firstOutput = NeatNetwork.OutputNodeId(contract, 0);
             source = brain;
             StructureVersion++;
         }

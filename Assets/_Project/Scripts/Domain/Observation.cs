@@ -5,7 +5,9 @@ namespace Eden.Domain
     /// <summary>
     /// What one creature senses at the start of a tick: only local information, never global food positions.
     /// Local frame: +x forward, +y to the creature's left; angles are counterclockwise. Values are normalized
-    /// as listed per property, in the input order used by brains (<see cref="CopyTo"/>).
+    /// as listed per property, in the input order used by brains (<see cref="CopyTo"/>). A creature with eyes also
+    /// carries <see cref="EyeInputs"/>, the inputs of <see cref="NeuralContract.Eyes"/>; brains of that contract read only
+    /// those, so the circular food sense and the wall radar above never reach them.
     /// </summary>
     public readonly struct Observation
     {
@@ -13,8 +15,9 @@ namespace Eden.Domain
 
         public Observation(float energy, float age, float velocityForward, float velocityLeft,
             float foodSin, float foodCos, float foodProximity, float foodVisible,
-            float wallFront, float wallRight, float wallBack, float wallLeft)
+            float wallFront, float wallRight, float wallBack, float wallLeft, float[] eyeInputs = null)
         {
+            EyeInputs = eyeInputs;
             Energy = energy;
             Age = age;
             VelocityForward = velocityForward;
@@ -59,6 +62,12 @@ namespace Eden.Domain
         public float WallRight { get; }
         public float WallBack { get; }
         public float WallLeft { get; }
+
+        /// <summary>
+        /// Inputs of <see cref="NeuralContract.Eyes"/> in contract order for a creature with eyes, otherwise null. The
+        /// array is the simulation's buffer for this tick: read it while deciding, copy it to keep it.
+        /// </summary>
+        public float[] EyeInputs { get; }
 
         /// <summary>Input by brain order (0-based), same order as <see cref="CopyTo"/>.</summary>
         public float this[int index]

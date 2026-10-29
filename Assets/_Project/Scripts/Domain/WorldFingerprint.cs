@@ -41,6 +41,22 @@ namespace Eden.Domain
                 hash.Add(creature.Parent.HasValue ? (ulong)creature.Parent.Value.Value : 0UL);
                 hash.Add((ulong)creature.Generation);
                 hash.Add(creature.ReproductionCooldownTicks);
+                // Eyes only exist with the eye senses, so a world without them hashes as before eyes existed.
+                if (creature.Eyes != null)
+                {
+                    for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+                    {
+                        if (!creature.Eyes.Has(slot))
+                            continue;
+                        var eye = creature.Eyes[slot];
+                        hash.Add((ulong)(slot + 1));
+                        hash.Add(eye.Orientation);
+                        hash.Add(eye.Aperture);
+                        hash.Add(eye.Range);
+                    }
+
+                    hash.Add(ulong.MaxValue);
+                }
             }
 
             hash.Add((ulong)world.Food.Count);

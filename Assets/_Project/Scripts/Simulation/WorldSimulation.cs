@@ -18,6 +18,7 @@ namespace Eden.Simulation
         private readonly List<CreatureDeath> deaths = new List<CreatureDeath>();
         private readonly List<CreatureBirth> births = new List<CreatureBirth>();
         private Observation[] observations = Array.Empty<Observation>();
+        private float[][] eyeInputs = Array.Empty<float[]>();
         private CreatureAction[] actions = Array.Empty<CreatureAction>();
         private float[] foodGains = Array.Empty<float>();
         private EnergyFlows energy;
@@ -139,7 +140,10 @@ namespace Eden.Simulation
             EnsureCapacity(count);
             for (var i = 0; i < count; i++)
             {
-                observations[i] = ObservationLimits.Sanitize(Sensors.Observe(World, creatures[i]), out var corrected);
+                var observed = Sensors.Observe(World, creatures[i]);
+                if (creatures[i].Eyes != null)
+                    observed = Sensors.WithEyes(observed, World, creatures[i], EyeInputs(i));
+                observations[i] = ObservationLimits.Sanitize(observed, out var corrected);
                 LastCorrectedInputValues += corrected;
             }
 
@@ -329,6 +333,12 @@ namespace Eden.Simulation
             observations = new Observation[size];
             actions = new CreatureAction[size];
             foodGains = new float[size];
+            var buffers = new float[size][];
+            Array.Copy(eyeInputs, buffers, eyeInputs.Length);
+            eyeInputs = buffers;
         }
+
+        // Scratch buffer for the eye inputs of the creature at index i this tick, created once per index.
+        private float[] EyeInputs(int index) => eyeInputs[index] ??= new float[NeuralContract.Eyes.InputCount];
     }
 }

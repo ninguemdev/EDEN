@@ -54,6 +54,30 @@ namespace Eden.Simulation
                 WallReading(config, position, range, -forwardY, forwardX));
         }
 
+        /// <summary>
+        /// The observation of a creature with eyes: <paramref name="observation"/> (its legacy readings) carrying the inputs
+        /// of <see cref="NeuralContract.Eyes"/> written into <paramref name="buffer"/>: the body channels copied from the
+        /// legacy readings, then what each eye slot sees (<see cref="Vision.See"/>).
+        /// </summary>
+        public static Observation WithEyes(in Observation observation, WorldState world, CreatureState creature,
+            float[] buffer)
+        {
+            if (creature?.Eyes == null)
+                throw new ArgumentException("Only a creature with eyes senses through them.", nameof(creature));
+            if (buffer == null || buffer.Length != NeuralContract.Eyes.InputCount)
+                throw new ArgumentException($"Needs {NeuralContract.Eyes.InputCount} values.", nameof(buffer));
+            buffer[0] = observation.Energy;
+            buffer[1] = observation.Age;
+            buffer[2] = observation.VelocityForward;
+            buffer[3] = observation.VelocityLeft;
+            for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
+                Vision.See(world, creature, creature.Eyes, slot, buffer, NeuralContract.EyeInputIndex(slot, EyeChannel.Present));
+            return new Observation(observation.Energy, observation.Age, observation.VelocityForward,
+                observation.VelocityLeft, observation.FoodSin, observation.FoodCos, observation.FoodProximity,
+                observation.FoodVisible, observation.WallFront, observation.WallRight, observation.WallBack,
+                observation.WallLeft, buffer);
+        }
+
         // Nearest food within range; on equal distance the lower id wins because food is in ascending id order.
         private static FoodState FindNearestVisibleFood(WorldState world, Float2 position, float rangeSquared,
             out float bestDistanceSquared)

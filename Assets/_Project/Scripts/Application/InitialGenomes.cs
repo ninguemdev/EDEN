@@ -38,15 +38,24 @@ namespace Eden.Application
         /// First generation of a NEAT experiment: minimal networks of the legacy contract, weights uniform within
         /// ±<paramref name="weightLimit"/>, drawn from the same stream as MLP genome i, then the body genes as above.
         /// </summary>
-        public static Genome[] NeatPopulation(ulong experimentSeed, int count, BodyGeneSet expressed, float weightLimit)
+        public static Genome[] NeatPopulation(ulong experimentSeed, int count, BodyGeneSet expressed, float weightLimit) =>
+            NeatPopulation(experimentSeed, count, expressed, weightLimit, NeuralContract.Legacy);
+
+        /// <summary>
+        /// As above for any contract; with <see cref="NeuralContract.Eyes"/> every founder has the founder's eyes
+        /// (<see cref="EyeSet.Founder"/>: one frontal eye), which draw nothing.
+        /// </summary>
+        public static Genome[] NeatPopulation(ulong experimentSeed, int count, BodyGeneSet expressed, float weightLimit,
+            NeuralContract contract)
         {
             BodyGenes.RequireSet(expressed);
+            var eyes = contract == NeuralContract.Eyes ? EyeSet.Founder : null;
             var genomes = new Genome[count];
             for (var i = 0; i < count; i++)
             {
                 var random = SeedDerivation.CreateIndexedStream(experimentSeed, RandomStream.Genome, (ulong)i + 1);
-                var network = NeatNetwork.CreateMinimal(NeuralContract.Legacy, random, weightLimit);
-                genomes[i] = new Genome(network, BodyGenes.CreateRandom(random).Masked(expressed));
+                var network = NeatNetwork.CreateMinimal(contract, random, weightLimit);
+                genomes[i] = new Genome(network, BodyGenes.CreateRandom(random).Masked(expressed), eyes);
             }
 
             return genomes;

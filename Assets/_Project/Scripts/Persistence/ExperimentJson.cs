@@ -119,7 +119,7 @@ namespace Eden.Persistence
                 .Add("validationSeeds", validationSeeds)
                 .Add("fitnessUnit", JsonValue.Of(FitnessUnit))
                 .Add("fitnessProfile", JsonValue.Of(Fitness.Profile))
-                .Add("neuralContract", JsonValue.Of(NeuralContract.LegacyId))
+                .Add("neuralContract", JsonValue.Of(header.Plan.Contract.Id))
                 .Add("network", JsonValue.Of(neat ? NeatNetwork.Kind : Genome.MlpNetwork))
                 .Add("topology", neat
                     ? JsonValue.Null()

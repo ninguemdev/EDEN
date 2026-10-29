@@ -185,6 +185,8 @@ namespace Eden.Persistence
                 settings.Add("plasticity", JsonValue.Of(true));
             if (s.Algorithm == EvolutionAlgorithm.Neat)
                 settings.Add("algorithm", JsonValue.Of(AlgorithmName(s.Algorithm))).Add("neat", EncodeNeat(s.Neat));
+            if (s.Senses == Senses.Eyes)
+                settings.Add("senses", JsonValue.Of("eyes"));
             return settings;
         }
 
@@ -302,6 +304,14 @@ namespace Eden.Persistence
                     throw new CheckpointException($"{algorithm.Path}: unknown evolution algorithm \"{algorithm.String()}\".");
                 settings.Algorithm = EvolutionAlgorithm.Neat;
                 settings.Neat = DecodeNeat(saved["neat"]);
+            }
+
+            var senses = saved.TryGet("senses");
+            if (senses != null)
+            {
+                if (senses.String() != "eyes")
+                    throw new CheckpointException($"{senses.Path}: unknown senses \"{senses.String()}\".");
+                settings.Senses = Senses.Eyes;
             }
 
             // They validate every value and report all problems together.
@@ -691,13 +701,18 @@ namespace Eden.Persistence
             return new NeatEvolutionState(history, species, saved["nextSpeciesId"].Int(1), lastSpecies);
         }
 
-        // A NEAT genome inside a checkpoint: the network kind, its connections and body genes when not neutral; the
-        // contract is the legacy one, the only one NEAT evolutions use so far.
+        // A NEAT genome inside a checkpoint: the network kind, its contract unless legacy, its connections, body genes
+        // when not neutral and, for the eye senses, its eyes.
         private static JsonValue EncodeNeatGenome(Genome genome, JsonValue saved)
         {
-            saved.Add("network", JsonValue.Of(NeatNetwork.Kind)).Add("connections", GenomeCodec.EncodeConnections(genome.Neat));
+            saved.Add("network", JsonValue.Of(NeatNetwork.Kind));
+            if (genome.Contract != NeuralContract.Legacy)
+                saved.Add("contract", JsonValue.Of(genome.Contract.Id));
+            saved.Add("connections", GenomeCodec.EncodeConnections(genome.Neat));
             if (!genome.Body.IsNeutral)
                 saved.Add("body", EncodeBodyGenes(genome.Body));
+            if (genome.Eyes != null)
+                saved.Add("eyes", GenomeCodec.EncodeEyes(genome.Eyes));
             return saved;
         }
 
@@ -706,8 +721,12 @@ namespace Eden.Persistence
             var network = saved["network"];
             if (network.String() != NeatNetwork.Kind)
                 throw new CheckpointException($"{network.Path}: expected a {NeatNetwork.Kind} genome.");
-            return new Genome(new NeatNetwork(NeuralContract.Legacy, GenomeCodec.DecodeConnections(saved["connections"])),
-                DecodeBodyGenes(saved.TryGet("body")));
+            var contractId = saved.TryGet("contract")?.String() ?? NeuralContract.LegacyId;
+            if (!NeuralContract.TryFind(contractId, out var contract) || contract == NeuralContract.Legacy &&
+                saved.TryGet("contract") != null)
+                throw new CheckpointException($"Unknown or non-canonical neural contract \"{contractId}\".");
+            return new Genome(new NeatNetwork(contract, GenomeCodec.DecodeConnections(saved["connections"])),
+                DecodeBodyGenes(saved.TryGet("body")), GenomeCodec.DecodeEyes(saved.TryGet("eyes"), contract));
         }
 
         private static EvolutionSnapshot DecodeEvolution(JsonValue saved, EvolutionSettings settings, int interval)
@@ -989,6 +1008,8 @@ namespace Eden.Persistence
                     saved.Add("reproductionCooldownTicks", JsonValue.Of(creature.ReproductionCooldownTicks));
                 if (!creature.Genes.IsNeutral)
                     saved.Add("bodyGenes", EncodeBodyGenes(creature.Genes));
+                if (creature.Eyes != null)
+                    saved.Add("eyes", GenomeCodec.EncodeEyes(creature.Eyes));
                 creatures.Add(saved);
             }
 
@@ -1044,7 +1065,8 @@ namespace Eden.Persistence
                     FoodEnergyEaten = value["foodEnergyEaten"].Float(),
                     Parent = value.TryGet("parent") is JsonValue parent ? new CreatureId(parent.Int(1)) : (CreatureId?)null,
                     Generation = value.TryGet("generation")?.Int(0) ?? 0,
-                    ReproductionCooldownTicks = value.TryGet("reproductionCooldownTicks")?.Long(0) ?? 0L
+                    ReproductionCooldownTicks = value.TryGet("reproductionCooldownTicks")?.Long(0) ?? 0L,
+                    Eyes = value.TryGet("eyes") is JsonValue eyes ? GenomeCodec.DecodeEyes(eyes, NeuralContract.Eyes) : null
                 };
             }
 

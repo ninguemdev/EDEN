@@ -33,7 +33,7 @@ namespace Eden.Application
                 ? InitialGenomes.Population(Rules.ExperimentSeed, Rules.PopulationSize, Plan.ExpressedBodyGenes,
                     Plan.Plasticity)
                 : InitialGenomes.NeatPopulation(Rules.ExperimentSeed, Rules.PopulationSize, Plan.ExpressedBodyGenes,
-                    neatRules.InitialWeightLimit));
+                    neatRules.InitialWeightLimit, Plan.Contract));
             population = GenomesOf(individuals);
         }
 
@@ -72,7 +72,7 @@ namespace Eden.Application
                 return;
             neatRules = new NeatRules(settings.Neat);
             speciation = new NeatSpeciation(neatRules);
-            innovations = new InnovationHistory(NeuralContract.Legacy);
+            innovations = new InnovationHistory(Plan.Contract);
         }
 
         /// <summary>
@@ -279,7 +279,7 @@ namespace Eden.Application
             IReadOnlyList<Individual> previous)
         {
             var history = InnovationHistory.Restore(neat.Innovations);
-            if (history.Contract != NeuralContract.Legacy || history.Generation != generation)
+            if (history.Contract != Plan.Contract || history.Generation != generation)
                 throw new ArgumentException($"The innovation history is at generation {history.Generation} of " +
                                             $"{history.Contract.Id}, the evolution at {generation}.", nameof(neat));
             var restored = NeatSpeciation.Restore(neatRules, neat.Species, neat.NextSpeciesId);

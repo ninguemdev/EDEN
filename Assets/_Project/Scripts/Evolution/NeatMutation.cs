@@ -305,7 +305,7 @@ namespace Eden.Evolution
 
             count = new NeatMutationCount(perturbed, replaced, nodes, added, toggled);
             var bodyGenes = Reproduction.MutateBody(parent.Body, body.Genes, body.Probability, body.Sigma, random);
-            return new Genome(new NeatNetwork(network.Contract, genes), bodyGenes);
+            return new Genome(new NeatNetwork(network.Contract, genes), bodyGenes, parent.Eyes);
         }
 
         /// <summary>
@@ -338,7 +338,7 @@ namespace Eden.Evolution
             }
 
             var body = Reproduction.MutateBody(parent.Body, bodyGenes, probability, sigma, random);
-            return new Genome(new NeatNetwork(network.Contract, genes), body);
+            return new Genome(new NeatNetwork(network.Contract, genes), body, parent.Eyes);
         }
 
         // Splits one enabled connection, drawn in innovation order; false when none is enabled (no draw).

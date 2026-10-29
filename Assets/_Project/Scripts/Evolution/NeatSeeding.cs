@@ -49,7 +49,7 @@ namespace Eden.Evolution
                         gene.Enabled);
                 }
 
-                renumbered[i] = new Genome(new NeatNetwork(contract, genes), genome.Body);
+                renumbered[i] = new Genome(new NeatNetwork(contract, genes), genome.Body, genome.Eyes);
             }
 
             return renumbered;

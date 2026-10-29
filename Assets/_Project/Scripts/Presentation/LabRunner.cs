@@ -744,6 +744,8 @@ namespace Eden.Presentation
             Simulation = new WorldSimulation(individuals == null
                 ? WorldFactory.CreateInitial(config)
                 : WorldFactory.CreateInitial(config, i => plan.ExpressedGenes(individuals[i].Genome.Body)));
+            for (var i = 0; individuals != null && i < individuals.Count; i++)
+                Simulation.World.Creatures[i].Eyes = individuals[i].Genome.Eyes;
             sharedGenomes = CreateGenomes(config, brain, individuals, Evolution);
             Simulation.Heredity = sharedGenomes;
             genealogy = config.Reproduction ? new Genealogy(Simulation.World) : null;

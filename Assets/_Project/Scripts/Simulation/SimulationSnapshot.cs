@@ -74,7 +74,8 @@ namespace Eden.Simulation
                     DeathCause = creature.DeathCause,
                     Parent = creature.Parent,
                     Generation = creature.Generation,
-                    ReproductionCooldownTicks = creature.ReproductionCooldownTicks
+                    ReproductionCooldownTicks = creature.ReproductionCooldownTicks,
+                    Eyes = creature.Eyes
                 };
 
         private static FoodState Clone(FoodState item)
