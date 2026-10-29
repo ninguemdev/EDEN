@@ -15,9 +15,10 @@ namespace Eden.Application
         public static readonly ExperimentPreset Minimal = new ExperimentPreset("minimal", 32, 64);
         public static readonly ExperimentPreset Standard = new ExperimentPreset("standard", 64, 128);
         public static readonly ExperimentPreset Stress = new ExperimentPreset("stress", 128, 256);
+        public static readonly ExperimentPreset Thousand = new ExperimentPreset("thousand", 1000, 2000);
 
         /// <summary>Presets in the order the lab offers them; the index is what the lab stores.</summary>
-        public static readonly IReadOnlyList<ExperimentPreset> All = new[] { Minimal, Standard, Stress };
+        public static readonly IReadOnlyList<ExperimentPreset> All = new[] { Minimal, Standard, Stress, Thousand };
 
         private ExperimentPreset(string name, int population, int food)
         {
@@ -43,6 +44,7 @@ namespace Eden.Application
             settings.Seed = seed;
             settings.InitialPopulation = Population;
             settings.InitialFood = Food;
+            settings.PopulationCap = Math.Max(settings.PopulationCap, Population);
             return settings;
         }
 

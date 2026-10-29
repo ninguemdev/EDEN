@@ -14,7 +14,8 @@ namespace Eden.Presentation
         public LabChoice(LabMode mode, int preset, int seed, LabBrainKind brain, bool evolvingBody = false,
             bool neat = false, bool eyes = false, bool evolvingEyes = false, bool solidBodies = false,
             ObstacleLayout obstacles = ObstacleLayout.None, ScenarioSettings scenario = null, string genomeDirectory = null,
-            string compositionText = null, bool compositionFrozen = true)
+            string compositionText = null, bool compositionFrozen = true,
+            bool parallelTraining = false)
         {
             Scenario = scenario;
             GenomeDirectory = genomeDirectory;
@@ -30,6 +31,7 @@ namespace Eden.Presentation
             Brain = brain;
             EvolvingBody = evolvingBody;
             Neat = neat;
+            ParallelTraining = parallelTraining;
         }
 
         public LabMode Mode { get; }
@@ -72,6 +74,9 @@ namespace Eden.Presentation
 
         /// <summary>Composed genomes face each other unchanged; otherwise they have mutating descendants.</summary>
         public bool CompositionFrozen { get; }
+
+        /// <summary>Episodes of the evolution are evaluated on CPU workers (isolated evolution only).</summary>
+        public bool ParallelTraining { get; }
     }
 
     /// <summary>
@@ -83,9 +88,10 @@ namespace Eden.Presentation
     public sealed class LabHud : MonoBehaviour
     {
         public static readonly string[] ModeChoices = { "Mundo compartilhado", "Evolução (avaliação isolada)" };
-        public static readonly string[] PresetChoices = { "Mínimo (32)", "Padrão (64)", "Estresse (128)" };
+        public static readonly string[] PresetChoices = { "Mínimo (32)", "Padrão (64)", "Estresse (128)", "Mil (1000)" };
         public static readonly string[] BodyChoices = { "Fixo (controle)", "Evolutivo (4 genes)" };
         public static readonly string[] AlgorithmChoices = { "MLP fixa (controle)", "NEAT (topologia evolui)" };
+        public static readonly string[] TrainingChoices = { "Sequencial", "Paralelo (CPU)" };
         public static readonly string[] SensesChoices =
             { "Legados (círculo + radar)", "Olhos fixos (requer NEAT)", "Olhos evolutivos (requer NEAT)" };
 
@@ -151,6 +157,7 @@ namespace Eden.Presentation
         private VisualElement compositionRow;
         private TextField compositionField;
         private DropdownField compositionModeField;
+        private DropdownField trainingField;
         private Label networkTitle;
         private Label networkLegend;
         private IntegerField seedField;
@@ -338,6 +345,7 @@ namespace Eden.Presentation
             if (choice.CompositionText != null)
                 compositionField.SetValueWithoutNotify(choice.CompositionText);
             compositionModeField.SetValueWithoutNotify(CompositionModeChoices[choice.CompositionFrozen ? 0 : 1]);
+            trainingField.SetValueWithoutNotify(TrainingChoices[choice.ParallelTraining ? 1 : 0]);
             seedField.SetValueWithoutNotify(choice.Seed);
             UpdateBrainField();
             resumeButton.style.display = evolutionAvailable && choice.Mode == LabMode.SharedWorld
@@ -365,7 +373,8 @@ namespace Eden.Presentation
                 Math.Max(0, seedField.value), (LabBrainKind)brain, bodyField.index == 1, algorithmField.index == 1,
                 sensesField.index >= 1, sensesField.index == 2, arena >= 1,
                 arena == 2 ? ObstacleLayout.Pillars : arena == 3 ? ObstacleLayout.Corridor : ObstacleLayout.None,
-                ReadScenario(), seedGenomesField.value?.Trim(), compositionField.value, compositionModeField.index != 1);
+                ReadScenario(), seedGenomesField.value?.Trim(), compositionField.value, compositionModeField.index != 1,
+                trainingField.index == 1);
         }
 
         // The scenario fields; a food count of 0 keeps the mode's own (the preset's or the episodes'), and a size that is
@@ -480,6 +489,7 @@ namespace Eden.Presentation
             bodyField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             algorithmField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             sensesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+            trainingField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             var composing = modeField.index == (int)LabMode.SharedWorld &&
                             Array.IndexOf(BrainChoices, brainField.value) == (int)LabBrainKind.Composition;
             seedGenomesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution || composing);
@@ -606,6 +616,9 @@ namespace Eden.Presentation
             arenaField.choices = new List<string>(ArenaChoices);
             arenaField.index = 0;
             BindScenario(root);
+            trainingField = root.Q<DropdownField>("training-field");
+            trainingField.choices = new List<string>(TrainingChoices);
+            trainingField.index = 0;
             // Eyes need NEAT: choosing eyes picks NEAT, and choosing the MLP control goes back to the legacy senses.
             sensesField.RegisterValueChangedCallback(change =>
             {

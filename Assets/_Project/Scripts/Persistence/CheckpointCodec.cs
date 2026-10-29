@@ -29,13 +29,15 @@ namespace Eden.Persistence
     /// weights), the innovation counters, the species and the species of the last trained generation are written only
     /// for a NEAT experiment, and only such a file says schema 6, so a build without NEAT refuses it as newer while MLP
     /// files stay schema 5, byte for byte.
+    /// Parallel evaluation (schema 7) additionally stores the worker count and all episodes ahead of the displayed
+    /// world, including finished results awaiting ordered aggregation. Sequential files retain their old schemas.
     /// </summary>
     public static class CheckpointCodec
     {
         public const string Format = "eden-checkpoint";
 
-        /// <summary>Newest schema this build reads and writes (for NEAT experiments).</summary>
-        public const int SchemaVersion = 6;
+        /// <summary>Newest schema: parallel evaluation progress. Sequential NEAT stays schema 6, MLP schema 5.</summary>
+        public const int SchemaVersion = 7;
 
         /// <summary>Schema of every checkpoint without NEAT, unchanged since plasticity.</summary>
         public const int SchemaWithoutNeat = 5;
@@ -56,7 +58,8 @@ namespace Eden.Persistence
         {
             if (checkpoint == null)
                 throw new ArgumentNullException(nameof(checkpoint));
-            var schema = checkpoint.Evolution?.Neat != null ? SchemaVersion : SchemaWithoutNeat;
+            var schema = checkpoint.Evolution?.Job.WorkerCount > 1 ? SchemaVersion
+                : checkpoint.Evolution?.Neat != null ? 6 : SchemaWithoutNeat;
             var config = EncodeConfig(checkpoint);
             var state = EncodeState(checkpoint);
             var configHash = Hash(config.ToCompactString());
@@ -772,13 +775,25 @@ namespace Eden.Persistence
                 .Add("baselines", evolution.BaselineEpisodes == null ? JsonValue.Null() : EncodeEpisodes(evolution.BaselineEpisodes))
                 .Add("training", training)
                 .Add("validation", validation)
-                .Add("job", JsonValue.NewObject()
-                    .Add("completed", EncodeEpisodes(evolution.Job.Completed))
-                    .Add("world", EncodeWorld(evolution.Job.CurrentWorld))
-                    .Add("brains", EncodeBrains(evolution.Job.CurrentBrains)));
+                .Add("job", EncodeProgress(evolution.Job));
             if (evolution.Neat != null)
                 encoded.Add("neat", EncodeNeatState(evolution.Neat));
             return encoded;
+        }
+
+        private static JsonValue EncodeProgress(EvaluationProgress progress)
+        {
+            var job = JsonValue.NewObject()
+                .Add("completed", EncodeEpisodes(progress.Completed))
+                .Add("world", EncodeWorld(progress.CurrentWorld))
+                .Add("brains", EncodeBrains(progress.CurrentBrains));
+            if (progress.WorkerCount == 1) return job;
+            var ahead = JsonValue.NewArray();
+            foreach (var episode in progress.Ahead)
+                ahead.Add(episode.Completed.HasValue
+                    ? JsonValue.NewObject().Add("result", EncodeEpisodes(new[] { episode.Completed.Value }))
+                    : JsonValue.NewObject().Add("world", EncodeWorld(episode.World)).Add("brains", EncodeBrains(episode.Brains)));
+            return job.Add("workers", JsonValue.Of(progress.WorkerCount)).Add("ahead", ahead);
         }
 
         private static JsonValue EncodeNeatState(NeatEvolutionState neat)
@@ -925,10 +940,32 @@ namespace Eden.Persistence
 
             var baselines = saved["baselines"];
             var job = saved["job"];
+            var workers = job.TryGet("workers")?.Int(1, EvaluationJob.MaxWorkers) ?? 1;
+            var ahead = new List<EvaluationAhead>();
+            var pending = job.TryGet("ahead");
+            if (pending != null)
+            {
+                var values = pending.ArrayOf(workers - 1);
+                for (var i = 0; i < values.Count; i++)
+                {
+                    var episode = values[i];
+                    var completed = episode.TryGet("result");
+                    if (completed != null)
+                    {
+                        if (completed.ArrayOf(1).Count != 1)
+                            throw new CheckpointException("A finished parallel episode needs exactly one result.");
+                        ahead.Add(new EvaluationAhead(DecodeEpisodes(completed, plan)[0]));
+                    }
+                    else
+                        ahead.Add(new EvaluationAhead(
+                            DecodeWorld(episode["world"], 1, settings.World.InitialFood, plan.EpisodeConfig(0)),
+                            DecodeBrains(episode["brains"])));
+                }
+            }
             // Bodies do not depend on the episode seed.
             var progress = new EvaluationProgress(DecodeEpisodes(job["completed"], plan),
                 DecodeWorld(job["world"], 1, settings.World.InitialFood, plan.EpisodeConfig(0)),
-                DecodeBrains(job["brains"]));
+                DecodeBrains(job["brains"]), workers, ahead);
             var neat = settings.Algorithm == EvolutionAlgorithm.Neat
                 ? DecodeNeatState(saved["neat"], settings.PopulationSize)
                 : null;

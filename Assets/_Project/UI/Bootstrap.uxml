@@ -31,6 +31,7 @@
                         <ui:FloatField name="scenario-max-age-field" label="Idade máxima (s)" class="lab-field" />
                         <ui:FloatField name="scenario-initial-energy-field" label="Energia inicial" class="lab-field" />
                     </ui:Foldout>
+                    <ui:DropdownField name="training-field" label="Treino" class="lab-field" tooltip="Paralelo usa a CPU para avaliar mundos independentes. Use Máx. para acelerar o treino; a arena mostra um dos episódios." />
                     <ui:IntegerField name="seed-field" label="Seed" value="1" class="lab-field" />
                     <ui:VisualElement class="lab-row">
                         <ui:TextField name="seed-genomes-field" label="Pool de genomas" class="lab-field" style="flex-grow: 1;" />

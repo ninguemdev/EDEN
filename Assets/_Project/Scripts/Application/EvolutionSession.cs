@@ -35,24 +35,28 @@ namespace Eden.Application
         private readonly List<ValidationPoint> validation = new List<ValidationPoint>();
         private IReadOnlyList<Individual> jobIndividuals;
 
-        public EvolutionSession(EvolutionSettings settings, int validationInterval = DefaultValidationInterval)
-            : this(new GenerationalEvolution(settings), validationInterval)
+        public EvolutionSession(EvolutionSettings settings, int validationInterval = DefaultValidationInterval,
+            int evaluationWorkers = 1)
+            : this(new GenerationalEvolution(settings), validationInterval, evaluationWorkers)
         {
             BeginTraining();
         }
 
         /// <summary>A new session whose evolution starts from an imported pool; see <see cref="GenerationalEvolution.FromSeedPool"/>.</summary>
         public static EvolutionSession FromSeedPool(EvolutionSettings settings, IReadOnlyList<Genome> pool,
-            IReadOnlyList<float> poolFitness, int validationInterval = DefaultValidationInterval)
+            IReadOnlyList<float> poolFitness, int validationInterval = DefaultValidationInterval, int evaluationWorkers = 1)
         {
             var session = new EvolutionSession(GenerationalEvolution.FromSeedPool(settings, pool, poolFitness),
-                validationInterval);
+                validationInterval, evaluationWorkers);
             session.BeginTraining();
             return session;
         }
 
-        private EvolutionSession(GenerationalEvolution evolution, int validationInterval)
+        private EvolutionSession(GenerationalEvolution evolution, int validationInterval, int evaluationWorkers = 1)
         {
+            if (evaluationWorkers < 1 || evaluationWorkers > EvaluationJob.MaxWorkers)
+                throw new ArgumentOutOfRangeException(nameof(evaluationWorkers));
+            EvaluationWorkers = evaluationWorkers;
             if (validationInterval < 1)
                 throw new ArgumentOutOfRangeException(nameof(validationInterval), "Must be at least 1.");
             Evolution = evolution;
@@ -73,7 +77,7 @@ namespace Eden.Application
             var previous = saved.Generation > 0 ? saved.LastTrainingIndividuals : null;
             var evolution = GenerationalEvolution.Restore(saved.Settings, saved.Generation, saved.Population,
                 Lineage.Restore(saved.Lineage), previous, saved.Neat);
-            var session = new EvolutionSession(evolution, saved.ValidationInterval);
+            var session = new EvolutionSession(evolution, saved.ValidationInterval, saved.Job.WorkerCount);
             var plan = evolution.Plan;
             var ticksPerSecond = plan.EpisodeConfig(plan.ValidationSeed).TicksPerSecond;
 
@@ -126,6 +130,7 @@ namespace Eden.Application
         public GenerationalEvolution Evolution { get; }
         public EvaluationPlan Plan => Evolution.Plan;
         public int ValidationInterval { get; }
+        public int EvaluationWorkers { get; }
         public EvolutionPhase Phase { get; private set; }
 
         /// <summary>Evaluation in progress; a new one starts as soon as the previous one completes.</summary>
@@ -240,6 +245,7 @@ namespace Eden.Application
             Phase = EvolutionPhase.Training;
             jobIndividuals = Evolution.Individuals;
             Job = Evolution.BeginTraining();
+            Job.WorkerCount = EvaluationWorkers;
         }
 
         private void BeginBaselines()
@@ -248,6 +254,7 @@ namespace Eden.Application
             jobIndividuals = null;
             Job = evaluator.Job(new Func<IBrain>[] { () => new RandomBrain(), () => new HeuristicBrain() },
                 Plan.ValidationSeeds(), 0, EvaluationMode.Validation);
+            Job.WorkerCount = EvaluationWorkers;
         }
 
         private void BeginValidation()
@@ -255,6 +262,7 @@ namespace Eden.Application
             Phase = EvolutionPhase.Validation;
             jobIndividuals = LastTraining.Individuals;
             Job = Evolution.BeginValidation(LastTraining);
+            Job.WorkerCount = EvaluationWorkers;
         }
 
         // One training summary per finished generation and validation points in order, as a running session has them.

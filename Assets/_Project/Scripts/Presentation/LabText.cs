@@ -95,6 +95,9 @@ namespace Eden.Presentation
             var episode = job.Current;
             var text = new StringBuilder();
             text.AppendLine("Evolução por gerações · AVALIAÇÃO ISOLADA");
+            text.AppendLine(session.EvaluationWorkers > 1
+                ? $"Treino paralelo (CPU): até {session.EvaluationWorkers} episódios independentes · a arena mostra um deles"
+                : "Treino sequencial: um episódio por vez");
             var neat = plan.Algorithm == EvolutionAlgorithm.Neat;
             text.AppendLine($"Cada genoma sozinho no mesmo mundo de cada seed ({plan.EpisodeSeconds:0} s); sem competição. " +
                             (neat

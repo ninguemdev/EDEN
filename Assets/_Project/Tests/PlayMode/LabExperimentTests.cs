@@ -4,9 +4,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Eden.Application;
 using Eden.Brains;
 using Eden.Domain;
-using Eden.Application;
 using Eden.Evolution;
 using Eden.Persistence;
 using Eden.Presentation;
@@ -45,6 +45,38 @@ namespace Eden.Tests.PlayMode
                 if (Directory.Exists(directory))
                     Directory.Delete(directory, true);
             runDirectories.Clear();
+        }
+
+        [UnityTest]
+        public IEnumerator Controls_ParallelTrainingSupportsPauseStepAndCheckpoint()
+        {
+            UseTemporaryCheckpoint();
+            var field = runner.Hud.Root.Q<DropdownField>("training-field");
+            Assert.That(field.enabledSelf, Is.False, "training applies only to isolated evolution");
+            yield return StartFromControls(LabMode.IsolatedEvolution, preset: 3, seed: 42, parallelTraining: true);
+            Assert.That(field.enabledSelf, Is.True);
+            Assert.That(runner.ParallelTraining, Is.True);
+            Assert.That(runner.Evolution.EvaluationWorkers, Is.EqualTo(EvaluationJob.AutomaticWorkerCount));
+            Assert.That(runner.Evolution.Evolution.Population.Count, Is.EqualTo(1000));
+            Assert.That(runner.Simulation.World.Creatures.Count, Is.EqualTo(1), "only one independent world is drawn");
+            yield return Press("max-button");
+            yield return WaitSeconds(0.3f);
+            yield return Press("pause-button");
+            var ticks = runner.Evolution.TotalTicks;
+            var shown = runner.Evolution.Job.Current;
+            var shownTick = shown.Tick;
+            yield return WaitSeconds(0.1f);
+            Assert.That(runner.Evolution.TotalTicks, Is.EqualTo(ticks), "all workers pause");
+            yield return Press("step-button");
+            Assert.That(runner.Evolution.TotalTicks, Is.EqualTo(ticks + 1));
+            Assert.That(shown.Tick, Is.EqualTo(shownTick + 1));
+            var savedTicks = runner.Evolution.TotalTicks;
+            yield return Press("save-button");
+            yield return Press("step-button");
+            yield return Press("load-button");
+            Assert.That(runner.Evolution.TotalTicks, Is.EqualTo(savedTicks));
+            Assert.That(runner.Evolution.EvaluationWorkers, Is.EqualTo(EvaluationJob.AutomaticWorkerCount));
+            Assert.That(field.index, Is.EqualTo(runner.Evolution.EvaluationWorkers > 1 ? 1 : 0));
         }
 
         [UnityTest]
@@ -549,7 +581,7 @@ namespace Eden.Tests.PlayMode
             yield return Step(20);
             Assert.That(Position(), Is.EqualTo(later));
 
-            File.WriteAllText(runner.CheckpointPath, "{\"format\": \"eden-checkpoint\", \"schemaVersion\": 7}");
+            File.WriteAllText(runner.CheckpointPath, "{\"format\": \"eden-checkpoint\", \"schemaVersion\": " + (CheckpointCodec.SchemaVersion + 1) + "}");
             File.Delete(runner.CheckpointPath + ".bak");
             var simulation = runner.Simulation;
             yield return Press("load-button");
@@ -703,7 +735,7 @@ namespace Eden.Tests.PlayMode
         }
 
         private IEnumerator StartFromControls(LabMode mode, int preset, int seed, LabBrainKind brain = LabBrainKind.Heuristic,
-            bool evolvingBody = false, bool neat = false)
+            bool evolvingBody = false, bool neat = false, bool parallelTraining = false)
         {
             var root = runner.Hud.Root;
             Assert.That(root, Is.Not.Null, "the HUD is bound");
@@ -715,6 +747,7 @@ namespace Eden.Tests.PlayMode
             root.Q<IntegerField>("seed-field").value = seed;
             root.Q<DropdownField>("body-field").index = evolvingBody ? 1 : 0;
             root.Q<DropdownField>("algorithm-field").index = neat ? 1 : 0;
+            root.Q<DropdownField>("training-field").index = parallelTraining ? 1 : 0;
             yield return Press("start-button");
         }
 

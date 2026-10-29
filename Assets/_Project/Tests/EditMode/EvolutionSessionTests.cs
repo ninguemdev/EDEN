@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using Eden.Application;
 using Eden.Brains;
 using Eden.Domain;
@@ -63,11 +64,21 @@ namespace Eden.Tests.EditMode
             Assert.That(episode.Result().SurvivedTicks, Is.EqualTo(reference.SurvivedTicks));
         }
 
-        [Test]
-        public void Session_InChunks_ReproducesGenerationalEvolutionAndItsValidation()
+        [TestCase(1, false, false, false)]
+        [TestCase(4, false, false, false)]
+        [TestCase(4, true, false, false)]
+        [TestCase(4, true, true, false)]
+        [TestCase(4, false, false, true)]
+        public void Session_InChunks_ReproducesGenerationalEvolutionAndItsValidation(int workers, bool neat,
+            bool eyes, bool plasticity)
         {
-            var reference = new GenerationalEvolution(Small(21));
-            var session = new EvolutionSession(Small(21), 2);
+            var settings = Small(21);
+            settings.Algorithm = neat ? EvolutionAlgorithm.Neat : EvolutionAlgorithm.Mlp;
+            settings.Senses = eyes ? Senses.Eyes : Senses.Legacy;
+            settings.EvolvingEyes = eyes;
+            settings.Plasticity = plasticity;
+            var reference = new GenerationalEvolution(settings);
+            var session = new EvolutionSession(settings, 2, workers);
             var ran = 0L;
             while (session.Training.Count < 4)
                 ran += session.Advance(113);
@@ -97,6 +108,9 @@ namespace Eden.Tests.EditMode
             Assert.That(session.Evolution.Individuals.Select(i => i.Id),
                 Is.EqualTo(reference.Individuals.Select(i => i.Id)), "validation never changes who is bred");
             Assert.That(session.Evolution.Lineage.NextId, Is.EqualTo(reference.Lineage.NextId));
+            for (var i = 0; i < reference.Population.Count; i++)
+                Assert.That(session.Evolution.Population[i].HasSameContent(reference.Population[i]), Is.True,
+                    "identical genomes after selection, crossover and mutation");
 
             var baselines = new IsolatedEvaluator(reference.Plan).Evaluate(
                 new Func<IBrain>[] { () => new RandomBrain(), () => new HeuristicBrain() },
@@ -182,8 +196,8 @@ namespace Eden.Tests.EditMode
         [Test]
         public void Presets_SizeTheSharedWorldAndThePopulationOnly()
         {
-            Assert.That(ExperimentPreset.All.Select(p => p.Population), Is.EqualTo(new[] { 32, 64, 128 }));
-            Assert.That(ExperimentPreset.All.Select(p => p.Food), Is.EqualTo(new[] { 64, 128, 256 }));
+            Assert.That(ExperimentPreset.All.Select(p => p.Population), Is.EqualTo(new[] { 32, 64, 128, 1000 }));
+            Assert.That(ExperimentPreset.All.Select(p => p.Food), Is.EqualTo(new[] { 64, 128, 256, 2000 }));
 
             var template = new SimulationSettings { MaxEnergy = 80f };
             var shared = ExperimentPreset.Minimal.SharedWorld(template, 42);
@@ -193,12 +207,75 @@ namespace Eden.Tests.EditMode
             Assert.That(shared.MaxEnergy, Is.EqualTo(80f), "other rules come from the template");
             Assert.That(template.InitialPopulation, Is.EqualTo(64), "the template is not changed");
 
-            var evolution = ExperimentPreset.Stress.Evolution(7);
+            var evolution = ExperimentPreset.Thousand.Evolution(7);
             var proposed = new EvolutionSettings();
-            Assert.That(evolution.PopulationSize, Is.EqualTo(128));
+            Assert.That(evolution.PopulationSize, Is.EqualTo(1000));
             Assert.That(evolution.ExperimentSeed, Is.EqualTo(7UL));
             Assert.That(evolution.World.InitialFood, Is.EqualTo(proposed.World.InitialFood), "episodes score the same");
             Assert.That(evolution.EpisodeSeconds, Is.EqualTo(proposed.EpisodeSeconds));
+
+            template.Reproduction = true;
+            var largeWorld = ExperimentPreset.Thousand.SharedWorld(template, 42);
+            var config = new SimulationConfig(largeWorld);
+            Assert.That(WorldFactory.CreateInitial(config).Creatures.Count, Is.EqualTo(1000));
+            Assert.That(config.PopulationCap, Is.EqualTo(1000));
+            Assert.That(template.PopulationCap, Is.EqualTo(256), "the template is not changed");
+            template.PopulationCap = 2000;
+            Assert.That(ExperimentPreset.Thousand.SharedWorld(template, 42).PopulationCap, Is.EqualTo(2000),
+                "a higher configured cap is preserved");
+        }
+
+        [TestCase(1)]
+        [TestCase(37)]
+        [TestCase(1024)]
+        public void ParallelEvaluation_RespectsTickBudgetAndMatchesSequentialWithDeaths(int chunk)
+        {
+            var settings = Small(37);
+            settings.World.MaxAgeSeconds = 3f;
+            var evaluator = new IsolatedEvaluator(new EvaluationPlan(settings));
+            var genomes = InitialGenomes.Population(37, 6);
+            var reference = evaluator.TrainingJob(genomes, 0).RunToEnd();
+            var parallel = evaluator.TrainingJob(genomes, 0);
+            parallel.WorkerCount = 4;
+            Assert.That(parallel.Advance(0), Is.Zero);
+            Assert.Throws<ArgumentOutOfRangeException>(() => parallel.Advance(-1));
+            long ticks = 0;
+            while (!parallel.IsComplete)
+            {
+                var ran = parallel.Advance(chunk);
+                Assert.That(ran, Is.InRange(1, chunk));
+                ticks += ran;
+            }
+            Assert.That(ticks, Is.EqualTo(reference.Episodes.Sum(e => e.SurvivedTicks)));
+            AssertSameEvaluation(parallel.Result, reference);
+        }
+
+        [Test]
+        public void ParallelEvaluation_ExecutesIndependentBrainsConcurrently()
+        {
+            using var rendezvous = new Barrier(2);
+            var plan = new EvaluationPlan(Small(7));
+            var job = new EvaluationJob(plan, new Func<IBrain>[]
+                { () => new RendezvousBrain(rendezvous), () => new RendezvousBrain(rendezvous) },
+                new[] { plan.TrainingSeed(0, 0) }, 0, EvaluationMode.Training) { WorkerCount = 2 };
+            Assert.That(job.Advance(2), Is.EqualTo(2));
+            Assert.That(job.Current.Tick, Is.EqualTo(1));
+            Assert.That(job.Capture().Ahead[0].World.Tick, Is.EqualTo(1));
+        }
+
+        private sealed class RendezvousBrain : IBrain
+        {
+            private readonly Barrier rendezvous;
+            private bool met;
+            public RendezvousBrain(Barrier rendezvous) => this.rendezvous = rendezvous;
+            public string Name => "parallel-test";
+            public CreatureAction Evaluate(in Observation observation, BrainState state)
+            {
+                if (!met && !rendezvous.SignalAndWait(TimeSpan.FromSeconds(10)))
+                    throw new TimeoutException("The other episode was not executing concurrently.");
+                met = true;
+                return default;
+            }
         }
 
         private static void AdvanceUntil(EvolutionSession session, Func<bool> condition)
@@ -210,6 +287,7 @@ namespace Eden.Tests.EditMode
 
         private static void AssertSameEvaluation(GenerationEvaluation actual, GenerationEvaluation expected)
         {
+            Assert.That(actual.Episodes, Is.EqualTo(expected.Episodes), "every ordered episode result is identical");
             Assert.That(actual.Generation, Is.EqualTo(expected.Generation));
             Assert.That(actual.Mode, Is.EqualTo(expected.Mode));
             Assert.That(actual.Seeds, Is.EqualTo(expected.Seeds));
