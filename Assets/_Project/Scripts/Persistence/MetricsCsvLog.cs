@@ -13,7 +13,8 @@ namespace Eden.Persistence
         public const string Header =
             "tick,simulated_seconds,population,food_available,food_eaten_window," +
             "starvation_deaths_window,old_age_deaths_window,mean_energy,total_food_eaten,births_window," +
-            "births_refused_window,max_generation,extinct";
+            "births_refused_window,max_generation,extinct,dehydration_deaths_window,contacts_per_tick_window," +
+            "births_blocked_window,respawns_delayed_window";
 
         private CsvFile file;
 
@@ -50,7 +51,11 @@ namespace Eden.Persistence
                 sample.BirthsInWindow.ToString(culture),
                 sample.BirthsRefusedInWindow.ToString(culture),
                 sample.MaxGeneration.ToString(culture),
-                sample.Extinct ? "1" : "0");
+                sample.Extinct ? "1" : "0",
+                sample.DehydrationDeathsInWindow.ToString(culture),
+                sample.ContactsPerTick.ToString("0.###", culture),
+                sample.BirthsBlockedInWindow.ToString(culture),
+                sample.RespawnsDelayedInWindow.ToString(culture));
         }
 
         public void Dispose()
