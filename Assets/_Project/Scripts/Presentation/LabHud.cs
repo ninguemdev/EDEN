@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Eden.Application;
 using Eden.Domain;
+using Eden.Evolution;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -12,8 +13,9 @@ namespace Eden.Presentation
     {
         public LabChoice(LabMode mode, int preset, int seed, LabBrainKind brain, bool evolvingBody = false,
             bool neat = false, bool eyes = false, bool evolvingEyes = false, bool solidBodies = false,
-            ObstacleLayout obstacles = ObstacleLayout.None)
+            ObstacleLayout obstacles = ObstacleLayout.None, ScenarioSettings scenario = null)
         {
+            Scenario = scenario;
             SolidBodies = solidBodies || obstacles != ObstacleLayout.None;
             Obstacles = obstacles;
             Eyes = eyes || evolvingEyes;
@@ -51,6 +53,12 @@ namespace Eden.Presentation
 
         /// <summary>Obstacle layout of the arena; any layout but none implies <see cref="SolidBodies"/>.</summary>
         public ObstacleLayout Obstacles { get; }
+
+        /// <summary>
+        /// Arena size and resources of both modes (its solid bodies and obstacles are the two properties above); null
+        /// for the 50 × 50 control with the template's resources.
+        /// </summary>
+        public ScenarioSettings Scenario { get; }
     }
 
     /// <summary>
@@ -71,6 +79,18 @@ namespace Eden.Presentation
         /// <summary>Arena of both modes; obstacles come only with solid bodies.</summary>
         public static readonly string[] ArenaChoices =
             { "Aberta (sem colisão; controle)", "Corpos sólidos", "Sólidos + pilares", "Sólidos + corredor" };
+
+        /// <summary>Arena sizes, in the order of <see cref="ScenarioSettings.PresetSides"/>.</summary>
+        public static readonly string[] SizeChoices = { "50 × 50 (controle)", "100 × 100", "200 × 200" };
+
+        /// <summary>How resources follow the size, in <see cref="ResourceScaling"/> order.</summary>
+        public static readonly string[] ResourceChoices =
+            { "Mantém a densidade (×área)", "Mantém a quantidade" };
+
+        /// <summary>Water layouts, in <see cref="WaterLayout"/> order; water implies solid bodies.</summary>
+        public static readonly string[] WaterChoices = { "Sem água", "Um lago", "Dois lagos" };
+
+        public static readonly string[] WaterSupplyChoices = { "Limitada (recarrega)", "Inesgotável (controle)" };
 
         private const string MlpNetworkTitle = "Rede neural (feed-forward: sem memória nem aprendizado)";
         private const string MlpNetworkLegend = "Neurônios: ativação (verde +, vermelho −). Linhas: peso × sinal.";
@@ -97,6 +117,20 @@ namespace Eden.Presentation
         private DropdownField algorithmField;
         private DropdownField sensesField;
         private DropdownField arenaField;
+        private DropdownField sizeField;
+        private DropdownField resourcesField;
+        private IntegerField foodField;
+        private FloatField foodEnergyField;
+        private FloatField foodRespawnField;
+        private DropdownField waterField;
+        private DropdownField waterSupplyField;
+        private FloatField waterCapacityField;
+        private FloatField waterRechargeField;
+        private FloatField episodeField;
+        private FloatField maxAgeField;
+        private FloatField initialEnergyField;
+        private float customSide = ScenarioSettings.ControlSide;
+        private ScenarioSettings shownScenario = new ScenarioSettings();
         private Label networkTitle;
         private Label networkLegend;
         private IntegerField seedField;
@@ -278,6 +312,7 @@ namespace Eden.Presentation
             algorithmField.SetValueWithoutNotify(AlgorithmChoices[choice.Neat || choice.Eyes ? 1 : 0]);
             sensesField.SetValueWithoutNotify(SensesChoices[choice.EvolvingEyes ? 2 : choice.Eyes ? 1 : 0]);
             arenaField.SetValueWithoutNotify(ArenaChoices[ArenaIndex(choice.SolidBodies, choice.Obstacles)]);
+            ShowScenario(choice.Scenario ?? new ScenarioSettings());
             seedField.SetValueWithoutNotify(choice.Seed);
             UpdateBrainField();
             resumeButton.style.display = evolutionAvailable && choice.Mode == LabMode.SharedWorld
@@ -303,7 +338,56 @@ namespace Eden.Presentation
             return new LabChoice((LabMode)Math.Max(0, modeField.index), Math.Max(0, presetField.index),
                 Math.Max(0, seedField.value), (LabBrainKind)brain, bodyField.index == 1, algorithmField.index == 1,
                 sensesField.index >= 1, sensesField.index == 2, arena >= 1,
-                arena == 2 ? ObstacleLayout.Pillars : arena == 3 ? ObstacleLayout.Corridor : ObstacleLayout.None);
+                arena == 2 ? ObstacleLayout.Pillars : arena == 3 ? ObstacleLayout.Corridor : ObstacleLayout.None,
+                ReadScenario());
+        }
+
+        // The scenario fields; a food count of 0 keeps the mode's own (the preset's or the episodes'), and a size that is
+        // not one of the presets (from a loaded run or the command line) stays as it was. A number still showing what
+        // the HUD put there keeps what it stood for, so an untouched field never overrides the run's own rules.
+        private ScenarioSettings ReadScenario()
+        {
+            var shown = shownScenario;
+            var defaults = new SimulationSettings();
+            return new ScenarioSettings
+            {
+                ArenaSide = sizeField.index >= 0 ? ScenarioSettings.PresetSides[sizeField.index] : customSide,
+                Scaling = resourcesField.index == 1 ? ResourceScaling.KeepQuantity : ResourceScaling.KeepDensity,
+                Food = foodField.value > 0 ? foodField.value : (int?)null,
+                FoodEnergy = Edited(foodEnergyField, shown.FoodEnergy, defaults.FoodEnergy),
+                FoodRespawnSeconds = Edited(foodRespawnField, shown.FoodRespawnSeconds, defaults.FoodRespawnSeconds),
+                Water = (WaterLayout)Math.Max(0, waterField.index),
+                InexhaustibleWater = waterSupplyField.index == 1,
+                WaterCapacity = Edited(waterCapacityField, shown.WaterCapacity, WaterLayouts.DefaultCapacity),
+                WaterRechargePerSecond = Edited(waterRechargeField, shown.WaterRechargePerSecond,
+                    WaterLayouts.DefaultRechargePerSecond),
+                EpisodeSeconds = Edited(episodeField, shown.EpisodeSeconds, new EvolutionSettings().EpisodeSeconds),
+                MaxAgeSeconds = Edited(maxAgeField, shown.MaxAgeSeconds, defaults.MaxAgeSeconds),
+                InitialEnergy = Edited(initialEnergyField, shown.InitialEnergy, defaults.InitialEnergy)
+            };
+
+            float? Edited(FloatField field, float? shownValue, float shownDefault) =>
+                field.value == (shownValue ?? shownDefault) ? shownValue : field.value;
+        }
+
+        private void ShowScenario(ScenarioSettings scenario)
+        {
+            shownScenario = scenario.Clone();
+            var size = Array.IndexOf(ScenarioSettings.PresetSides, scenario.ArenaSide);
+            customSide = scenario.ArenaSide;
+            sizeField.SetValueWithoutNotify(size >= 0 ? SizeChoices[size] : $"{scenario.ArenaSide:0.#} × {scenario.ArenaSide:0.#}");
+            resourcesField.SetValueWithoutNotify(ResourceChoices[(int)scenario.Scaling]);
+            foodField.SetValueWithoutNotify(scenario.Food ?? 0);
+            var defaults = new SimulationSettings();
+            foodEnergyField.SetValueWithoutNotify(scenario.FoodEnergy ?? defaults.FoodEnergy);
+            foodRespawnField.SetValueWithoutNotify(scenario.FoodRespawnSeconds ?? defaults.FoodRespawnSeconds);
+            waterField.SetValueWithoutNotify(WaterChoices[(int)scenario.Water]);
+            waterSupplyField.SetValueWithoutNotify(WaterSupplyChoices[scenario.InexhaustibleWater ? 1 : 0]);
+            waterCapacityField.SetValueWithoutNotify(scenario.WaterCapacity ?? WaterLayouts.DefaultCapacity);
+            waterRechargeField.SetValueWithoutNotify(scenario.WaterRechargePerSecond ?? WaterLayouts.DefaultRechargePerSecond);
+            episodeField.SetValueWithoutNotify(scenario.EpisodeSeconds ?? new EvolutionSettings().EpisodeSeconds);
+            maxAgeField.SetValueWithoutNotify(scenario.MaxAgeSeconds ?? defaults.MaxAgeSeconds);
+            initialEnergyField.SetValueWithoutNotify(scenario.InitialEnergy ?? defaults.InitialEnergy);
         }
 
         // Index into ArenaChoices: the open control, solid bodies, then one entry per obstacle layout.
@@ -324,7 +408,7 @@ namespace Eden.Presentation
                      element != null;
                      element = element.parent)
                 {
-                    if (element == seedField || element == seedGenomesField)
+                    if (element is TextField || element is IntegerField || element is FloatField)
                         return true;
                 }
 
@@ -371,6 +455,58 @@ namespace Eden.Presentation
             algorithmField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             sensesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             seedGenomesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+            episodeField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+        }
+
+        // The scenario fields start at the control's values. A value the simulation would refuse (not a number, zero or
+        // negative where a positive one is needed, above the limits) goes back to the previous one, so Start never fails.
+        private void BindScenario(VisualElement root)
+        {
+            var defaults = new SimulationSettings();
+            sizeField = root.Q<DropdownField>("scenario-size-field");
+            sizeField.choices = new List<string>(SizeChoices);
+            sizeField.index = 0;
+            resourcesField = root.Q<DropdownField>("scenario-resources-field");
+            resourcesField.choices = new List<string>(ResourceChoices);
+            resourcesField.index = 0;
+            foodField = root.Q<IntegerField>("scenario-food-field");
+            foodField.RegisterValueChangedCallback(change =>
+            {
+                // At most what still fits 200 × 200 with density scaling (×16).
+                if (change.newValue < 0 || change.newValue > SimulationConfig.MaxFood / 16)
+                    foodField.SetValueWithoutNotify(change.previousValue);
+            });
+            foodEnergyField = Bounded("scenario-food-energy-field", defaults.FoodEnergy, false, SimulationConfig.MaxWater);
+            foodRespawnField = Bounded("scenario-food-respawn-field", defaults.FoodRespawnSeconds, false,
+                SimulationConfig.MaxDurationSeconds);
+            waterField = root.Q<DropdownField>("scenario-water-field");
+            waterField.choices = new List<string>(WaterChoices);
+            waterField.index = 0;
+            waterSupplyField = root.Q<DropdownField>("scenario-water-supply-field");
+            waterSupplyField.choices = new List<string>(WaterSupplyChoices);
+            waterSupplyField.index = 0;
+            waterCapacityField = Bounded("scenario-water-capacity-field", WaterLayouts.DefaultCapacity, false,
+                SimulationConfig.MaxWater / 16f);
+            waterRechargeField = Bounded("scenario-water-recharge-field", WaterLayouts.DefaultRechargePerSecond, true,
+                SimulationConfig.MaxWater / 16f);
+            episodeField = Bounded("scenario-episode-field", new EvolutionSettings().EpisodeSeconds, false,
+                EvaluationPlan.MaxEpisodeSeconds);
+            maxAgeField = Bounded("scenario-max-age-field", defaults.MaxAgeSeconds, false,
+                SimulationConfig.MaxDurationSeconds);
+            initialEnergyField = Bounded("scenario-initial-energy-field", defaults.InitialEnergy, false, defaults.MaxEnergy);
+
+            FloatField Bounded(string name, float initial, bool zeroAllowed, float max)
+            {
+                var field = root.Q<FloatField>(name);
+                field.SetValueWithoutNotify(initial);
+                field.RegisterValueChangedCallback(change =>
+                {
+                    var value = change.newValue;
+                    if (float.IsNaN(value) || value > max || value < 0f || (value == 0f && !zeroAllowed))
+                        field.SetValueWithoutNotify(change.previousValue);
+                });
+                return field;
+            }
         }
 
         private bool Bind()
@@ -440,6 +576,7 @@ namespace Eden.Presentation
             arenaField = root.Q<DropdownField>("arena-field");
             arenaField.choices = new List<string>(ArenaChoices);
             arenaField.index = 0;
+            BindScenario(root);
             // Eyes need NEAT: choosing eyes picks NEAT, and choosing the MLP control goes back to the legacy senses.
             sensesField.RegisterValueChangedCallback(change =>
             {

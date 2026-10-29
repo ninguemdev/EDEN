@@ -252,6 +252,7 @@ namespace Eden.Presentation
         private IReadOnlyList<KeyValuePair<string, string>> Scenario(LabRunner runner)
         {
             var culture = CultureInfo.InvariantCulture;
+            var config = runner.Simulation.World.Config;
             return new[]
             {
                 Pair("mode", runner.Mode == LabMode.IsolatedEvolution ? "evolution" : "shared"),
@@ -260,6 +261,12 @@ namespace Eden.Presentation
                 Pair("seed", runner.Seed.ToString(culture)),
                 Pair("speed", runner.Clock.IsUnpaced ? "max" : runner.Clock.RequestedSpeed.ToString("0.###", culture) + "x"),
                 Pair("simulated_ticks_per_second", runner.Simulation.World.Config.TicksPerSecond.ToString(culture)),
+                Pair("arena", config.ArenaWidth.ToString(culture) + "x" + config.ArenaHeight.ToString(culture) +
+                              (runner.Scenario.Describe() is string scenario ? " (" + scenario + ")" : string.Empty)),
+                Pair("food", config.InitialFood.ToString(culture)),
+                Pair("bodies", config.SolidBodies ? "solid" : "points"),
+                Pair("obstacles", config.Obstacles.Count.ToString(culture)),
+                Pair("water_sources", config.Water.Count.ToString(culture)),
                 Pair("max_speed_budget_ms", (LabRunner.MaxSpeedBudgetSeconds * 1000).ToString("0.#", culture)),
                 Pair("warmup_seconds", warmupSeconds.ToString("0.###", culture)),
                 Pair("selected_creature", runner.Selected.HasValue ? runner.Selected.Value.Value.ToString(culture) : "none"),

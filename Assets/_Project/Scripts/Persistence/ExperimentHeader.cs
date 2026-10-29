@@ -18,8 +18,9 @@ namespace Eden.Persistence
 
         /// <param name="validationInterval">Generations between validations; 0 when the run is never validated.</param>
         /// <param name="preset">Lab preset name, or null outside the lab.</param>
+        /// <param name="scenario">Arena size and resource scaling (<see cref="ScenarioSettings.Describe"/>), or null for the control.</param>
         public ExperimentHeader(EvolutionSettings settings, int validationInterval, string appVersion, DateTime createdUtc,
-            string preset = null, ResumeOrigin resumedFrom = null)
+            string preset = null, ResumeOrigin resumedFrom = null, string scenario = null)
         {
             if (settings == null)
                 throw new ArgumentNullException(nameof(settings));
@@ -34,6 +35,7 @@ namespace Eden.Persistence
             CreatedUtc = createdUtc.ToUniversalTime();
             Preset = preset;
             ResumedFrom = resumedFrom;
+            Scenario = scenario;
             ConfigHash = CheckpointCodec.Hash(SettingsJson().ToCompactString());
         }
 
@@ -44,6 +46,9 @@ namespace Eden.Persistence
         public DateTime CreatedUtc { get; }
         public string Preset { get; }
         public ResumeOrigin ResumedFrom { get; }
+
+        /// <summary>Arena size and resource scaling of a scenario other than the control; null otherwise.</summary>
+        public string Scenario { get; }
 
         /// <summary>FNV-1a 64 of the canonical settings text.</summary>
         public ulong ConfigHash { get; }
@@ -169,11 +174,47 @@ namespace Eden.Persistence
                 lines.Add("water_senses=" + (Plan.Contract.SensesWater
                     ? "eyes see water (not through obstacles; water hides nothing);hydration is a brain input"
                     : "none;the legacy senses neither see water nor feel thirst"));
+            lines.AddRange(ResourceLines(world, 1));
+            if (Scenario != null)
+                lines.Add("scenario=" + Scenario);
             if (Preset != null)
                 lines.Add("preset=" + Preset);
             if (ResumedFrom != null)
                 lines.AddRange(ResumedFrom.Describe());
             return lines;
+        }
+
+        /// <summary>
+        /// The food and reserve rules and what the scenario offers (<see cref="ResourceSupply"/>) to its
+        /// <paramref name="creatures"/>: densities per 100 square units and the most energy (and water) per second, in
+        /// all and per creature, with what a creature spends at rest.
+        /// </summary>
+        internal static IEnumerable<string> ResourceLines(SimulationConfig world, int creatures)
+        {
+            var culture = CultureInfo.InvariantCulture;
+            var supply = new ResourceSupply(world, creatures);
+            yield return "resources=food_energy " + world.FoodEnergy.ToString(culture) + ";food_respawn_seconds " +
+                         world.FoodRespawnSeconds.ToString(culture) + ";initial_energy " +
+                         world.InitialEnergy.ToString(culture) + ";max_age_seconds " +
+                         world.MaxAgeSeconds.ToString(culture);
+            var line = "supply=creatures " + supply.Creatures.ToString(culture) +
+                       ";creature_density " + Number(supply.CreatureDensity) +
+                       ";food_density " + Number(supply.FoodDensity) +
+                       ";food_stock " + Number(supply.FoodStock) +
+                       ";food_energy_per_second " + Number(supply.FoodEnergyPerSecond) +
+                       ";per_creature " + Number(supply.FoodEnergyPerCreaturePerSecond) +
+                       ";resting_cost_per_second " + Number(supply.RestingCostPerSecond) +
+                       ";creatures_fed_at_rest " + Number(supply.CreaturesFedAtRest) +
+                       ";densities per 100 square units;energy per second if every item is eaten when it respawns";
+            if (supply.WaterSources > 0)
+                line += supply.InexhaustibleWater
+                    ? ";water inexhaustible"
+                    : ";water_stock " + Number(supply.WaterStock) + ";water_per_second " + Number(supply.WaterPerSecond) +
+                      ";water_per_creature_per_second " + Number(supply.WaterPerCreaturePerSecond) +
+                      ";hydration_loss_per_second " + Number(supply.HydrationLossPerSecond);
+            yield return line;
+
+            string Number(double value) => value.ToString("0.####", culture);
         }
 
         /// <summary>

@@ -45,6 +45,7 @@ namespace Eden.Presentation
             }
             text.AppendLine($"Preset {PresetLabel(preset)}  ·  Seed {config.Seed}");
             text.AppendLine("Arena: " + ArenaLabel(config));
+            text.AppendLine(Supply(config, config.InitialPopulation));
             if (config.SolidBodies)
             {
                 text.AppendLine($"Contatos no último tick: {simulation.LastContacts} pares de corpos encostados");
@@ -105,6 +106,7 @@ namespace Eden.Presentation
                 ? "Corpo fixo (controle): todos com o corpo de referência"
                 : "Corpo evolutivo: tamanho, velocidade, sensor e eficiência herdados e mutados, cada um com custo");
             text.AppendLine("Arena dos episódios: " + ArenaLabel(episode.Simulation.World.Config));
+            text.AppendLine(Supply(episode.Simulation.World.Config, 1));
 
             var last = session.LastTraining?.Summary;
             var structure = session.LastTraining?.Neat;
@@ -302,6 +304,31 @@ namespace Eden.Presentation
                                     ? "sem espaço para o filho ao lado"
                                     : "população no teto"));
             return text.ToString().TrimEnd();
+        }
+
+        /// <summary>
+        /// Size, densities and what the scenario offers its <paramref name="creatures"/> (see <see cref="ResourceSupply"/>):
+        /// upper bounds of food energy and water per second, in all and per creature, next to what a creature spends.
+        /// </summary>
+        public static string Supply(SimulationConfig config, int creatures)
+        {
+            var supply = new ResourceSupply(config, creatures);
+            var text = new StringBuilder();
+            text.AppendLine($"Cenário {config.ArenaWidth:0.#}×{config.ArenaHeight:0.#}  ·  {supply.FoodItems} comidas " +
+                            $"({supply.FoodDensity:0.###} por 100 u²)  ·  {supply.Creatures} criatura(s) " +
+                            $"({supply.CreatureDensity:0.###} por 100 u²)");
+            text.Append($"Oferta de comida: até {supply.FoodEnergyPerSecond:0.##} energia/s, " +
+                        $"{supply.FoodEnergyPerCreaturePerSecond:0.##} por criatura (repouso gasta " +
+                        $"{supply.RestingCostPerSecond:0.##}/s; daria para {supply.CreaturesFedAtRest:0.#} em repouso)  ·  " +
+                        $"estoque inicial {supply.FoodStock:0} ({config.FoodEnergy:0.##} por item, volta em " +
+                        $"{config.FoodRespawnSeconds:0.##} s)");
+            if (supply.WaterSources > 0)
+                text.Append("\nOferta de água: " + (supply.InexhaustibleWater
+                    ? $"{supply.WaterSources} fonte(s) inesgotável(is) (controle)"
+                    : $"{supply.WaterSources} fonte(s), recarga {supply.WaterPerSecond:0.##}/s, " +
+                      $"{supply.WaterPerCreaturePerSecond:0.###} por criatura (sede {supply.HydrationLossPerSecond:0.##}/s)  ·  " +
+                      $"reserva {supply.WaterStock:0}"));
+            return text.ToString();
         }
 
         /// <summary>The arena in words: open or solid, and its obstacle layout.</summary>

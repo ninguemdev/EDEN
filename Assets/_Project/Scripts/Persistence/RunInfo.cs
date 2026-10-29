@@ -9,8 +9,9 @@ namespace Eden.Persistence
     /// <summary>Plain key=value description of a shared world run, written next to its metrics.</summary>
     public static class RunInfo
     {
+        /// <param name="scenario">Arena size and resource scaling (see the scenario's description), or null for the control.</param>
         public static IReadOnlyList<string> Describe(SimulationConfig config, string brainName, string appVersion,
-            DateTime createdUtc)
+            DateTime createdUtc, string scenario = null)
         {
             if (config == null)
                 throw new ArgumentNullException(nameof(config));
@@ -42,6 +43,9 @@ namespace Eden.Persistence
             }
 
             lines.AddRange(ExperimentHeader.WaterLines(config));
+            lines.AddRange(ExperimentHeader.ResourceLines(config, config.InitialPopulation));
+            if (scenario != null)
+                lines.Add("scenario=" + scenario);
 
             return lines;
         }

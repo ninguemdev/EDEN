@@ -13,6 +13,20 @@
                     <ui:DropdownField name="algorithm-field" label="Algoritmo" class="lab-field" />
                     <ui:DropdownField name="senses-field" label="Sentidos" class="lab-field" />
                     <ui:DropdownField name="arena-field" label="Arena" class="lab-field" />
+                    <ui:Foldout name="scenario-foldout" text="Cenário: tamanho e recursos" value="false" class="lab-field">
+                        <ui:DropdownField name="scenario-size-field" label="Tamanho" class="lab-field" />
+                        <ui:DropdownField name="scenario-resources-field" label="Recursos" class="lab-field" />
+                        <ui:IntegerField name="scenario-food-field" label="Comida no 50×50 (0 = do modo)" value="0" class="lab-field" />
+                        <ui:FloatField name="scenario-food-energy-field" label="Energia por comida" class="lab-field" />
+                        <ui:FloatField name="scenario-food-respawn-field" label="Comida volta em (s)" class="lab-field" />
+                        <ui:DropdownField name="scenario-water-field" label="Água (implica sólidos)" class="lab-field" />
+                        <ui:DropdownField name="scenario-water-supply-field" label="Oferta de água" class="lab-field" />
+                        <ui:FloatField name="scenario-water-capacity-field" label="Reserva por lago (50×50)" class="lab-field" />
+                        <ui:FloatField name="scenario-water-recharge-field" label="Recarga por lago/s (50×50)" class="lab-field" />
+                        <ui:FloatField name="scenario-episode-field" label="Episódio (s)" class="lab-field" />
+                        <ui:FloatField name="scenario-max-age-field" label="Idade máxima (s)" class="lab-field" />
+                        <ui:FloatField name="scenario-initial-energy-field" label="Energia inicial" class="lab-field" />
+                    </ui:Foldout>
                     <ui:IntegerField name="seed-field" label="Seed" value="1" class="lab-field" />
                     <ui:VisualElement class="lab-row">
                         <ui:TextField name="seed-genomes-field" label="Pool de genomas" class="lab-field" style="flex-grow: 1;" />

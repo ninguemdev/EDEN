@@ -48,7 +48,10 @@ namespace Eden.Presentation
     /// -eden-brain heuristic|random|neural, -eden-body fixed|evolving, -eden-algorithm mlp|neat, -eden-senses legacy|eyes,
     /// -eden-eyes fixed|evolving, -eden-solid on|off, -eden-obstacles none|pillars|corridor (a layout implies solid
     /// bodies; both apply to the shared world and to the evolution's episodes),
-    /// -eden-reproduction on|off,
+    /// -eden-reproduction on|off, the scenario as in the batch (see <see cref="ScenarioSettings"/>): -eden-arena SIDE,
+    /// -eden-resources density|quantity, -eden-food N, -eden-food-energy E, -eden-food-respawn SECONDS,
+    /// -eden-water none|pond|ponds, -eden-water-supply finite|inexhaustible, -eden-water-capacity C,
+    /// -eden-water-recharge R, -eden-episode-seconds S, -eden-max-age SECONDS, -eden-initial-energy E,
     /// -eden-seed N,
     /// -eden-select ID, -eden-max, and for a measured run
     /// -eden-benchmark SECONDS [-eden-benchmark-warmup SECONDS] [-eden-benchmark-output DIR] (see <see cref="LabBenchmark"/>).
@@ -78,6 +81,7 @@ namespace Eden.Presentation
         [SerializeField] private bool solidBodies;
         [Tooltip("Obstacles of the arena (shared world and episodes); any layout but None makes the bodies solid.")]
         [SerializeField] private ObstacleLayout obstacles;
+        private ScenarioSettings scenario = new ScenarioSettings();
         [SerializeField] private bool writeMetrics = true;
         [SerializeField] private WorldView worldView;
         [SerializeField] private LabHud hud;
@@ -126,6 +130,9 @@ namespace Eden.Presentation
 
         /// <summary>Obstacle layout of the next run's arena (see <see cref="LabChoice.Obstacles"/>).</summary>
         public ObstacleLayout Obstacles => obstacles;
+
+        /// <summary>Arena size and resources of the next run (a copy; see <see cref="LabChoice.Scenario"/>).</summary>
+        public ScenarioSettings Scenario => scenario.Clone();
 
         /// <summary>Totals of the physical arena since the shared world started or was loaded.</summary>
         public ArenaTally ArenaTally => arenaTally;
@@ -201,6 +208,7 @@ namespace Eden.Presentation
             evolvingEyes = choice.EvolvingEyes;
             solidBodies = choice.SolidBodies;
             obstacles = choice.Obstacles;
+            scenario = choice.Scenario?.Clone() ?? new ScenarioSettings();
             StartRun();
         }
 
@@ -233,7 +241,7 @@ namespace Eden.Presentation
             CloseMetricsLog();
             mode = LabMode.IsolatedEvolution;
             sharedGenomes = null;
-            ReadArena(Evolution.Evolution.Settings.World);
+            ReadArena(Evolution.Evolution.Settings.World, Evolution.Evolution.Settings.EpisodeSeconds);
             ClearSelection();
             ShowEpisode();
             hud?.ShowChoice(CurrentChoice(), true);
@@ -348,7 +356,10 @@ namespace Eden.Presentation
             neat = session != null && session.Evolution.Plan.Algorithm == EvolutionAlgorithm.Neat;
             eyes = session != null && session.Evolution.Plan.Senses == Senses.Eyes;
             evolvingEyes = session != null && session.Evolution.Plan.EvolvingEyes;
-            ReadArena(loadedMode == LabMode.IsolatedEvolution ? session.Evolution.Settings.World : saved.SharedWorld.Settings);
+            if (loadedMode == LabMode.IsolatedEvolution)
+                ReadArena(session.Evolution.Settings.World, session.Evolution.Settings.EpisodeSeconds);
+            else
+                ReadArena(saved.SharedWorld.Settings, null);
             arenaTally = default;
             Evolution = session;
             EvolutionDirectory = null;
@@ -820,7 +831,7 @@ namespace Eden.Presentation
             evolutionSettings.Algorithm = neat || eyes || evolvingEyes ? EvolutionAlgorithm.Neat : EvolutionAlgorithm.Mlp;
             evolutionSettings.Senses = eyes || evolvingEyes ? Senses.Eyes : Senses.Legacy;
             evolutionSettings.EvolvingEyes = evolvingEyes;
-            ApplyArena(evolutionSettings.World);
+            AppliedScenario().Apply(evolutionSettings);
             Evolution = CreateEvolution(evolutionSettings);
             BrainName = EvolutionBrainName(Evolution);
             if (writeMetrics)
@@ -1105,6 +1116,43 @@ namespace Eden.Presentation
                             : value == "corridor" ? ObstacleLayout.Corridor
                             : ObstacleLayout.None;
                         break;
+                    case "-eden-arena" when TryNumber(value, out var side):
+                        scenario.ArenaSide = side;
+                        break;
+                    case "-eden-resources" when value == "density" || value == "quantity":
+                        scenario.Scaling = value == "density" ? ResourceScaling.KeepDensity : ResourceScaling.KeepQuantity;
+                        break;
+                    case "-eden-food" when int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var food):
+                        scenario.Food = food;
+                        break;
+                    case "-eden-food-energy" when TryNumber(value, out var foodEnergy):
+                        scenario.FoodEnergy = foodEnergy;
+                        break;
+                    case "-eden-food-respawn" when TryNumber(value, out var respawn):
+                        scenario.FoodRespawnSeconds = respawn;
+                        break;
+                    case "-eden-water" when value == "none" || value == "pond" || value == "ponds":
+                        scenario.Water = value == "pond" ? WaterLayout.Pond
+                            : value == "ponds" ? WaterLayout.Ponds : WaterLayout.None;
+                        break;
+                    case "-eden-water-supply" when value == "finite" || value == "inexhaustible":
+                        scenario.InexhaustibleWater = value == "inexhaustible";
+                        break;
+                    case "-eden-water-capacity" when TryNumber(value, out var capacity):
+                        scenario.WaterCapacity = capacity;
+                        break;
+                    case "-eden-water-recharge" when TryNumber(value, out var recharge):
+                        scenario.WaterRechargePerSecond = recharge;
+                        break;
+                    case "-eden-episode-seconds" when TryNumber(value, out var episodeSeconds):
+                        scenario.EpisodeSeconds = episodeSeconds;
+                        break;
+                    case "-eden-max-age" when TryNumber(value, out var maxAge):
+                        scenario.MaxAgeSeconds = maxAge;
+                        break;
+                    case "-eden-initial-energy" when TryNumber(value, out var initialEnergy):
+                        scenario.InitialEnergy = initialEnergy;
+                        break;
                     case "-eden-reproduction" when value == "on" || value == "off":
                         settings.Reproduction = value == "on";
                         break;
@@ -1126,6 +1174,9 @@ namespace Eden.Presentation
             }
 
             return select;
+
+            bool TryNumber(string text, out float number) =>
+                float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out number) && number >= 0f;
         }
 
         // Founder genomes: evolved creature id i is individuals[i - 1] (the same individuals give the same brains after a
@@ -1210,20 +1261,27 @@ namespace Eden.Presentation
         }
 
         private LabChoice CurrentChoice() =>
-            new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes, solidBodies, obstacles);
+            new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes, solidBodies, obstacles,
+                scenario.Clone());
 
-        // The lab's arena choice, the same for the shared world and the evolution's episodes.
-        private void ApplyArena(SimulationSettings world)
+        // The lab's scenario with its arena choice, the same for the shared world and the evolution's episodes.
+        private ScenarioSettings AppliedScenario()
         {
-            world.SolidBodies = SolidBodies;
-            world.Obstacles = ObstacleLayouts.Create(obstacles, world);
+            var applied = scenario.Clone();
+            applied.SolidBodies = SolidBodies;
+            applied.Obstacles = obstacles;
+            return applied;
         }
 
-        // What a saved or resumed run's arena was, so the controls show it (hand-placed obstacles show as solid bodies).
-        private void ReadArena(SimulationSettings world)
+        private void ApplyArena(SimulationSettings world) => AppliedScenario().Apply(world);
+
+        // What a saved or resumed run's scenario was, so the controls show it (hand-placed obstacles show as solid
+        // bodies; see ScenarioSettings.Read for the rest).
+        private void ReadArena(SimulationSettings world, float? episodeSeconds)
         {
             solidBodies = world.SolidBodies;
             obstacles = ObstacleLayouts.Identify(world) ?? ObstacleLayout.None;
+            scenario = ScenarioSettings.Read(world, episodeSeconds);
         }
 
         private EvolutionSession EvolutionShown => mode == LabMode.IsolatedEvolution ? Evolution : null;
@@ -1237,7 +1295,8 @@ namespace Eden.Presentation
             {
                 var directory = CreateRunDirectory("SimulationRuns", $"seed{config.Seed}-{BrainName}");
                 File.WriteAllLines(Path.Combine(directory, "run-info.txt"),
-                    RunInfo.Describe(config, BrainName, UnityEngine.Application.version, DateTime.UtcNow));
+                    RunInfo.Describe(config, BrainName, UnityEngine.Application.version, DateTime.UtcNow,
+                        scenario.Describe()));
                 metricsLog = new MetricsCsvLog(Path.Combine(directory, "metrics.csv"));
                 if (genealogy != null)
                     genealogyLog = new GenealogyCsvLog(Path.Combine(directory, "genealogy.csv"), genealogy);
@@ -1259,7 +1318,7 @@ namespace Eden.Presentation
             {
                 var directory = CreateRunDirectory("EvolutionRuns", $"lab-seed{seed}-{Preset.Name}");
                 var header = new ExperimentHeader(Evolution.Evolution.Settings, Evolution.ValidationInterval,
-                    UnityEngine.Application.version, DateTime.UtcNow, Preset.Name, resumedFrom);
+                    UnityEngine.Application.version, DateTime.UtcNow, Preset.Name, resumedFrom, scenario.Describe());
                 var log = new EvolutionCsvLog(directory, header);
                 evolutionLog = log;
                 EvolutionDirectory = directory;

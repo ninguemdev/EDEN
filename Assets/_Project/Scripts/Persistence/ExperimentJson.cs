@@ -187,7 +187,22 @@ namespace Eden.Persistence
                 .Add("obstacleLayout", JsonValue.Of(ExperimentHeader.LayoutName(world)))
                 .Add("obstacles", JsonValue.Of(world.Obstacles.Count))
                 .Add("waterSources", JsonValue.Of(world.Water.Count))
-                .Add("freeRegions", world.FreeSpace == null ? JsonValue.Null() : JsonValue.Of(world.FreeSpace.Regions));
+                .Add("freeRegions", world.FreeSpace == null ? JsonValue.Null() : JsonValue.Of(world.FreeSpace.Regions))
+                .Add("supply", Supply(new ResourceSupply(world, 1)));
+
+        // What the episode offers its one creature (see ResourceSupply); infinite water figures are null.
+        private static JsonValue Supply(ResourceSupply supply) =>
+            JsonValue.NewObject()
+                .Add("area", JsonValue.Of(supply.Area))
+                .Add("foodDensity", JsonValue.Of((float)supply.FoodDensity))
+                .Add("foodStock", JsonValue.Of((float)supply.FoodStock))
+                .Add("foodEnergyPerSecond", JsonValue.Of((float)supply.FoodEnergyPerSecond))
+                .Add("foodEnergyPerCreaturePerSecond", JsonValue.Of((float)supply.FoodEnergyPerCreaturePerSecond))
+                .Add("restingCostPerSecond", JsonValue.Of(supply.RestingCostPerSecond))
+                .Add("waterPerSecond", supply.WaterSources == 0 || supply.InexhaustibleWater
+                    ? JsonValue.Null()
+                    : JsonValue.Of((float)supply.WaterPerSecond))
+                .Add("inexhaustibleWater", JsonValue.Of(supply.InexhaustibleWater));
 
         private static JsonValue SummaryOrNull(GenerationSummary summary) =>
             summary == null ? JsonValue.Null() : CheckpointCodec.EncodeSummary(summary);

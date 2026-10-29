@@ -165,8 +165,20 @@ namespace Eden.Domain
 
         public static SimulationConfig CreateDefault(ulong seed) => new SimulationConfig(new SimulationSettings { Seed = seed });
 
+        /// <summary>
+        /// The same validated rules with another seed, sharing what does not depend on it (e.g. <see cref="FreeSpace"/>,
+        /// a grid of up to a million cells in a large arena with barriers) instead of building it again. Identical to a
+        /// config built from the same settings with that seed.
+        /// </summary>
+        public SimulationConfig WithSeed(ulong seed)
+        {
+            var copy = (SimulationConfig)MemberwiseClone();
+            copy.Seed = seed;
+            return copy;
+        }
+
         public int SchemaVersion => CurrentSchemaVersion;
-        public ulong Seed { get; }
+        public ulong Seed { get; private set; }
         public float ArenaWidth { get; }
         public float ArenaHeight { get; }
         public int TicksPerSecond { get; }
