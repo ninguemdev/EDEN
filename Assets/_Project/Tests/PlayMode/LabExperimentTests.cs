@@ -373,6 +373,55 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Controls_ALargerScenario_AppliesToBothModes_AndShowsItsSupply()
+        {
+            var root = runner.Hud.Root;
+            Assert.That(root.Q<DropdownField>("scenario-size-field").value, Is.EqualTo(LabHud.SizeChoices[0]),
+                "the 50 × 50 control is the default");
+            root.Q<DropdownField>("scenario-size-field").index = 1;
+            root.Q<IntegerField>("scenario-food-field").value = 10;
+            root.Q<FloatField>("scenario-food-energy-field").value = 4f;
+            root.Q<DropdownField>("scenario-water-field").index = 1;
+            root.Q<FloatField>("scenario-episode-field").value = 30f;
+            var maxAge = root.Q<FloatField>("scenario-max-age-field");
+            maxAge.value = -5f;
+            yield return null;
+            Assert.That(maxAge.value, Is.EqualTo(180f), "a value the simulation would refuse goes back");
+            yield return StartFromControls(LabMode.SharedWorld, preset: 0, seed: 5);
+
+            var config = runner.Simulation.World.Config;
+            Assert.That((config.ArenaWidth, config.ArenaHeight), Is.EqualTo((100f, 100f)));
+            Assert.That(config.InitialFood, Is.EqualTo(40), "10 in the 50 × 50 control, kept dense");
+            Assert.That(config.FoodEnergy, Is.EqualTo(4f));
+            Assert.That(config.Water.Count, Is.EqualTo(1));
+            Assert.That(config.SolidBodies, Is.True, "water implies solid bodies");
+            StringAssert.Contains("Cenário 100×100", runner.Hud.RunText);
+            StringAssert.Contains("Oferta de comida: até", runner.Hud.RunText);
+            StringAssert.Contains("Oferta de água", runner.Hud.RunText);
+            Assert.That(File.ReadAllLines(Path.Combine(runner.MetricsDirectory, "run-info.txt")),
+                Does.Contain("scenario=arena 100x100;resources keep density (x4 of the 50x50 control)")
+                    .And.Some.StartsWith("supply=creatures 32;"));
+
+            yield return StartFromControls(LabMode.IsolatedEvolution, preset: 0, seed: 3);
+            var episode = runner.Simulation.World.Config;
+            Assert.That(episode.ArenaWidth, Is.EqualTo(100f), "the episodes have the same scenario");
+            Assert.That(episode.InitialFood, Is.EqualTo(40), "the food given replaces the episodes' own");
+            Assert.That(runner.Evolution.Plan.EpisodeSeconds, Is.EqualTo(30f));
+            Assert.That(root.Q<DropdownField>("scenario-size-field").index, Is.EqualTo(1), "the scenario stays");
+            StringAssert.Contains("Cenário 100×100", runner.Hud.RunText);
+            Assert.That(File.ReadAllLines(Path.Combine(runner.EvolutionDirectory, "experiment.txt")),
+                Does.Contain("episode_food=40").And.Some.StartsWith("scenario=arena 100x100"));
+
+            root.Q<DropdownField>("scenario-size-field").index = 0;
+            root.Q<IntegerField>("scenario-food-field").value = 0;
+            root.Q<DropdownField>("scenario-water-field").index = 0;
+            yield return StartFromControls(LabMode.IsolatedEvolution, preset: 0, seed: 3);
+            episode = runner.Simulation.World.Config;
+            Assert.That((episode.ArenaWidth, episode.InitialFood, episode.Water.Count), Is.EqualTo((50f, 32, 0)),
+                "back to the control and the episodes' own food");
+        }
+
+        [UnityTest]
         public IEnumerator Controls_SaveAndLoadAnEvolutionInTheMiddleOfAnEpisode()
         {
             UseTemporaryCheckpoint();
@@ -552,6 +601,8 @@ namespace Eden.Tests.PlayMode
             var json = File.ReadAllText(Path.Combine(directory, "performance.json"));
             StringAssert.Contains("\"build\": \"editor\"", json);
             StringAssert.Contains("\"mode\": \"shared\"", json);
+            StringAssert.Contains("\"arena\": \"50x50\"", json);
+            StringAssert.Contains("\"bodies\": \"points\"", json);
             Assert.That(int.Parse(Regex.Match(json, "\"timedTicks\": ([0-9]+)").Groups[1].Value), Is.GreaterThan(0),
                 "every shared world tick is timed");
             StringAssert.DoesNotContain("\"simulationAllocations\": null", json, "the Editor has the allocation recorder");

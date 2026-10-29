@@ -101,5 +101,29 @@ namespace Eden.Domain
 
         /// <summary>Name of a layout in files and on the command line: none, pond, ponds.</summary>
         public static string Name(WaterLayout layout) => layout.ToString().ToLowerInvariant();
+
+        /// <summary>
+        /// The named layout whose areas the settings' water sources have for their arena, whatever their reserves, or
+        /// null for sources placed by hand. For the lab: the simulation only knows the sources.
+        /// </summary>
+        public static WaterLayout? Identify(SimulationSettings settings)
+        {
+            if (settings == null)
+                throw new ArgumentNullException(nameof(settings));
+            var water = settings.Water ?? Array.Empty<WaterSource>();
+            foreach (WaterLayout layout in Enum.GetValues(typeof(WaterLayout)))
+            {
+                var expected = Create(layout, settings);
+                if (expected.Length != water.Length)
+                    continue;
+                var same = true;
+                for (var i = 0; i < expected.Length && same; i++)
+                    same = expected[i].Area.Equals(water[i].Area);
+                if (same)
+                    return layout;
+            }
+
+            return null;
+        }
     }
 }

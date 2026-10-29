@@ -36,6 +36,13 @@ namespace Eden.Editor
     /// none|pillars|corridor puts that layout in the arena (needs -eden-solid on; default none); -eden-water
     /// none|pond|ponds puts water sources in the arena and gives creatures hydration (needs -eden-solid on; default none),
     /// limited and recharging unless -eden-water-supply inexhaustible (the control; default finite).
+    /// The scenario (see ScenarioSettings) takes each factor apart: -eden-arena SIDE (square arena, default 50, the
+    /// control; the lab offers 50, 100 and 200), -eden-resources density|quantity (whether food items and water reserves
+    /// grow with the area or stay as in the control; default density), -eden-food N (items in the control arena, before
+    /// scaling), -eden-food-energy E, -eden-food-respawn SECONDS, -eden-water-capacity C and -eden-water-recharge R (per
+    /// source in the control arena, before scaling), -eden-episode-seconds S, -eden-max-age SECONDS and
+    /// -eden-initial-energy E. Obstacles and water imply solid bodies. A scenario other than the 50 × 50 control is
+    /// recorded as scenario= in experiment.txt, and every export records its resources and supply.
     /// -eden-seed-genomes DIR starts generation 0 of RunFromCommandLine from every genome file (see GenomeFile) in DIR
     /// instead of random weights (see GenerationalEvolution.FromSeedPool); a genome exported without a fitness of its
     /// own, or with one from another fitness profile, counts as 0. -eden-export-top N DIR writes the N best genomes of the last generation RunFromCommandLine
@@ -58,8 +65,8 @@ namespace Eden.Editor
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
                 var battery = new BatterySettings { Generations = DefaultGenerations };
-                var output = ReadArguments(settings, battery, out var seedGenomes);
-                Run(settings, battery.Generations, output, seedGenomes, ReadExportTop());
+                var output = ReadArguments(settings, battery, out var seedGenomes, out var scenario);
+                Run(settings, battery.Generations, output, seedGenomes, ReadExportTop(), scenario);
             });
         }
 
@@ -69,8 +76,8 @@ namespace Eden.Editor
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
                 var battery = new BatterySettings();
-                var output = ReadArguments(settings, battery, out _);
-                RunBattery(settings, battery, output);
+                var output = ReadArguments(settings, battery, out _, out var scenario);
+                RunBattery(settings, battery, output, scenario);
             });
         }
 
@@ -80,7 +87,7 @@ namespace Eden.Editor
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
                 var battery = new BatterySettings();
-                var output = ReadArguments(settings, battery, out _);
+                var output = ReadArguments(settings, battery, out _, out _);
                 ComparePresets(settings, battery, ReadPresets(), output);
             });
         }
@@ -91,7 +98,7 @@ namespace Eden.Editor
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
                 var battery = new BatterySettings();
-                var output = ReadArguments(settings, battery, out _);
+                var output = ReadArguments(settings, battery, out _, out _);
                 ComparePlasticity(settings, battery, ReadFoodShift(), output);
             });
         }
@@ -102,13 +109,13 @@ namespace Eden.Editor
             {
                 var settings = new EvolutionSettings { ExperimentSeed = 1 };
                 var battery = new BatterySettings();
-                var output = ReadArguments(settings, battery, out _);
+                var output = ReadArguments(settings, battery, out _, out _);
                 AblateBody(settings, battery, ReadVariants(), output);
             });
         }
 
         private static void Run(EvolutionSettings settings, int generations, string output, string seedGenomesDirectory,
-            (int Count, string Directory)? exportTop)
+            (int Count, string Directory)? exportTop, string scenario = null)
         {
             if (generations < 1)
                 throw new ArgumentOutOfRangeException(nameof(generations), "At least one generation is required.");
@@ -125,7 +132,8 @@ namespace Eden.Editor
             }
 
             var directory = output ?? DefaultDirectory($"seed{settings.ExperimentSeed}");
-            var header = new ExperimentHeader(settings, 0, UnityEngine.Application.version, DateTime.UtcNow);
+            var header = new ExperimentHeader(settings, 0, UnityEngine.Application.version, DateTime.UtcNow,
+                scenario: scenario);
             var started = DateTime.UtcNow;
             GenerationReport report = null;
 
@@ -181,7 +189,8 @@ namespace Eden.Editor
             Debug.Log($"EDEN exported top {exported} genomes to {directory}");
         }
 
-        private static void RunBattery(EvolutionSettings settings, BatterySettings battery, string output)
+        private static void RunBattery(EvolutionSettings settings, BatterySettings battery, string output,
+            string scenario)
         {
             var runner = new EvolutionBattery(settings, battery);
             var directory = output ?? DefaultDirectory($"battery-seed{settings.ExperimentSeed}x{battery.Runs}");
@@ -190,7 +199,8 @@ namespace Eden.Editor
             {
                 var result = runner.Run((run, report) =>
                 {
-                    logs[run] ??= RunLog(directory, run, settings.WithExperimentSeed(runner.RunSeed(run)), battery, null);
+                    logs[run] ??= RunLog(directory, run, settings.WithExperimentSeed(runner.RunSeed(run)), battery, null,
+                        scenario);
                     logs[run].Append(report);
                     LogSummary(run, report.Summary);
                 });
@@ -336,10 +346,10 @@ namespace Eden.Editor
         }
 
         private static EvolutionCsvLog RunLog(string directory, int run, EvolutionSettings runSettings,
-            BatterySettings battery, string preset) =>
+            BatterySettings battery, string preset, string scenario = null) =>
             new EvolutionCsvLog(Path.Combine(directory, $"run{run}-seed{runSettings.ExperimentSeed}"),
                 new ExperimentHeader(runSettings, battery.ValidationInterval, UnityEngine.Application.version,
-                    DateTime.UtcNow, preset));
+                    DateTime.UtcNow, preset, scenario: scenario));
 
         private static IReadOnlyList<ExperimentPreset> ReadPresets()
         {
@@ -362,13 +372,14 @@ namespace Eden.Editor
             return ExperimentPreset.All;
         }
 
+        // The scenario's factors are collected first and applied together at the end, so they hold whatever their order
+        // (e.g. obstacles and water are laid out for the arena size given after them).
         private static string ReadArguments(EvolutionSettings settings, BatterySettings battery,
-            out string seedGenomesDirectory)
+            out string seedGenomesDirectory, out string scenarioDescription)
         {
             string output = null;
             string seedGenomes = null;
-            var water = WaterLayout.None;
-            var inexhaustible = false;
+            var scenario = new ScenarioSettings();
             var args = Environment.GetCommandLineArgs();
             for (var i = 0; i + 1 < args.Length; i++)
             {
@@ -391,7 +402,34 @@ namespace Eden.Editor
                         battery.ValidationInterval = Integer(value);
                         break;
                     case "-eden-food":
-                        settings.World.InitialFood = Integer(value);
+                        scenario.Food = Integer(value);
+                        break;
+                    case "-eden-arena":
+                        scenario.ArenaSide = Number(value);
+                        break;
+                    case "-eden-resources" when value == "density" || value == "quantity":
+                        scenario.Scaling = value == "density" ? ResourceScaling.KeepDensity : ResourceScaling.KeepQuantity;
+                        break;
+                    case "-eden-food-energy":
+                        scenario.FoodEnergy = Number(value);
+                        break;
+                    case "-eden-food-respawn":
+                        scenario.FoodRespawnSeconds = Number(value);
+                        break;
+                    case "-eden-water-capacity":
+                        scenario.WaterCapacity = Number(value);
+                        break;
+                    case "-eden-water-recharge":
+                        scenario.WaterRechargePerSecond = Number(value);
+                        break;
+                    case "-eden-episode-seconds":
+                        scenario.EpisodeSeconds = Number(value);
+                        break;
+                    case "-eden-max-age":
+                        scenario.MaxAgeSeconds = Number(value);
+                        break;
+                    case "-eden-initial-energy":
+                        scenario.InitialEnergy = Number(value);
                         break;
                     case "-eden-body":
                         settings.ExpressedBodyGenes = BodyGeneSetOf(value);
@@ -409,18 +447,18 @@ namespace Eden.Editor
                         settings.EvolvingEyes = value == "evolving";
                         break;
                     case "-eden-solid" when value == "on" || value == "off":
-                        settings.World.SolidBodies = value == "on";
+                        scenario.SolidBodies = value == "on";
                         break;
                     case "-eden-obstacles" when value == "none" || value == "pillars" || value == "corridor":
-                        settings.World.Obstacles = ObstacleLayouts.Create(
-                            value == "pillars" ? ObstacleLayout.Pillars
-                            : value == "corridor" ? ObstacleLayout.Corridor : ObstacleLayout.None, settings.World);
+                        scenario.Obstacles = value == "pillars" ? ObstacleLayout.Pillars
+                            : value == "corridor" ? ObstacleLayout.Corridor : ObstacleLayout.None;
                         break;
                     case "-eden-water" when value == "none" || value == "pond" || value == "ponds":
-                        water = value == "pond" ? WaterLayout.Pond : value == "ponds" ? WaterLayout.Ponds : WaterLayout.None;
+                        scenario.Water = value == "pond" ? WaterLayout.Pond
+                            : value == "ponds" ? WaterLayout.Ponds : WaterLayout.None;
                         break;
                     case "-eden-water-supply" when value == "finite" || value == "inexhaustible":
-                        inexhaustible = value == "inexhaustible";
+                        scenario.InexhaustibleWater = value == "inexhaustible";
                         break;
                     case "-eden-output":
                         output = value;
@@ -428,13 +466,14 @@ namespace Eden.Editor
                 }
             }
 
-            // After the loop, so the supply applies whatever the order of the two options.
-            if (water != WaterLayout.None)
-                settings.World.Water = WaterLayouts.Create(water, settings.World, inexhaustible: inexhaustible);
-
+            scenario.Apply(settings);
             seedGenomesDirectory = seedGenomes;
+            scenarioDescription = scenario.Describe();
             return output;
         }
+
+        private static float Number(string value) =>
+            float.Parse(value, NumberStyles.Float, CultureInfo.InvariantCulture);
 
         /// <summary>-eden-export-top N DIR, or null when not given.</summary>
         private static (int Count, string Directory)? ReadExportTop()
