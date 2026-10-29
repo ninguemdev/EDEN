@@ -57,6 +57,27 @@ namespace Eden.Evolution
         /// </summary>
         public int NormalizationThreshold = 20;
 
+        /// <summary>Genomes closer than this distance to a species' representative join it (proposed 3).</summary>
+        public float CompatibilityThreshold = 3f;
+
+        /// <summary>Generations without a new best fitness after which a species stops reproducing (proposed 15).</summary>
+        public int StagnationGenerations = 15;
+
+        /// <summary>Species with the best fitness so far that are never removed for stagnation (proposed 2).</summary>
+        public int ProtectedSpecies = 2;
+
+        /// <summary>Species at least this large copy their champion unchanged into the next generation (proposed 5).</summary>
+        public int ChampionMinimumSize = 5;
+
+        /// <summary>Best fraction of each species that may be a parent, at least one member (proposed 0.2).</summary>
+        public float SurvivalFraction = 0.2f;
+
+        /// <summary>Chance that a child comes from crossover before mutating, rather than from mutation alone (proposed 0.75).</summary>
+        public float CrossoverProbability = 0.75f;
+
+        /// <summary>In crossover, chance that the second parent comes from another species (proposed 0.001).</summary>
+        public float InterspeciesProbability = 0.001f;
+
         public NeatSettings Clone() => (NeatSettings)MemberwiseClone();
     }
 
@@ -91,6 +112,20 @@ namespace Eden.Evolution
             if (settings.NormalizationThreshold < 0 || settings.NormalizationThreshold > NeatNetwork.MaxConnections)
                 errors.Add($"{nameof(settings.NormalizationThreshold)} must be in [0, {NeatNetwork.MaxConnections}] " +
                            $"(was {settings.NormalizationThreshold})");
+            if (!(settings.CompatibilityThreshold > 0f) || float.IsInfinity(settings.CompatibilityThreshold))
+                errors.Add($"{nameof(settings.CompatibilityThreshold)} must be finite and > 0 " +
+                           $"(was {settings.CompatibilityThreshold})");
+            if (settings.StagnationGenerations < 1)
+                errors.Add($"{nameof(settings.StagnationGenerations)} must be >= 1 (was {settings.StagnationGenerations})");
+            if (settings.ProtectedSpecies < 1)
+                errors.Add($"{nameof(settings.ProtectedSpecies)} must be >= 1 so a species always survives " +
+                           $"(was {settings.ProtectedSpecies})");
+            if (settings.ChampionMinimumSize < 1)
+                errors.Add($"{nameof(settings.ChampionMinimumSize)} must be >= 1 (was {settings.ChampionMinimumSize})");
+            if (!(settings.SurvivalFraction > 0f && settings.SurvivalFraction <= 1f))
+                errors.Add($"{nameof(settings.SurvivalFraction)} must be in (0, 1] (was {settings.SurvivalFraction})");
+            Probability(settings.CrossoverProbability, nameof(settings.CrossoverProbability), errors);
+            Probability(settings.InterspeciesProbability, nameof(settings.InterspeciesProbability), errors);
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid NEAT settings: " + string.Join("; ", errors));
 
@@ -107,6 +142,13 @@ namespace Eden.Evolution
             DisjointCoefficient = settings.DisjointCoefficient;
             WeightDifferenceCoefficient = settings.WeightDifferenceCoefficient;
             NormalizationThreshold = settings.NormalizationThreshold;
+            CompatibilityThreshold = settings.CompatibilityThreshold;
+            StagnationGenerations = settings.StagnationGenerations;
+            ProtectedSpecies = settings.ProtectedSpecies;
+            ChampionMinimumSize = settings.ChampionMinimumSize;
+            SurvivalFraction = settings.SurvivalFraction;
+            CrossoverProbability = settings.CrossoverProbability;
+            InterspeciesProbability = settings.InterspeciesProbability;
         }
 
         public float InitialWeightLimit { get; }
@@ -122,6 +164,13 @@ namespace Eden.Evolution
         public float DisjointCoefficient { get; }
         public float WeightDifferenceCoefficient { get; }
         public int NormalizationThreshold { get; }
+        public float CompatibilityThreshold { get; }
+        public int StagnationGenerations { get; }
+        public int ProtectedSpecies { get; }
+        public int ChampionMinimumSize { get; }
+        public float SurvivalFraction { get; }
+        public float CrossoverProbability { get; }
+        public float InterspeciesProbability { get; }
 
         private static void Coefficient(float value, string name, List<string> errors)
         {
