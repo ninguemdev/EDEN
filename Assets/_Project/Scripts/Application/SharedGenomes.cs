@@ -71,6 +71,8 @@ namespace Eden.Application
 
         public EyeSet EyesOf(CreatureId creature) => GenomeOf(creature).Eyes;
 
+        public void Cancel(CreatureId child) => born.Remove(child.Value);
+
         /// <summary>Drops the genomes of children that died, e.g. with <see cref="WorldSimulation.LastDeaths"/>.</summary>
         public void Forget(IReadOnlyList<CreatureDeath> deaths)
         {

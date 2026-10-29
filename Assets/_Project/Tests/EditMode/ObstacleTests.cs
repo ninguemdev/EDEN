@@ -131,7 +131,7 @@ namespace Eden.Tests.EditMode
             var saved = original.Capture();
             var savedBrains = brains.Capture();
             Run(original, brains, 140);
-            // Founders may start inside a pillar (free placement is P2.4): from the first tick on, nobody is in one.
+            // Founders start outside the pillars and nobody ever enters one.
             foreach (var creature in original.World.Creatures)
             {
                 foreach (var pillar in config.Obstacles)

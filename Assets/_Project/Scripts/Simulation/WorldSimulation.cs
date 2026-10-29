@@ -11,6 +11,7 @@ namespace Eden.Simulation
     public sealed class WorldSimulation
     {
         private const float FullTurn = 2f * MathF.PI;
+        private const float BirthGap = 1e-3f;
         private static readonly SimulationEvent FoodRespawn = new SimulationEvent(SimulationEventKind.FoodRespawn);
 
         private readonly TickScheduler<SimulationEvent> agenda;
@@ -91,6 +92,12 @@ namespace Eden.Simulation
         /// <summary>Births refused during the last tick because the population was at its cap; nobody paid for them.</summary>
         public int LastBirthsRefused { get; private set; }
 
+        /// <summary>
+        /// Births refused during the last tick because no room was found near the parent (solid bodies); nobody paid for
+        /// them and nobody was placed far away instead.
+        /// </summary>
+        public int LastBirthsBlocked { get; private set; }
+
         /// <summary>What children inherit; null gives every child its parent's body genes. Never saved: set it again.</summary>
         public IHeredity Heredity { get; set; }
 
@@ -98,6 +105,12 @@ namespace Eden.Simulation
 
         /// <summary>Food items put back by the agenda in the last tick.</summary>
         public int LastFoodRespawned { get; private set; }
+
+        /// <summary>
+        /// Respawns due in the last tick that found no free place (solid bodies) and wait for the next tick, kept in the
+        /// agenda: food is neither lost nor multiplied.
+        /// </summary>
+        public int LastFoodRespawnsDelayed { get; private set; }
 
         /// <summary>Energy flows of the last tick; they explain exactly how the creatures' total energy changed.</summary>
         public EnergyFlows LastEnergy => energy;
@@ -134,8 +147,10 @@ namespace Eden.Simulation
             deaths.Clear();
             births.Clear();
             LastBirthsRefused = 0;
+            LastBirthsBlocked = 0;
             LastFoodEaten = 0;
             LastFoodRespawned = 0;
+            LastFoodRespawnsDelayed = 0;
             LastContacts = 0;
             energy = default;
             LastCorrectedInputValues = 0;
@@ -207,9 +222,22 @@ namespace Eden.Simulation
             {
                 switch (due.Payload.Kind)
                 {
-                    case SimulationEventKind.FoodRespawn:
+                    case SimulationEventKind.FoodRespawn when !World.Config.SolidBodies:
                         World.AddFood(WorldFactory.RandomFoodPosition(World.SpawnRandom, World.Config, tick), World.Config.FoodEnergy);
                         LastFoodRespawned++;
+                        break;
+                    case SimulationEventKind.FoodRespawn:
+                        if (Placement.TryPlaceFood(World.SpawnRandom, World.Config, World.Creatures, tick, out var place))
+                        {
+                            World.AddFood(place, World.Config.FoodEnergy);
+                            LastFoodRespawned++;
+                        }
+                        else
+                        {
+                            agenda.Schedule(tick + 1, FoodRespawn);
+                            LastFoodRespawnsDelayed++;
+                        }
+
                         break;
                     default:
                         throw new InvalidOperationException($"Unknown event kind {due.Payload.Kind}.");
@@ -218,11 +246,17 @@ namespace Eden.Simulation
         }
 
         // The changing world: every uneaten item moves, in id order, to a new place in the right half (spawn stream).
+        // With solid bodies an item that finds no free place there stays where it is.
         private void ShiftFood(long tick)
         {
             var food = World.Food;
             for (var i = 0; i < food.Count; i++)
-                food[i].MoveTo(WorldFactory.RandomFoodPosition(World.SpawnRandom, World.Config, tick));
+            {
+                if (!World.Config.SolidBodies)
+                    food[i].MoveTo(WorldFactory.RandomFoodPosition(World.SpawnRandom, World.Config, tick));
+                else if (Placement.TryPlaceFood(World.SpawnRandom, World.Config, World.Creatures, tick, out var place))
+                    food[i].MoveTo(place);
+            }
         }
 
         // Each food goes to the closest creature within its own eat radius that can reach it (no obstacle between them,
@@ -318,7 +352,8 @@ namespace Eden.Simulation
         // hold the configured share of its capacity, and must keep some energy after paying. At the cap the birth is
         // refused before anything is drawn or paid. The child gets min(share of the parent's energy, its capacity);
         // the parent loses that plus the cost: no energy is created. Placement draws angle then heading from the spawn
-        // stream.
+        // stream. With solid bodies the child is conceived first, a place for its own disc is looked for next to the
+        // parent and only then is anything paid; without room the birth is refused for free and the child forgotten.
         private void ApplyBirths(long tick, int count)
         {
             var config = World.Config;
@@ -339,6 +374,19 @@ namespace Eden.Simulation
 
                 var childId = new CreatureId(World.NextCreatureId);
                 var genes = Heredity?.Conceive(parent, childId) ?? parent.Genes;
+                if (config.SolidBodies)
+                {
+                    if (!SolidBirth(tick, parent, childId, genes))
+                    {
+                        Heredity?.Cancel(childId);
+                        LastBirthsBlocked++;
+                        continue;
+                    }
+
+                    alive++;
+                    continue;
+                }
+
                 var capacity = genes.IsNeutral ? World.ReferenceBody.MaxEnergy : CreatureBody.Express(config, genes).MaxEnergy;
                 var transfer = Math.Min(parent.Energy * config.OffspringEnergyFraction, capacity);
                 parent.Energy -= transfer + config.ReproductionCost;
@@ -357,6 +405,40 @@ namespace Eden.Simulation
                 births.Add(new CreatureBirth(child.Id, parent.Id, tick));
                 alive++;
             }
+        }
+
+        // Up to BirthAttempts directions around the parent, the child's disc just clear of the parent's (or at the birth
+        // distance if farther); the first where it fits wins, then the heading is drawn and the birth is paid. The small
+        // gap keeps rounding from reading a touching child as overlapping its parent.
+        private bool SolidBirth(long tick, CreatureState parent, CreatureId childId, BodyGenes genes)
+        {
+            var config = World.Config;
+            var body = genes.IsNeutral ? World.ReferenceBody : CreatureBody.Express(config, genes);
+            var distance = Math.Max(config.BirthDistance, parent.Body.Radius + body.Radius + BirthGap);
+            var random = World.SpawnRandom;
+            var found = false;
+            var place = default(Float2);
+            for (var attempt = 0; attempt < Placement.BirthAttempts && !found; attempt++)
+            {
+                var angle = random.NextFloat() * FullTurn;
+                place = new Float2(parent.Position.X + MathF.Cos(angle) * distance,
+                    parent.Position.Y + MathF.Sin(angle) * distance);
+                found = Placement.BodyFits(config, World.Creatures, place, body.Radius);
+            }
+
+            if (!found)
+                return false;
+            var heading = random.NextFloat() * FullTurn;
+            var transfer = Math.Min(parent.Energy * config.OffspringEnergyFraction, body.MaxEnergy);
+            parent.Energy -= transfer + config.ReproductionCost;
+            parent.ReproductionCooldownTicks = config.ReproductionCooldownTicks;
+            energy.Transferred += transfer;
+            energy.BirthCosts += config.ReproductionCost;
+            var child = World.AddOffspring(parent, place, heading, transfer, genes);
+            if (Heredity != null)
+                child.Eyes = Heredity.EyesOf(childId);
+            births.Add(new CreatureBirth(child.Id, parent.Id, tick));
+            return true;
         }
 
         private static float Clamp(float value, float size) => value < 0f ? 0f : value > size ? size : value;
