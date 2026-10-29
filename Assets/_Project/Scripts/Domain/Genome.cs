@@ -104,17 +104,17 @@ namespace Eden.Domain
         }
 
         /// <summary>
-        /// NEAT genome; its network is fixed during a life (no plasticity coefficients). A network of
-        /// <see cref="NeuralContract.Eyes"/> needs <paramref name="eyes"/> (possibly without any eye); one of the legacy
-        /// contract has none.
+        /// NEAT genome; its network is fixed during a life (no plasticity coefficients). A network of an eye contract
+        /// (<see cref="NeuralContract.HasEyes"/>) needs <paramref name="eyes"/> (possibly without any eye); one of the
+        /// legacy contract has none.
         /// </summary>
         public Genome(NeatNetwork network, BodyGenes body, EyeSet eyes)
         {
             neat = network ?? throw new ArgumentNullException(nameof(network));
-            if ((network.Contract == NeuralContract.Eyes) != (eyes != null))
+            if (network.Contract.HasEyes != (eyes != null))
                 throw new ArgumentException(eyes == null
-                    ? $"A network of {NeuralContract.EyesId} needs its eyes."
-                    : $"Only a network of {NeuralContract.EyesId} has eyes.", nameof(eyes));
+                    ? $"A network of {network.Contract.Id} needs its eyes."
+                    : $"Only a network of {NeuralContract.EyesId} or {NeuralContract.EyesWaterId} has eyes.", nameof(eyes));
             Body = body;
             Eyes = eyes;
             Plasticity = PlasticityGenes.Fixed;
@@ -145,7 +145,7 @@ namespace Eden.Domain
 
         public BodyGenes Body { get; }
 
-        /// <summary>The eyes of a genome of <see cref="NeuralContract.Eyes"/>; null for the legacy senses.</summary>
+        /// <summary>The eyes of a genome of an eye contract; null for the legacy senses.</summary>
         public EyeSet Eyes { get; }
 
         /// <summary>Lifetime plasticity coefficients; <see cref="PlasticityGenes.Fixed"/> for a fixed network.</summary>

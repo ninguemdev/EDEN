@@ -226,20 +226,21 @@ namespace Eden.Persistence
         }
 
         /// <summary>
-        /// Eyes as written by <see cref="EncodeEyes"/>: required for <see cref="NeuralContract.Eyes"/>, refused for any
-        /// other contract; slots in increasing order and eyes within their limits.
+        /// Eyes as written by <see cref="EncodeEyes"/>: required for an eye contract, refused for any other contract;
+        /// slots in increasing order and eyes within their limits.
         /// </summary>
         internal static EyeSet DecodeEyes(JsonValue saved, NeuralContract contract)
         {
-            if (contract != NeuralContract.Eyes)
+            if (!contract.HasEyes)
             {
                 if (saved != null)
-                    throw new CheckpointException($"{saved.Path}: only a genome of {NeuralContract.EyesId} has eyes.");
+                    throw new CheckpointException($"{saved.Path}: only a genome of {NeuralContract.EyesId} or " +
+                                                  $"{NeuralContract.EyesWaterId} has eyes.");
                 return null;
             }
 
             if (saved == null)
-                throw new CheckpointException($"A genome of {NeuralContract.EyesId} needs its eyes.");
+                throw new CheckpointException($"A genome of {contract.Id} needs its eyes.");
             var values = saved.ArrayOf(EyeSet.MaxEyes);
             var slots = new Eye?[EyeSet.MaxEyes];
             var previous = -1;

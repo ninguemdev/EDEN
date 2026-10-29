@@ -9,7 +9,8 @@ namespace Eden.Simulation
     /// observation with <see cref="ObservationLimits.Sanitize"/> before a brain sees it. Energy, range and speed readings
     /// are relative to the creature's own body: its energy capacity, its sensor range and its speed cap. The legacy
     /// readings keep the <see cref="NeuralContract.Legacy"/> meaning on purpose and ignore obstacles: the food sense
-    /// sees through them and the wall readings only know the arena's border. Only eyes see obstacles.
+    /// sees through them and the wall readings only know the arena's border. Only eyes see obstacles. Likewise the legacy
+    /// readings neither see water nor feel thirst; only eyes in a world with water do (<see cref="EyeContract"/>).
     /// </summary>
     public static class Sensors
     {
@@ -56,24 +57,32 @@ namespace Eden.Simulation
                 WallReading(config, position, range, -forwardY, forwardX));
         }
 
+        /// <summary>The eye contract of a world: <see cref="NeuralContract.EyesWater"/> with water, else <see cref="NeuralContract.Eyes"/>.</summary>
+        public static NeuralContract EyeContract(SimulationConfig config) => NeuralContract.ForEyes(config.HasWater);
+
         /// <summary>
         /// The observation of a creature with eyes: <paramref name="observation"/> (its legacy readings) carrying the inputs
-        /// of <see cref="NeuralContract.Eyes"/> written into <paramref name="buffer"/>: the body channels copied from the
-        /// legacy readings, then what each eye slot sees (<see cref="Vision.See"/>).
+        /// of the world's <see cref="EyeContract"/> written into <paramref name="buffer"/>: the body channels copied from
+        /// the legacy readings, with water hydration / max hydration, then what each eye slot sees
+        /// (<see cref="Vision.See"/>, water included with water).
         /// </summary>
         public static Observation WithEyes(in Observation observation, WorldState world, CreatureState creature,
             float[] buffer)
         {
             if (creature?.Eyes == null)
                 throw new ArgumentException("Only a creature with eyes senses through them.", nameof(creature));
-            if (buffer == null || buffer.Length != NeuralContract.Eyes.InputCount)
-                throw new ArgumentException($"Needs {NeuralContract.Eyes.InputCount} values.", nameof(buffer));
+            var contract = EyeContract(world.Config);
+            if (buffer == null || buffer.Length != contract.InputCount)
+                throw new ArgumentException($"Needs {contract.InputCount} values.", nameof(buffer));
             buffer[0] = observation.Energy;
             buffer[1] = observation.Age;
             buffer[2] = observation.VelocityForward;
             buffer[3] = observation.VelocityLeft;
+            var water = contract.SensesWater;
+            if (water)
+                buffer[NeuralContract.HydrationInput] = Clamp(creature.Hydration / world.Config.MaxHydration, 0f, 1f);
             for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
-                Vision.See(world, creature, creature.Eyes, slot, buffer, NeuralContract.EyeInputIndex(slot, EyeChannel.Present));
+                Vision.See(world, creature, creature.Eyes, slot, buffer, contract.EyeInput(slot, EyeChannel.Present), water);
             return new Observation(observation.Energy, observation.Age, observation.VelocityForward,
                 observation.VelocityLeft, observation.FoodSin, observation.FoodCos, observation.FoodProximity,
                 observation.FoodVisible, observation.WallFront, observation.WallRight, observation.WallBack,

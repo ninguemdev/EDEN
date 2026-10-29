@@ -88,30 +88,36 @@ namespace Eden.Domain
         }
 
         /// <summary>
-        /// The same policy for the inputs of <see cref="NeuralContract.Eyes"/>: body channels in their legacy ranges;
-        /// per eye, the present and visible flags exactly 0 or 1, sines and cosines in [-1, 1], proximities in [0, 1];
-        /// an absent eye reads all 0, and a target not seen zeroes its direction and proximity. With
-        /// <paramref name="fix"/> the values are corrected in place; the count is returned either way.
+        /// The same policy for the inputs of an eye contract (<see cref="NeuralContract.Eyes"/> or
+        /// <see cref="NeuralContract.EyesWater"/>, told apart by their length): body channels in their legacy ranges and
+        /// hydration in [0, 1]; per eye, the present and visible flags exactly 0 or 1, sines and cosines in [-1, 1],
+        /// proximities in [0, 1]; an absent eye reads all 0, and a target not seen zeroes its direction and proximity.
+        /// With <paramref name="fix"/> the values are corrected in place; the count is returned either way.
         /// </summary>
         public static int CountEyeCorrections(float[] inputs, bool fix)
         {
             if (inputs == null)
                 throw new ArgumentNullException(nameof(inputs));
-            if (inputs.Length != NeuralContract.Eyes.InputCount)
-                throw new ArgumentException($"Expected {NeuralContract.Eyes.InputCount} eye inputs, got {inputs.Length}.",
-                    nameof(inputs));
+            var contract = NeuralContract.OfEyeInputs(inputs.Length) ??
+                           throw new ArgumentException($"Expected {NeuralContract.Eyes.InputCount} or " +
+                                                       $"{NeuralContract.EyesWater.InputCount} eye inputs, got {inputs.Length}.",
+                               nameof(inputs));
 
             var corrections = 0;
             for (var i = 0; i < NeuralContract.EyesBodyInputs; i++)
                 corrections += Limit(inputs, i, Minimums[i], Maximums[i], fix);
+            if (contract.SensesWater)
+                corrections += Limit(inputs, NeuralContract.HydrationInput, 0f, 1f, fix);
             for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
             {
-                var start = NeuralContract.EyeInputIndex(slot, EyeChannel.Present);
+                var start = contract.EyeInput(slot, EyeChannel.Present);
                 corrections += Flag(inputs, start, fix);
                 corrections += Group(inputs, start + (int)EyeChannel.FoodVisible, fix);
                 corrections += Group(inputs, start + (int)EyeChannel.BarrierVisible, fix);
+                if (contract.SensesWater)
+                    corrections += Group(inputs, start + (int)EyeChannel.WaterVisible, fix);
                 if (Read(inputs, start, fix) == 0f)
-                    corrections += Zero(inputs, start + 1, EyeChannels.Count - 1, fix);
+                    corrections += Zero(inputs, start + 1, contract.ChannelsPerEye - 1, fix);
             }
 
             return corrections;

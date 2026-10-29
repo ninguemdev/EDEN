@@ -165,6 +165,10 @@ namespace Eden.Persistence
             }
 
             lines.AddRange(WaterLines(world));
+            if (world.HasWater)
+                lines.Add("water_senses=" + (Plan.Contract.SensesWater
+                    ? "eyes see water (not through obstacles; water hides nothing);hydration is a brain input"
+                    : "none;the legacy senses neither see water nor feel thirst"));
             if (Preset != null)
                 lines.Add("preset=" + Preset);
             if (ResumedFrom != null)

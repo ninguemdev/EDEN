@@ -139,16 +139,18 @@ namespace Eden.Presentation
             { "presente", "comida vis.", "comida sen", "comida cos", "comida prox.", "barreira vis.", "barreira sen",
               "barreira cos", "barreira prox." };
 
-        // Legacy inputs by name; with eyes, the body inputs and each eye slot's "present" input, so 41 inputs stay
-        // readable in the panel (the others are unlabelled dots below their eye's label).
+        // Legacy inputs by name; with eyes, the body inputs (and hydration with water) and each eye slot's "present"
+        // input, so 41 or 58 inputs stay readable in the panel (the others are unlabelled dots below their eye's label).
         private static string InputLabel(NeuralContract contract, int index)
         {
             if (contract == NeuralContract.Legacy)
                 return NetworkGraph.InputNames[index];
             if (index < NeuralContract.EyesBodyInputs)
                 return NetworkGraph.InputNames[index];
-            var slot = (index - NeuralContract.EyesBodyInputs) / EyeChannels.Count;
-            var channel = (index - NeuralContract.EyesBodyInputs) % EyeChannels.Count;
+            if (index < contract.BodyInputs)
+                return "hidratação";
+            var slot = (index - contract.BodyInputs) / contract.ChannelsPerEye;
+            var channel = (index - contract.BodyInputs) % contract.ChannelsPerEye;
             return channel == (int)EyeChannel.Present ? $"olho {slot}: " + EyeLabels[channel] : null;
         }
 
