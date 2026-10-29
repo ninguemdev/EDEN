@@ -143,7 +143,7 @@ namespace Eden.Evolution
         private const ulong TrainingTag = 0x74726169UL; // "trai"
         private const ulong ValidationTag = 0x76616C69UL; // "vali"
 
-        private readonly SimulationSettings world;
+        private readonly SimulationConfig episodeTemplate;
         private readonly ulong trainingRoot;
         private readonly ulong[] validationSeeds;
 
@@ -180,10 +180,12 @@ namespace Eden.Evolution
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid evolution settings: " + string.Join("; ", errors));
 
-            world = settings.World.Clone();
+            var world = settings.World.Clone();
             world.InitialPopulation = 1;
             world.Reproduction = false;
             var validated = new SimulationConfig(world);
+            // Every episode differs only by its seed: the validated rules (and their free-space grid) are built once.
+            episodeTemplate = validated;
 
             ExperimentSeed = settings.ExperimentSeed;
             Algorithm = settings.Algorithm;
@@ -257,11 +259,6 @@ namespace Eden.Evolution
         public BodyGenes ExpressedGenes(BodyGenes genes) => genes.Masked(ExpressedBodyGenes);
 
         /// <summary>World configuration of one isolated episode (single creature) for a seed.</summary>
-        public SimulationConfig EpisodeConfig(ulong episodeSeed)
-        {
-            var episode = world.Clone();
-            episode.Seed = episodeSeed;
-            return new SimulationConfig(episode);
-        }
+        public SimulationConfig EpisodeConfig(ulong episodeSeed) => episodeTemplate.WithSeed(episodeSeed);
     }
 }
