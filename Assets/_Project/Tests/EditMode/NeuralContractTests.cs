@@ -55,7 +55,7 @@ namespace Eden.Tests.EditMode
         {
             Assert.That(NeuralContract.TryFind(NeuralContract.LegacyId, out var found), Is.True);
             Assert.That(found, Is.SameAs(NeuralContract.Legacy));
-            Assert.That(NeuralContract.TryFind("eyes-v1", out found), Is.False);
+            Assert.That(NeuralContract.TryFind("eyes-v9", out found), Is.False);
             Assert.That(found, Is.Null);
             Assert.That(NeuralContract.TryFind(null, out _), Is.False);
         }
