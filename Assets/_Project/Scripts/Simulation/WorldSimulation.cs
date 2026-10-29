@@ -143,6 +143,13 @@ namespace Eden.Simulation
 
         public ScheduledEvent<SimulationEvent>[] SnapshotAgenda() => agenda.SnapshotPending();
 
+        /// <summary>
+        /// Search rules: energy and hydration stay as they are, food and water give nothing, eaten food is not put back,
+        /// age counts but nobody dies of it. What would have been charged is still measured
+        /// (<see cref="EnergyFlows.Uncharged"/>). Off by default; not saved, so it is set again after a restore.
+        /// </summary>
+        public bool FrozenNeeds { get; set; }
+
         /// <summary>When set, receives the cost of every tick; null (the default) measures nothing.</summary>
         public TickTimings Timings { get; set; }
 
@@ -206,9 +213,17 @@ namespace Eden.Simulation
             }
 
             ResolveFeeding(tick, count);
-            if (config.HasWater)
-                ResolveDrinking(count);
-            ApplyEnergyAndAging(tick, count);
+            if (FrozenNeeds)
+            {
+                ApplyFrozenNeeds(count);
+            }
+            else
+            {
+                if (config.HasWater)
+                    ResolveDrinking(count);
+                ApplyEnergyAndAging(tick, count);
+            }
+
             if (config.Reproduction)
                 ApplyBirths(tick, count);
 
@@ -317,7 +332,8 @@ namespace Eden.Simulation
                 foodGains[winner] += item.Energy;
                 creatures[winner].FoodEnergyEaten += item.Energy;
                 LastFoodEaten++;
-                agenda.Schedule(tick + World.Config.FoodRespawnTicks, FoodRespawn);
+                if (!FrozenNeeds)
+                    agenda.Schedule(tick + World.Config.FoodRespawnTicks, FoodRespawn);
             }
         }
 
@@ -397,6 +413,48 @@ namespace Eden.Simulation
                 Math.Min(area.MaxY, Math.Max(area.MinY, position.Y)));
             return config.Obstacles.Count == 0 || Vision.LineOfSight(config, position, nearest);
         }
+
+        // The search rules' own branch, so the expressions of ApplyEnergyAndAging stay exactly as they are.
+        private void ApplyFrozenNeeds(int count)
+        {
+            var config = World.Config;
+            var creatures = World.Creatures;
+            for (var i = 0; i < count; i++)
+            {
+                var creature = creatures[i];
+                var action = actions[i];
+                var effort = action.Thrust * action.Thrust + action.Strafe * action.Strafe;
+                var body = creature.Body;
+                double cost = (double)config.TickDuration * (body.MetabolismPerSecond + body.MovementCostPerSecond * effort);
+                energy.Maintenance += (double)config.TickDuration * body.MetabolismPerSecond;
+                energy.Effort += (double)config.TickDuration * body.MovementCostPerSecond * effort;
+                if (creature.Eyes == null)
+                {
+                    energy.SensorCosts += (double)config.TickDuration * body.SensorCostPerSecond;
+                    cost += (double)config.TickDuration * body.SensorCostPerSecond;
+                }
+                else
+                {
+                    var eyeCost = EyeCost.PerSecond(body, creature.Eyes);
+                    var turning = config.TurnCostFraction * action.Turn * action.Turn;
+                    energy.EyeCosts += (double)config.TickDuration * eyeCost;
+                    energy.TurnCosts += (double)config.TickDuration * body.MovementCostPerSecond * turning;
+                    cost += (double)config.TickDuration * (eyeCost + body.MovementCostPerSecond * turning);
+                }
+
+                energy.Uncharged += cost;
+                energy.Food += foodGains[i];
+                energy.Overflow += foodGains[i];
+                creature.AgeTicks++;
+                if (creature.ReproductionCooldownTicks > 0)
+                    creature.ReproductionCooldownTicks--;
+            }
+        }
+
+        // The edge of a water area within the creature's eating reach with a clear line: where it drinks, and where a
+        // search target pond counts as reached.
+        public static bool ReachesWater(SimulationConfig config, CreatureState creature, Obstacle area) =>
+            Reaches(config, creature, area);
 
         private void ApplyEnergyAndAging(long tick, int count)
         {
