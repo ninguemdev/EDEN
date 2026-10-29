@@ -1,5 +1,7 @@
 using System;
+using System.Text.RegularExpressions;
 using Eden.Domain;
+using Eden.Evolution;
 using Eden.Persistence;
 using NUnit.Framework;
 
@@ -44,6 +46,8 @@ namespace Eden.Tests.EditMode
             var record = new GenomeRecord(genome, 2.5f, new GenomeSource(7, 12, 913));
             var withExtras = GenomeCodec.Decode(GenomeCodec.Encode(record, "0.1.0", SavedAt));
             Assert.That(withExtras.Fitness, Is.EqualTo(2.5f));
+            Assert.That(withExtras.FitnessProfile, Is.EqualTo(Fitness.Profile));
+            Assert.That(withExtras.FitnessFor(Fitness.Profile), Is.EqualTo(2.5f));
             Assert.That(withExtras.Source.Value.ExperimentSeed, Is.EqualTo(7UL));
             Assert.That(withExtras.Source.Value.Generation, Is.EqualTo(12));
             Assert.That(withExtras.Source.Value.IndividualId, Is.EqualTo(913L));
@@ -60,9 +64,82 @@ namespace Eden.Tests.EditMode
             Assert.That(text, Does.Contain("\"topology\": [12,16,3]"));
             Assert.That(() => GenomeCodec.Decode(text.Replace("\"topology\": [12,16,3]", "\"topology\": [12,16,4]")),
                 Throws.TypeOf<CheckpointException>().With.Message.Contains("network"));
-            Assert.That(() => GenomeCodec.Decode(text.Replace("\"schemaVersion\": 1", "\"schemaVersion\": 99")),
+            Assert.That(() => GenomeCodec.Decode(text.Replace("\"schemaVersion\": 2", "\"schemaVersion\": 99")),
                 Throws.TypeOf<CheckpointException>().With.Message.Contains("newer"));
         }
+
+        [Test]
+        public void Encode_NamesTheNetworkContractAndFitnessProfile()
+        {
+            var genome = new Genome(NetworkTopology.Mlp12x16x3, Weights(7));
+            var text = GenomeCodec.Encode(new GenomeRecord(genome, 1.25f), "0.1.0", SavedAt);
+
+            Assert.That(text, Does.Contain("\"schemaVersion\": 2"));
+            Assert.That(text, Does.Contain("\"network\": \"mlp\""));
+            Assert.That(text, Does.Contain("\"contract\": \"legacy-12-3-v1\""));
+            Assert.That(text, Does.Contain("\"fitnessProfile\": \"food-energy-per-second-v1\""));
+            Assert.That(GenomeCodec.Encode(new GenomeRecord(genome), "0.1.0", SavedAt), Does.Not.Contain("fitnessProfile"),
+                "no profile without a fitness");
+        }
+
+        [Test]
+        public void Decode_ReadsSchema1FilesAsLegacyMlpGenomes()
+        {
+            var genome = new Genome(NetworkTopology.Mlp12x16x3, Weights(8), new BodyGenes(0.5f, 0f, 0f, 0f));
+            var text = GenomeCodec.Encode(new GenomeRecord(genome, 3f, new GenomeSource(1, 2, 3)), "0.1.0", SavedAt);
+            var schema1 = SchemaOne(text);
+            Assert.That(schema1, Does.Not.Contain("network").And.Not.Contain("contract").And.Not.Contain("fitnessProfile"));
+
+            var decoded = GenomeCodec.Decode(schema1);
+            Assert.That(decoded.Genome.HasSameContent(genome), Is.True);
+            Assert.That(decoded.Genome.Contract, Is.SameAs(NeuralContract.Legacy));
+            Assert.That(decoded.Fitness, Is.EqualTo(3f));
+            Assert.That(decoded.FitnessProfile, Is.EqualTo(Fitness.Profile), "the only profile schema 1 files had");
+        }
+
+        [Test]
+        public void Decode_RefusesAnUnknownNetworkOrContractAndAProfileWithoutFitness()
+        {
+            var genome = new Genome(NetworkTopology.Mlp12x16x3, Weights(9));
+            var text = GenomeCodec.Encode(new GenomeRecord(genome, 2f), "0.1.0", SavedAt);
+
+            Assert.That(() => GenomeCodec.Decode(text.Replace("\"network\": \"mlp\"", "\"network\": \"neat\"")),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("neat"));
+            Assert.That(() => GenomeCodec.Decode(text.Replace("legacy-12-3-v1", "eyes-v9")),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("eyes-v9"));
+            Assert.That(() => GenomeCodec.Decode(WithoutMember(text, "network")),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("network"), "schema 2 must name its network");
+            Assert.That(() => GenomeCodec.Decode(WithoutMember(text, "fitness")),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("without a fitness"));
+            var withoutProfile = Regex.Replace(text, @",\s*""fitnessProfile"": [^\n]*\n", "\n");
+            Assert.That(() => GenomeCodec.Decode(withoutProfile),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("profile"));
+        }
+
+        [Test]
+        public void FitnessFor_IgnoresScoresOfAnotherProfile()
+        {
+            var genome = new Genome(NetworkTopology.Mlp12x16x3, Weights(10));
+            var other = new GenomeRecord(genome, 9f, null, "water-and-food-v1");
+            Assert.That(other.FitnessFor(Fitness.Profile), Is.Null);
+            Assert.That(other.FitnessFor("water-and-food-v1"), Is.EqualTo(9f));
+            Assert.That(new GenomeRecord(genome).FitnessFor(Fitness.Profile), Is.Null);
+            Assert.That(new GenomeRecord(genome).FitnessProfile, Is.Null);
+            Assert.That(() => new GenomeRecord(genome, 1f, null, ""), Throws.ArgumentException);
+
+            var decoded = GenomeCodec.Decode(GenomeCodec.Encode(other, "0.1.0", SavedAt));
+            Assert.That(decoded.FitnessProfile, Is.EqualTo("water-and-food-v1"), "kept as history");
+            Assert.That(decoded.FitnessFor(Fitness.Profile), Is.Null);
+        }
+
+        // The same file as schema 1 wrote it: no network, contract or fitness profile.
+        private static string SchemaOne(string schema2) =>
+            WithoutMember(WithoutMember(WithoutMember(schema2, "network"), "contract"), "fitnessProfile")
+                .Replace("\"schemaVersion\": 2", "\"schemaVersion\": 1");
+
+        // Drops a one-line, non-final member of the top-level object (the writer puts one member per line).
+        private static string WithoutMember(string text, string name) =>
+            Regex.Replace(text, @"\n\s*""" + name + @""": [^\n]*,\n", "\n");
 
         private static float[] Weights(int seed)
         {

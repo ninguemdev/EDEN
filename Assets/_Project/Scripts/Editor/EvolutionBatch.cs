@@ -32,7 +32,7 @@ namespace Eden.Editor
     /// commands accept both.
     /// -eden-seed-genomes DIR starts generation 0 of RunFromCommandLine from every genome file (see GenomeFile) in DIR
     /// instead of random weights (see GenerationalEvolution.FromSeedPool); a genome exported without a fitness of its
-    /// own counts as 0. -eden-export-top N DIR writes the N best genomes of the last generation RunFromCommandLine
+    /// own, or with one from another fitness profile, counts as 0. -eden-export-top N DIR writes the N best genomes of the last generation RunFromCommandLine
     /// trained to DIR (see GenomeFile), one file per genome, ranked by their training fitness.
     /// Settings not given keep the proposed defaults of <see cref="EvolutionSettings"/> and <see cref="BatterySettings"/>.
     /// </summary>
@@ -141,7 +141,8 @@ namespace Eden.Editor
                 generations, (DateTime.UtcNow - started).TotalSeconds, directory));
         }
 
-        // A genome exported without its own fitness ranks last among real scores rather than always losing ties.
+        // A genome exported without its own fitness (or scored by another profile) ranks last among real scores rather
+        // than always losing ties.
         private static void SplitPool(string directory, out Genome[] genomes, out float[] fitness)
         {
             var pool = GenomeFile.LoadPool(directory);
@@ -150,7 +151,7 @@ namespace Eden.Editor
             for (var i = 0; i < pool.Length; i++)
             {
                 genomes[i] = pool[i].Genome;
-                fitness[i] = pool[i].Fitness ?? 0f;
+                fitness[i] = pool[i].FitnessFor(Fitness.Profile) ?? 0f;
             }
         }
 

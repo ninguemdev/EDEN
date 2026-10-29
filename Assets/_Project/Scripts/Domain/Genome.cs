@@ -86,7 +86,17 @@ namespace Eden.Domain
             Plasticity = plasticity;
         }
 
+        /// <summary>Kind of network recorded in files: a fixed-topology MLP described by <see cref="Topology"/> and flat weights.</summary>
+        public const string MlpNetwork = "mlp";
+
         public int SchemaVersion => CurrentSchemaVersion;
+
+        /// <summary>Kind of network (<see cref="MlpNetwork"/>); a genome of another kind is not the same format.</summary>
+        public string Network => MlpNetwork;
+
+        /// <summary>What the network reads and writes. Every MLP genome uses <see cref="NeuralContract.Legacy"/>.</summary>
+        public NeuralContract Contract => NeuralContract.Legacy;
+
         public NetworkTopology Topology { get; }
         public int WeightCount => weights.Length;
         public BodyGenes Body { get; }

@@ -205,7 +205,10 @@ namespace Eden.Tests.EditMode
 
                 var experiment = File.ReadAllLines(Path.Combine(directory, "experiment.txt"));
                 Assert.That(experiment, Does.Contain("experiment_seed=54").And.Contain("mutation_sigma=0.1")
-                    .And.Contain("crossover=off").And.Contain("created_utc=2026-10-23T12:00:00Z"));
+                    .And.Contain("crossover=off").And.Contain("created_utc=2026-10-23T12:00:00Z")
+                    .And.Contain("neural_contract=legacy-12-3-v1").And.Contain("network=mlp-12-16-3")
+                    .And.Contain("evolution_algorithm=fixed-topology-ga-v1")
+                    .And.Contain("fitness_profile=food-energy-per-second-v1"));
 
                 var generations = File.ReadAllLines(Path.Combine(directory, "generations.csv"));
                 Assert.That(generations, Has.Length.EqualTo(3));

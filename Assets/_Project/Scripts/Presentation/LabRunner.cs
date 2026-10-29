@@ -764,7 +764,7 @@ namespace Eden.Presentation
                 for (var i = 0; i < pool.Length; i++)
                 {
                     genomes[i] = pool[i].Genome;
-                    fitness[i] = pool[i].Fitness ?? 0f;
+                    fitness[i] = pool[i].FitnessFor(Fitness.Profile) ?? 0f;
                 }
 
                 return EvolutionSession.FromSeedPool(evolutionSettings, genomes, fitness);

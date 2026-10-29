@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using Eden.Domain;
 using Eden.Evolution;
 
 namespace Eden.Persistence
@@ -20,6 +21,12 @@ namespace Eden.Persistence
 
         /// <summary>Unit of every fitness value: food energy eaten per simulated second of the configured episode.</summary>
         public const string FitnessUnit = "food_energy_per_simulated_second";
+
+        /// <summary>
+        /// Selection of every experiment so far: fixed-topology weights evolved by elites, tournaments and Gaussian
+        /// mutation, without crossover or species (not NEAT).
+        /// </summary>
+        public const string EvolutionAlgorithm = "fixed-topology-ga-v1";
 
         private const string Energy = "energy";
         private const string Seconds = "simulated_second";
@@ -90,6 +97,14 @@ namespace Eden.Persistence
                 .Add("episodeTicks", JsonValue.Of(header.Plan.EpisodeTicks))
                 .Add("validationSeeds", validationSeeds)
                 .Add("fitnessUnit", JsonValue.Of(FitnessUnit))
+                .Add("fitnessProfile", JsonValue.Of(Fitness.Profile))
+                .Add("neuralContract", JsonValue.Of(NeuralContract.LegacyId))
+                .Add("network", JsonValue.Of(Genome.MlpNetwork))
+                .Add("topology", JsonValue.NewArray()
+                    .Add(JsonValue.Of(NetworkTopology.Mlp12x16x3.Inputs))
+                    .Add(JsonValue.Of(NetworkTopology.Mlp12x16x3.Hidden))
+                    .Add(JsonValue.Of(NetworkTopology.Mlp12x16x3.Outputs)))
+                .Add("evolutionAlgorithm", JsonValue.Of(EvolutionAlgorithm))
                 .Add("columns", files)
                 .Add("resumedFrom", header.ResumedFrom == null ? JsonValue.Null() : header.ResumedFrom.ToJson());
             return JsonText.Write(root);

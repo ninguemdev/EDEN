@@ -63,6 +63,10 @@ namespace Eden.Tests.EditMode
             Assert.That(experiment["format"].String(), Is.EqualTo(ExperimentJson.ExperimentFormat));
             Assert.That(experiment["evaluationMode"].String(), Is.EqualTo("isolated"));
             Assert.That(experiment["fitnessUnit"].String(), Is.EqualTo(ExperimentJson.FitnessUnit));
+            Assert.That(experiment["fitnessProfile"].String(), Is.EqualTo(Fitness.Profile));
+            Assert.That(experiment["neuralContract"].String(), Is.EqualTo(NeuralContract.LegacyId));
+            Assert.That(experiment["network"].String(), Is.EqualTo(Genome.MlpNetwork));
+            Assert.That(experiment["evolutionAlgorithm"].String(), Is.EqualTo(ExperimentJson.EvolutionAlgorithm));
             Assert.That(experiment["preset"].String(), Is.EqualTo("minimal"));
             Assert.That(experiment["settings"]["populationSize"].Int(), Is.EqualTo(6));
             Assert.That(experiment["configHash"].String(), Is.EqualTo(CheckpointCodec.Hex(header.ConfigHash)));
