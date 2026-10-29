@@ -33,9 +33,24 @@ namespace Eden.Domain
             }
 
             for (var i = 0; i < config.InitialFood; i++)
-                world.AddFood(RandomArenaPosition(random, config), config.FoodEnergy);
+                world.AddFood(RandomFoodPosition(random, config, 0), config.FoodEnergy);
 
             return world;
+        }
+
+        /// <summary>
+        /// Where food appears at <paramref name="tick"/>: anywhere in the arena, or, when the config shifts food, in the
+        /// left half before the shift tick and in the right half from it on. Draws x, then y.
+        /// </summary>
+        public static Float2 RandomFoodPosition(IRandomSource random, SimulationConfig config, long tick)
+        {
+            if (!config.FoodShifts)
+                return RandomArenaPosition(random, config);
+            var half = config.ArenaWidth * 0.5f;
+            var left = tick < config.FoodShiftTicks ? 0f : half;
+            var x = random.NextFloat(left, left + half);
+            var y = random.NextFloat(0f, config.ArenaHeight);
+            return new Float2(x, y);
         }
 
         /// <summary>Uniform position inside the arena (borders included). Draws x, then y.</summary>
