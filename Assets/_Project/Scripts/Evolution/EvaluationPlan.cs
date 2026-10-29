@@ -71,6 +71,13 @@ namespace Eden.Evolution
         /// </summary>
         public RewardProfile Profile = RewardProfile.Legacy;
 
+        /// <summary>
+        /// The stages after the first, one per further stage of <see cref="Profile"/> and in its order; null or empty
+        /// (the default) for a single-stage profile. The first stage is the one described by <see cref="World"/>,
+        /// <see cref="EpisodeSeconds"/>, <see cref="TrainingSeedsPerGeneration"/> and <see cref="ValidationSeedCount"/>.
+        /// </summary>
+        public List<StageSettings> FurtherStages;
+
         /// <summary>Genomes per generation (proposed 64).</summary>
         public int PopulationSize = 64;
 
@@ -93,6 +100,31 @@ namespace Eden.Evolution
             copy.ExperimentSeed = experimentSeed;
             copy.World = World?.Clone();
             copy.Neat = Neat?.Clone();
+            copy.FurtherStages = FurtherStages?.ConvertAll(stage => stage?.Clone());
+            return copy;
+        }
+    }
+
+    /// <summary>World, length and seeds of one evaluation stage after the first (<see cref="EvolutionSettings.FurtherStages"/>).</summary>
+    [Serializable]
+    public sealed class StageSettings
+    {
+        /// <summary>Simulated length of every episode of the stage.</summary>
+        public float EpisodeSeconds = 120f;
+
+        /// <summary>Training seeds of the stage per generation, shared by every genome of that generation.</summary>
+        public int TrainingSeedsPerGeneration = 3;
+
+        /// <summary>Held-out seeds of the stage, derived from <see cref="EvolutionSettings.ValidationSeed"/>.</summary>
+        public int ValidationSeedCount = 5;
+
+        /// <summary>World of an episode of the stage; population is forced to one creature that never reproduces.</summary>
+        public SimulationSettings World = new SimulationSettings { InitialPopulation = 1, InitialFood = 32 };
+
+        public StageSettings Clone()
+        {
+            var copy = (StageSettings)MemberwiseClone();
+            copy.World = World?.Clone();
             return copy;
         }
     }
@@ -133,25 +165,81 @@ namespace Eden.Evolution
         SharedInspection = 2
     }
 
+
     /// <summary>
-    /// Validated, immutable evaluation rules. Every genome of a generation runs alone, once per training seed, in a
-    /// world built from the same seed, so all genomes face identical starting conditions and never compete.
-    /// Training seed scheme (version 1): SplitMix64 output (index + 1) of seed (SplitMix64 output (generation + 1)
-    /// of seed (SplitMix64 output <see cref="TrainingTag"/> of the experiment seed)).
+    /// One stage of an <see cref="EvaluationPlan"/>: the episode world, length and seeds that a stage of the reward
+    /// profile scores. Every candidate runs every stage.
+    /// </summary>
+    public sealed class EvaluationStage
+    {
+        private readonly SimulationConfig episodeTemplate;
+        private readonly ulong trainingRoot;
+        private readonly ulong[] validationSeeds;
+
+        internal EvaluationStage(int index, RewardStage reward, SimulationConfig episodeTemplate, float episodeSeconds,
+            int trainingSeedsPerGeneration, ulong trainingRoot, ulong validationRoot, int validationSeedCount)
+        {
+            Index = index;
+            Reward = reward;
+            this.episodeTemplate = episodeTemplate;
+            EpisodeSeconds = episodeSeconds;
+            EpisodeTicks = Math.Max(1L, (long)Math.Round((double)episodeSeconds * episodeTemplate.TicksPerSecond));
+            TrainingSeedsPerGeneration = trainingSeedsPerGeneration;
+            this.trainingRoot = trainingRoot;
+            validationSeeds = new ulong[validationSeedCount];
+            for (var i = 0; i < validationSeeds.Length; i++)
+                validationSeeds[i] = SplitMix64.Output(validationRoot, (ulong)i + 1);
+        }
+
+        /// <summary>Position of the stage in the plan and in the profile.</summary>
+        public int Index { get; }
+
+        /// <summary>The profile stage that scores these episodes.</summary>
+        public RewardStage Reward { get; }
+
+        public string Name => Reward.Name;
+        public float EpisodeSeconds { get; }
+
+        /// <summary>Configured episode length in ticks; an episode always counts as this long, even after a death.</summary>
+        public long EpisodeTicks { get; }
+
+        public int TrainingSeedsPerGeneration { get; }
+        public int ValidationSeedCount => validationSeeds.Length;
+
+        /// <summary>World configuration of one isolated episode (single creature) of the stage for a seed.</summary>
+        public SimulationConfig EpisodeConfig(ulong episodeSeed) => episodeTemplate.WithSeed(episodeSeed);
+
+        internal ulong TrainingSeed(int generation, int index)
+        {
+            var generationSeed = SplitMix64.Output(trainingRoot, (ulong)generation + 1);
+            return SplitMix64.Output(generationSeed, (ulong)index + 1);
+        }
+
+        internal ulong ValidationSeed(int index) => validationSeeds[index];
+    }
+
+    /// <summary>
+    /// Validated, immutable evaluation rules. Every genome of a generation runs alone, once per training seed of every
+    /// stage, in a world built from the same seed, so all genomes face identical starting conditions and never compete.
+    /// The seeds of an evaluation are listed stage after stage, so its episodes run candidate → stage → seed.
+    /// Training seed scheme version 1 (one stage): SplitMix64 output (index + 1) of seed (SplitMix64 output
+    /// (generation + 1) of seed (SplitMix64 output <see cref="TrainingTag"/> of the experiment seed)).
     /// Validation seeds: SplitMix64 output (index + 1) of seed (SplitMix64 output <see cref="ValidationTag"/> of the
     /// validation seed). They are fixed for the whole experiment and are never passed to selection.
+    /// Version 2 (several stages) derives the seeds of each stage the same way from a root of its own: SplitMix64 output
+    /// (<see cref="StageTag"/> + stage index) of the version 1 root.
     /// </summary>
     public sealed class EvaluationPlan
     {
         public const int SeedSchemeVersion = 1;
+        public const int StagedSeedSchemeVersion = 2;
         public const int MaxTrainingSeeds = 64;
         public const float MaxEpisodeSeconds = 100000f;
         private const ulong TrainingTag = 0x74726169UL; // "trai"
         private const ulong ValidationTag = 0x76616C69UL; // "vali"
+        private const ulong StageTag = 0x73746700UL; // "stg" + stage index
 
-        private readonly SimulationConfig episodeTemplate;
-        private readonly ulong trainingRoot;
-        private readonly ulong[] validationSeeds;
+        private readonly EvaluationStage[] stages;
 
         public EvaluationPlan(EvolutionSettings settings)
         {
@@ -161,14 +249,18 @@ namespace Eden.Evolution
                 throw new ArgumentException("A world template is required.", nameof(settings));
 
             var errors = new List<string>();
-            if (float.IsNaN(settings.EpisodeSeconds) || settings.EpisodeSeconds <= 0f || settings.EpisodeSeconds > MaxEpisodeSeconds)
-                errors.Add($"{nameof(settings.EpisodeSeconds)} must be in (0, {MaxEpisodeSeconds}] (was {settings.EpisodeSeconds})");
-            if (settings.TrainingSeedsPerGeneration < 1 || settings.TrainingSeedsPerGeneration > MaxTrainingSeeds)
-                errors.Add($"{nameof(settings.TrainingSeedsPerGeneration)} must be in [1, {MaxTrainingSeeds}] " +
-                           $"(was {settings.TrainingSeedsPerGeneration})");
-            if (settings.ValidationSeedCount < 1 || settings.ValidationSeedCount > MaxTrainingSeeds)
-                errors.Add($"{nameof(settings.ValidationSeedCount)} must be in [1, {MaxTrainingSeeds}] " +
-                           $"(was {settings.ValidationSeedCount})");
+            var further = settings.FurtherStages ?? new List<StageSettings>();
+            CheckStage(errors, "", settings.EpisodeSeconds, settings.TrainingSeedsPerGeneration,
+                settings.ValidationSeedCount);
+            for (var i = 0; i < further.Count; i++)
+            {
+                if (further[i]?.World == null)
+                    errors.Add($"stage {i + 2} needs its settings and world");
+                else
+                    CheckStage(errors, $"stage {i + 2} ", further[i].EpisodeSeconds,
+                        further[i].TrainingSeedsPerGeneration, further[i].ValidationSeedCount);
+            }
+
             if (!BodyGenes.IsValidSet(settings.ExpressedBodyGenes))
                 errors.Add($"{nameof(settings.ExpressedBodyGenes)} has unknown genes ({(int)settings.ExpressedBodyGenes})");
             if (settings.Algorithm != EvolutionAlgorithm.Mlp && settings.Algorithm != EvolutionAlgorithm.Neat)
@@ -185,36 +277,58 @@ namespace Eden.Evolution
                 errors.Add("evolving eyes need the eye senses");
             if (settings.Profile == null)
                 errors.Add("a reward profile is required");
-            else if (settings.Profile.Stages.Count != 1)
-                errors.Add($"reward profile \"{settings.Profile.Id}\" has {settings.Profile.Stages.Count} stages; " +
-                           "episodes are evaluated in a single stage");
+            else if (settings.Profile.Stages.Count != further.Count + 1)
+                errors.Add($"reward profile \"{settings.Profile.Id}\" has {settings.Profile.Stages.Count} stages and " +
+                           $"the settings describe {further.Count + 1}");
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid evolution settings: " + string.Join("; ", errors));
 
-            var world = settings.World.Clone();
-            world.InitialPopulation = 1;
-            world.Reproduction = false;
-            var validated = new SimulationConfig(world);
-            // Every episode differs only by its seed: the validated rules (and their free-space grid) are built once.
-            episodeTemplate = validated;
+            // Every episode of a stage differs only by its seed: the validated rules (and their free-space grid) are
+            // built once per stage.
+            var templates = new SimulationConfig[further.Count + 1];
+            templates[0] = Template(settings.World);
+            for (var i = 1; i < templates.Length; i++)
+                templates[i] = Template(further[i - 1].World);
+
+            Senses = settings.Senses;
+            Contract = ContractOf(Senses, templates[0]);
+            for (var i = 1; i < templates.Length; i++)
+            {
+                var contract = ContractOf(Senses, templates[i]);
+                if (contract.Id != Contract.Id)
+                    errors.Add($"stage {i + 1} reads the neural contract {contract.Id} and stage 1 reads {Contract.Id}; " +
+                               "a genome needs the same contract in every stage");
+                if (templates[i].TicksPerSecond != templates[0].TicksPerSecond)
+                    errors.Add($"stage {i + 1} runs {templates[i].TicksPerSecond} ticks per second and stage 1 runs " +
+                               $"{templates[0].TicksPerSecond}");
+            }
+
+            if (errors.Count > 0)
+                throw new ArgumentException("Invalid evolution settings: " + string.Join("; ", errors));
 
             ExperimentSeed = settings.ExperimentSeed;
             Profile = settings.Profile;
             Algorithm = settings.Algorithm;
-            Senses = settings.Senses;
-            Contract = Senses == Senses.Eyes ? NeuralContract.ForEyes(validated.HasWater) : NeuralContract.Legacy;
             EvolvingEyes = settings.EvolvingEyes;
             ExpressedBodyGenes = settings.ExpressedBodyGenes;
             Plasticity = settings.Plasticity;
-            EpisodeSeconds = settings.EpisodeSeconds;
-            TrainingSeedsPerGeneration = settings.TrainingSeedsPerGeneration;
-            EpisodeTicks = Math.Max(1L, (long)Math.Round((double)EpisodeSeconds * validated.TicksPerSecond));
-            trainingRoot = SplitMix64.Output(ExperimentSeed, TrainingTag);
             ValidationSeed = settings.ValidationSeed;
+            var trainingRoot = SplitMix64.Output(ExperimentSeed, TrainingTag);
             var validationRoot = SplitMix64.Output(ValidationSeed, ValidationTag);
-            validationSeeds = new ulong[settings.ValidationSeedCount];
-            for (var i = 0; i < validationSeeds.Length; i++)
-                validationSeeds[i] = SplitMix64.Output(validationRoot, (ulong)i + 1);
+            var staged = templates.Length > 1;
+            stages = new EvaluationStage[templates.Length];
+            for (var i = 0; i < stages.Length; i++)
+            {
+                var stage = i == 0 ? null : further[i - 1];
+                stages[i] = new EvaluationStage(i, Profile.Stages[i], templates[i],
+                    stage?.EpisodeSeconds ?? settings.EpisodeSeconds,
+                    stage?.TrainingSeedsPerGeneration ?? settings.TrainingSeedsPerGeneration,
+                    staged ? SplitMix64.Output(trainingRoot, StageTag + (ulong)i) : trainingRoot,
+                    staged ? SplitMix64.Output(validationRoot, StageTag + (ulong)i) : validationRoot,
+                    stage?.ValidationSeedCount ?? settings.ValidationSeedCount);
+                TrainingSeedsPerGeneration += stages[i].TrainingSeedsPerGeneration;
+                ValidationSeedCount += stages[i].ValidationSeedCount;
+            }
         }
 
         public ulong ExperimentSeed { get; }
@@ -230,8 +344,9 @@ namespace Eden.Evolution
         public bool EvolvingEyes { get; }
 
         /// <summary>
-        /// What the brains read and write: with eyes, <see cref="NeuralContract.EyesWater"/> in a world with water and
-        /// <see cref="NeuralContract.Eyes"/> without; else the legacy contract, which neither sees water nor feels thirst.
+        /// What the brains read and write, the same in every stage: with eyes, <see cref="NeuralContract.EyesWater"/> in
+        /// a world with water and <see cref="NeuralContract.Eyes"/> without; else the legacy contract, which neither sees
+        /// water nor feels thirst.
         /// </summary>
         public NeuralContract Contract { get; }
 
@@ -241,22 +356,41 @@ namespace Eden.Evolution
         /// <summary>Whether genomes carry plasticity coefficients (brains change during a life).</summary>
         public bool Plasticity { get; }
 
-        public float EpisodeSeconds { get; }
+        /// <summary>The stages, in profile order; a single one unless the profile has several.</summary>
+        public IReadOnlyList<EvaluationStage> Stages => stages;
+
+        /// <summary>How seeds are derived: <see cref="SeedSchemeVersion"/> for one stage, else <see cref="StagedSeedSchemeVersion"/>.</summary>
+        public int SeedScheme => stages.Length == 1 ? SeedSchemeVersion : StagedSeedSchemeVersion;
+
+        /// <summary>Episode length of the first stage.</summary>
+        public float EpisodeSeconds => stages[0].EpisodeSeconds;
+
+        /// <summary>Training seeds per generation of all stages together.</summary>
         public int TrainingSeedsPerGeneration { get; }
+
         public ulong ValidationSeed { get; }
-        public int ValidationSeedCount => validationSeeds.Length;
 
-        /// <summary>Configured episode length in ticks; an episode always counts as this long, even after a death.</summary>
-        public long EpisodeTicks { get; }
+        /// <summary>Validation seeds of all stages together.</summary>
+        public int ValidationSeedCount { get; }
 
+        /// <summary>Episode length in ticks of the first stage.</summary>
+        public long EpisodeTicks => stages[0].EpisodeTicks;
+
+        /// <summary>Training seed at <paramref name="index"/> among those of all stages, listed stage after stage.</summary>
         public ulong TrainingSeed(int generation, int index)
         {
             if (generation < 0)
                 throw new ArgumentOutOfRangeException(nameof(generation));
             if (index < 0 || index >= TrainingSeedsPerGeneration)
                 throw new ArgumentOutOfRangeException(nameof(index));
-            var generationSeed = SplitMix64.Output(trainingRoot, (ulong)generation + 1);
-            return SplitMix64.Output(generationSeed, (ulong)index + 1);
+            foreach (var stage in stages)
+            {
+                if (index < stage.TrainingSeedsPerGeneration)
+                    return stage.TrainingSeed(generation, index);
+                index -= stage.TrainingSeedsPerGeneration;
+            }
+
+            throw new InvalidOperationException("The index was checked against every stage.");
         }
 
         public ulong[] TrainingSeeds(int generation)
@@ -267,13 +401,75 @@ namespace Eden.Evolution
             return seeds;
         }
 
-        /// <summary>Held-out seeds, identical for every generation of the experiment (a fresh copy).</summary>
-        public ulong[] ValidationSeeds() => (ulong[])validationSeeds.Clone();
+        /// <summary>Held-out seeds of all stages, stage after stage, identical for every generation (a fresh copy).</summary>
+        public ulong[] ValidationSeeds()
+        {
+            var seeds = new ulong[ValidationSeedCount];
+            var next = 0;
+            foreach (var stage in stages)
+            {
+                for (var i = 0; i < stage.ValidationSeedCount; i++)
+                    seeds[next++] = stage.ValidationSeed(i);
+            }
+
+            return seeds;
+        }
+
+        /// <summary>
+        /// The stage of each of <paramref name="seedCount"/> seeds listed stage after stage. A single-stage plan runs any
+        /// number of seeds; with several stages the count must be the plan's for <paramref name="mode"/>.
+        /// </summary>
+        public int[] StageOfSeeds(EvaluationMode mode, int seedCount)
+        {
+            var stageOf = new int[seedCount];
+            if (stages.Length == 1)
+                return stageOf;
+
+            var expected = mode == EvaluationMode.Training ? TrainingSeedsPerGeneration
+                : mode == EvaluationMode.Validation ? ValidationSeedCount : -1;
+            if (seedCount != expected)
+                throw new ArgumentException($"A plan of {stages.Length} stages evaluates {mode} on {expected} seeds, " +
+                                            $"not {seedCount}.", nameof(seedCount));
+            var next = 0;
+            foreach (var stage in stages)
+            {
+                var count = mode == EvaluationMode.Training ? stage.TrainingSeedsPerGeneration : stage.ValidationSeedCount;
+                for (var i = 0; i < count; i++)
+                    stageOf[next++] = stage.Index;
+            }
+
+            return stageOf;
+        }
 
         /// <summary>The genes of <paramref name="genes"/> that shape the episode creature; the others are neutral.</summary>
         public BodyGenes ExpressedGenes(BodyGenes genes) => genes.Masked(ExpressedBodyGenes);
 
-        /// <summary>World configuration of one isolated episode (single creature) for a seed.</summary>
-        public SimulationConfig EpisodeConfig(ulong episodeSeed) => episodeTemplate.WithSeed(episodeSeed);
+        /// <summary>World configuration of one isolated episode (single creature) of the first stage for a seed.</summary>
+        public SimulationConfig EpisodeConfig(ulong episodeSeed) => stages[0].EpisodeConfig(episodeSeed);
+
+        private static void CheckStage(List<string> errors, string stage, float episodeSeconds, int trainingSeeds,
+            int validationSeeds)
+        {
+            if (float.IsNaN(episodeSeconds) || episodeSeconds <= 0f || episodeSeconds > MaxEpisodeSeconds)
+                errors.Add($"{stage}{nameof(EvolutionSettings.EpisodeSeconds)} must be in (0, {MaxEpisodeSeconds}] " +
+                           $"(was {episodeSeconds})");
+            if (trainingSeeds < 1 || trainingSeeds > MaxTrainingSeeds)
+                errors.Add($"{stage}{nameof(EvolutionSettings.TrainingSeedsPerGeneration)} must be in " +
+                           $"[1, {MaxTrainingSeeds}] (was {trainingSeeds})");
+            if (validationSeeds < 1 || validationSeeds > MaxTrainingSeeds)
+                errors.Add($"{stage}{nameof(EvolutionSettings.ValidationSeedCount)} must be in [1, {MaxTrainingSeeds}] " +
+                           $"(was {validationSeeds})");
+        }
+
+        private static SimulationConfig Template(SimulationSettings settings)
+        {
+            var world = settings.Clone();
+            world.InitialPopulation = 1;
+            world.Reproduction = false;
+            return new SimulationConfig(world);
+        }
+
+        private static NeuralContract ContractOf(Senses senses, SimulationConfig world) =>
+            senses == Senses.Eyes ? NeuralContract.ForEyes(world.HasWater) : NeuralContract.Legacy;
     }
 }

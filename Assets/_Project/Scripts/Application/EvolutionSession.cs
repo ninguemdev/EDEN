@@ -87,7 +87,7 @@ namespace Eden.Application
                     throw new ArgumentException("The last training evaluation is missing.", nameof(saved));
                 var last = saved.Generation - 1;
                 var lastEvaluation = GenerationEvaluation.FromEpisodes(last, EvaluationMode.Training, plan.TrainingSeeds(last),
-                    saved.LastTrainingEpisodes, ticksPerSecond);
+                    saved.LastTrainingEpisodes, ticksPerSecond, plan.Profile);
                 session.LastTraining = evolution.LastTrainingSpecies == null
                     ? new GenerationReport(lastEvaluation, previous)
                     : new GenerationReport(lastEvaluation, previous, evolution.LastTrainingSpecies);
@@ -96,7 +96,7 @@ namespace Eden.Application
             if (saved.BaselineEpisodes != null)
             {
                 var baselines = GenerationEvaluation.FromEpisodes(0, EvaluationMode.Validation, plan.ValidationSeeds(),
-                    saved.BaselineEpisodes, ticksPerSecond);
+                    saved.BaselineEpisodes, ticksPerSecond, plan.Profile);
                 if (baselines.Candidates.Count != 2)
                     throw new ArgumentException("Baselines are the random and the heuristic brain.", nameof(saved));
                 session.RandomBaseline = baselines.Candidates[0];

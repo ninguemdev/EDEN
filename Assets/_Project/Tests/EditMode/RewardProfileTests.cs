@@ -99,13 +99,15 @@ namespace Eden.Tests.EditMode
         }
 
         [Test]
-        public void Plan_RefusesSeveralStagesAndAMissingProfile()
+        public void Plan_RefusesStagesWithoutSettingsAndAMissingProfile()
         {
             var several = new EvolutionSettings
             {
                 Profile = new RewardProfile("two-v1", new[] { StageOf("a", 0.5), StageOf("b", 0.5) })
             };
             Assert.That(() => new EvaluationPlan(several), Throws.ArgumentException.With.Message.Contains("2 stages"));
+            several.FurtherStages = new System.Collections.Generic.List<StageSettings> { new StageSettings() };
+            Assert.That(new EvaluationPlan(several).Stages.Count, Is.EqualTo(2));
             Assert.That(() => new EvaluationPlan(new EvolutionSettings { Profile = null }),
                 Throws.ArgumentException.With.Message.Contains("reward profile is required"));
             Assert.That(new EvaluationPlan(new EvolutionSettings { Profile = Food(3) }).Profile.ParameterHash,

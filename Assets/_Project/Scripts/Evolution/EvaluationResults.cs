@@ -36,11 +36,13 @@ namespace Eden.Evolution
         /// Values of the stage's reward components beyond the fields kept here, in the stage's order; null (the legacy
         /// profile) when there are none.
         /// </param>
+        /// <param name="stage">Index of the plan stage the episode ran (0 for a single-stage plan).</param>
         public EpisodeResult(EvaluationMode mode, int generation, int candidate, int seedIndex, ulong episodeSeed,
             long episodeTicks, float episodeSeconds, float foodEnergy, long survivedTicks, bool survived, float finalEnergy,
-            IReadOnlyList<float> components = null)
+            IReadOnlyList<float> components = null, int stage = 0)
         {
             Components = components;
+            Stage = stage;
             Mode = mode;
             Generation = generation;
             Candidate = candidate;
@@ -60,10 +62,15 @@ namespace Eden.Evolution
         /// <summary>Index of the candidate (genome) inside its generation.</summary>
         public int Candidate { get; }
 
+        /// <summary>Position of the seed among the evaluation's seeds, which list every stage's seeds stage after stage.</summary>
         public int SeedIndex { get; }
+
         public ulong EpisodeSeed { get; }
 
-        /// <summary>Configured episode length; the same for every result of a plan.</summary>
+        /// <summary>Index of the plan stage the episode ran.</summary>
+        public int Stage { get; }
+
+        /// <summary>Configured episode length; the same for every result of a stage.</summary>
         public long EpisodeTicks { get; }
 
         public float FoodEnergy { get; }
@@ -83,23 +90,37 @@ namespace Eden.Evolution
         public bool IsValid => Evolution.Fitness.IsValid(Fitness);
     }
 
-    /// <summary>Aggregate of one candidate over its seeds; keeps the per-seed results it was computed from.</summary>
+    /// <summary>
+    /// Aggregate of one candidate over its seeds; keeps the per-seed results it was computed from. With several stages
+    /// each stage is averaged on its own seeds and the stage means are combined by the weights of the profile.
+    /// </summary>
     public sealed class CandidateEvaluation
     {
-        public CandidateEvaluation(int candidate, IReadOnlyList<EpisodeResult> episodes, int ticksPerSecond)
+        /// <param name="profile">How stage means combine; null (or a single stage) for one stage, as before stages.</param>
+        public CandidateEvaluation(int candidate, IReadOnlyList<EpisodeResult> episodes, int ticksPerSecond,
+            RewardProfile profile = null)
         {
             if (episodes == null || episodes.Count == 0)
                 throw new ArgumentException("At least one episode is required.", nameof(episodes));
 
+            var stageCount = profile?.Stages.Count ?? 1;
+            var stageFitness = new double[stageCount];
+            var stageEpisodes = new int[stageCount];
+            var stageValid = new bool[stageCount];
+            for (var k = 0; k < stageCount; k++)
+                stageValid[k] = true;
             Candidate = candidate;
             Episodes = episodes;
-            double fitness = 0, survivedSeconds = 0, finalEnergy = 0, food = 0;
+            double survivedSeconds = 0, finalEnergy = 0, food = 0;
             var survivors = 0;
-            var valid = true;
             foreach (var episode in episodes)
             {
-                valid &= episode.IsValid;
-                fitness += episode.Fitness;
+                if (episode.Stage < 0 || episode.Stage >= stageCount)
+                    throw new ArgumentException($"An episode of stage {episode.Stage} is not one of {stageCount} stages.",
+                        nameof(episodes));
+                stageValid[episode.Stage] &= episode.IsValid;
+                stageFitness[episode.Stage] += episode.Fitness;
+                stageEpisodes[episode.Stage]++;
                 food += episode.FoodEnergy;
                 survivedSeconds += (double)episode.SurvivedTicks / ticksPerSecond;
                 finalEnergy += episode.FinalEnergy;
@@ -107,8 +128,17 @@ namespace Eden.Evolution
                     survivors++;
             }
 
+            var means = new float[stageCount];
+            for (var k = 0; k < stageCount; k++)
+            {
+                if (stageEpisodes[k] == 0)
+                    throw new ArgumentException($"Stage {k} has no episode.", nameof(episodes));
+                means[k] = stageValid[k] ? (float)(stageFitness[k] / stageEpisodes[k]) : Fitness.Worst;
+            }
+
             var count = episodes.Count;
-            MeanFitness = valid ? (float)(fitness / count) : Fitness.Worst;
+            StageFitness = means;
+            MeanFitness = stageCount == 1 ? means[0] : profile.Combine(means);
             MeanFoodEnergy = (float)(food / count);
             SurvivalRate = (float)survivors / count;
             MeanSurvivedSeconds = (float)(survivedSeconds / count);
@@ -118,8 +148,14 @@ namespace Eden.Evolution
         public int Candidate { get; }
         public IReadOnlyList<EpisodeResult> Episodes { get; }
 
-        /// <summary>Mean episode fitness, or <see cref="Fitness.Worst"/> if any episode was invalid.</summary>
+        /// <summary>
+        /// Mean episode fitness (with several stages, the profile's combination of <see cref="StageFitness"/>), or
+        /// <see cref="Fitness.Worst"/> if any episode was invalid.
+        /// </summary>
         public float MeanFitness { get; }
+
+        /// <summary>Mean episode fitness of each stage, or <see cref="Fitness.Worst"/> for a stage with an invalid episode.</summary>
+        public IReadOnlyList<float> StageFitness { get; }
 
         public float MeanFoodEnergy { get; }
         public float SurvivalRate { get; }
@@ -145,7 +181,7 @@ namespace Eden.Evolution
         /// order for these seeds, generation and mode; candidates are aggregated as during the evaluation.
         /// </summary>
         public static GenerationEvaluation FromEpisodes(int generation, EvaluationMode mode, IReadOnlyList<ulong> seeds,
-            IReadOnlyList<EpisodeResult> episodes, int ticksPerSecond)
+            IReadOnlyList<EpisodeResult> episodes, int ticksPerSecond, RewardProfile profile = null)
         {
             if (seeds == null || seeds.Count == 0)
                 throw new ArgumentException("At least one seed is required.", nameof(seeds));
@@ -172,7 +208,7 @@ namespace Eden.Evolution
                 seedCopy[s] = seeds[s];
             for (var c = 0; c < candidates.Length; c++)
                 candidates[c] = new CandidateEvaluation(c, new ArraySegment<EpisodeResult>(ordered, c * seeds.Count, seeds.Count)
-                    .ToArray(), ticksPerSecond);
+                    .ToArray(), ticksPerSecond, profile);
             return new GenerationEvaluation(generation, mode, seedCopy, ordered, candidates);
         }
 

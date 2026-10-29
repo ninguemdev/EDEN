@@ -73,7 +73,7 @@ namespace Eden.Persistence
                 "neural_contract=" + Plan.Contract.Id,
                 "network=" + (IsNeat ? NeatNetwork.Kind : NetworkTopology.Mlp12x16x3.ToString()),
                 "evolution_algorithm=" + ExperimentJson.EvolutionAlgorithmOf(Plan.Algorithm),
-                "seed_scheme=" + EvaluationPlan.SeedSchemeVersion.ToString(culture),
+                "seed_scheme=" + Plan.SeedScheme.ToString(culture),
                 "training_seeds_per_generation=" + Plan.TrainingSeedsPerGeneration.ToString(culture),
                 "validation_seed=" + Plan.ValidationSeed.ToString(culture),
                 "validation_seeds=" + string.Join(";", Array.ConvertAll(Plan.ValidationSeeds(), s => s.ToString(culture))),

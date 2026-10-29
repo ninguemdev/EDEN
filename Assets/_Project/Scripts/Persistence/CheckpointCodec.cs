@@ -200,6 +200,19 @@ namespace Eden.Persistence
                 settings.Add("rewardProfile", JsonValue.NewObject()
                     .Add("id", JsonValue.Of(s.Profile.Id))
                     .Add("hash", JsonValue.Of(s.Profile.ParameterHash)));
+            // Only profiles of several stages have further stages, so single-stage texts stay the same.
+            if (s.FurtherStages != null && s.FurtherStages.Count > 0)
+            {
+                var stages = JsonValue.NewArray();
+                foreach (var stage in s.FurtherStages)
+                    stages.Add(JsonValue.NewObject()
+                        .Add("episodeSeconds", JsonValue.Of(stage.EpisodeSeconds))
+                        .Add("trainingSeedsPerGeneration", JsonValue.Of(stage.TrainingSeedsPerGeneration))
+                        .Add("validationSeedCount", JsonValue.Of(stage.ValidationSeedCount))
+                        .Add("world", EncodeSettings(stage.World)));
+                settings.Add("furtherStages", stages);
+            }
+
             return settings;
         }
 
