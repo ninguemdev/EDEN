@@ -10,13 +10,18 @@ namespace Eden.Simulation
     /// half the aperture of the eye's axis, borders included. Food is a point; on equal distance the lower id wins,
     /// because food is kept in ascending id order. The arena's border is a barrier the eye sees at the nearest point of
     /// the border inside its cone and range; nothing outside the cone is ever reported, so there is no radar.
-    /// Directions are given in the body's frame (sine positive to the left, cosine 1 straight ahead). Objects do not
-    /// hide each other yet: occlusion comes with the physical arena.
+    /// Directions are given in the body's frame (sine positive to the left, cosine 1 straight ahead).
+    /// <see cref="SimulationConfig.Obstacles"/> are opaque: food behind one is not seen (see <see cref="LineOfSight"/>),
+    /// and each is a barrier the eye sees, like the border, at its nearest point inside the cone and range. Creatures
+    /// hide nothing.
     /// </summary>
     public static class Vision
     {
         // Rounding slack on the cone's border, so a target exactly on the edge counts as inside.
         private const float EdgeSlack = 1e-5f;
+
+        // Share of a segment that must lie inside an obstacle to be blocked; grazing a side or corner does not block.
+        private const float CrossingSlack = 1e-6f;
 
         /// <summary>
         /// Writes the <see cref="EyeChannels.Count"/> channels of eye slot <paramref name="slot"/> of
@@ -92,6 +97,48 @@ namespace Eden.Simulation
             return (dx * axisX + dy * axisY) / distance >= cosHalf - EdgeSlack;
         }
 
+        /// <summary>
+        /// Whether nothing opaque lies between two points: the segment does not pass through the inside of any obstacle.
+        /// Touching an obstacle's side or corner does not block it, so an eye pressed against an obstacle still sees
+        /// along it and away from it.
+        /// </summary>
+        public static bool LineOfSight(SimulationConfig config, Float2 from, Float2 to)
+        {
+            if (config == null)
+                throw new ArgumentNullException(nameof(config));
+            var obstacles = config.Obstacles;
+            for (var i = 0; i < obstacles.Count; i++)
+            {
+                if (Crosses(obstacles[i], from, to))
+                    return false;
+            }
+
+            return true;
+        }
+
+        // Whether the segment from a to b has a piece of positive length strictly inside the rectangle (slab method).
+        private static bool Crosses(Obstacle obstacle, Float2 a, Float2 b)
+        {
+            var enter = 0f;
+            var leave = 1f;
+            return Slab(a.X, b.X - a.X, obstacle.MinX, obstacle.MaxX, ref enter, ref leave) &&
+                   Slab(a.Y, b.Y - a.Y, obstacle.MinY, obstacle.MaxY, ref enter, ref leave) &&
+                   leave - enter > CrossingSlack;
+        }
+
+        private static bool Slab(float start, float delta, float min, float max, ref float enter, ref float leave)
+        {
+            if (MathF.Abs(delta) < 1e-9f)
+                return start > min && start < max;
+            var first = (min - start) / delta;
+            var second = (max - start) / delta;
+            if (first > second)
+                (first, second) = (second, first);
+            enter = MathF.Max(enter, first);
+            leave = MathF.Min(leave, second);
+            return leave > enter;
+        }
+
         private static bool NearestFood(WorldState world, Float2 origin, float axisX, float axisY, float cosHalf,
             float range, out Float2 position, out float bestDistance)
         {
@@ -99,10 +146,13 @@ namespace Eden.Simulation
             bestDistance = float.MaxValue;
             var found = false;
             var food = world.Food;
+            var occluded = world.Config.Obstacles.Count > 0;
             for (var i = 0; i < food.Count; i++)
             {
                 var item = food[i].Position;
                 if (!InCone(origin, axisX, axisY, cosHalf, range, item, out var distance) || distance >= bestDistance)
+                    continue;
+                if (occluded && !LineOfSight(world.Config, origin, item))
                     continue;
                 position = item;
                 bestDistance = distance;
@@ -112,8 +162,10 @@ namespace Eden.Simulation
             return found;
         }
 
-        // The nearest point of the arena's border inside the sector: for each side, the foot of the perpendicular when it
-        // lies in the cone, and where the two edge rays cross that side; the nearest of those within range.
+        // The nearest barrier point inside the sector. For each side of the arena: the foot of the perpendicular when it
+        // lies in the cone, and where the two edge rays cross that side. For each obstacle: its point nearest the eye
+        // when it lies in the cone, and where the edge rays first hit it (a convex shape's nearest point within a convex
+        // sector is one of those). The nearest of all within range.
         private static bool NearestBarrier(SimulationConfig config, Float2 origin, float axis, float half, float cosHalf,
             float axisX, float axisY, float range, out Float2 position, out float bestDistance)
         {
@@ -140,6 +192,25 @@ namespace Eden.Simulation
                         ref position, ref bestDistance, ref found);
             }
 
+            var obstacles = config.Obstacles;
+            for (var i = 0; i < obstacles.Count; i++)
+            {
+                var obstacle = obstacles[i];
+                var nearest = new Float2(Math.Min(obstacle.MaxX, Math.Max(obstacle.MinX, origin.X)),
+                    Math.Min(obstacle.MaxY, Math.Max(obstacle.MinY, origin.Y)));
+                Consider(nearest, origin, axisX, axisY, cosHalf, range, ref position, ref bestDistance, ref found);
+                for (var edge = -1; edge <= 1; edge += 2)
+                {
+                    var angle = axis + edge * half;
+                    var dirX = MathF.Cos(angle);
+                    var dirY = MathF.Sin(angle);
+                    var t = RayToObstacle(origin, dirX, dirY, obstacle);
+                    if (t < float.MaxValue)
+                        Consider(new Float2(origin.X + dirX * t, origin.Y + dirY * t), origin, axisX, axisY, cosHalf,
+                            range, ref position, ref bestDistance, ref found);
+                }
+            }
+
             return found;
         }
 
@@ -151,6 +222,31 @@ namespace Eden.Simulation
             position = point;
             bestDistance = distance;
             found = true;
+        }
+
+        // Distance along a unit ray to where it first meets a rectangle (0 from inside it); float.MaxValue if it misses.
+        private static float RayToObstacle(Float2 origin, float dirX, float dirY, Obstacle obstacle)
+        {
+            var enter = 0f;
+            var leave = float.MaxValue;
+            if (!RaySlab(origin.X, dirX, obstacle.MinX, obstacle.MaxX, ref enter, ref leave) ||
+                !RaySlab(origin.Y, dirY, obstacle.MinY, obstacle.MaxY, ref enter, ref leave))
+                return float.MaxValue;
+            return enter;
+        }
+
+        private static bool RaySlab(float start, float direction, float min, float max, ref float enter, ref float leave)
+        {
+            const float parallel = 1e-6f;
+            if (MathF.Abs(direction) < parallel)
+                return start >= min && start <= max;
+            var first = (min - start) / direction;
+            var second = (max - start) / direction;
+            if (first > second)
+                (first, second) = (second, first);
+            enter = MathF.Max(enter, first);
+            leave = MathF.Min(leave, second);
+            return leave >= enter;
         }
 
         // Distance along a unit ray from a point inside the arena to its border (the first side it meets).

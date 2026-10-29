@@ -225,12 +225,14 @@ namespace Eden.Simulation
                 food[i].MoveTo(WorldFactory.RandomFoodPosition(World.SpawnRandom, World.Config, tick));
         }
 
-        // Each food goes to the closest creature within its own eat radius; equal distance goes to the lower id.
+        // Each food goes to the closest creature within its own eat radius that can reach it (no obstacle between them,
+        // see Vision.LineOfSight); equal distance goes to the lower id.
         private void ResolveFeeding(long tick, int count)
         {
             Array.Clear(foodGains, 0, count);
             var creatures = World.Creatures;
             var food = World.Food;
+            var blocked = World.Config.Obstacles.Count > 0;
 
             for (var f = 0; f < food.Count; f++)
             {
@@ -243,7 +245,8 @@ namespace Eden.Simulation
                     var dy = creatures[c].Position.Y - item.Position.Y;
                     var distanceSquared = dx * dx + dy * dy;
                     var eatRadius = creatures[c].Body.EatRadius;
-                    if (distanceSquared <= eatRadius * eatRadius && distanceSquared < best)
+                    if (distanceSquared <= eatRadius * eatRadius && distanceSquared < best &&
+                        (!blocked || Vision.LineOfSight(World.Config, creatures[c].Position, item.Position)))
                     {
                         winner = c;
                         best = distanceSquared;
