@@ -75,6 +75,14 @@ namespace Eden.Persistence
             return Number(ShortestRoundTrip(value));
         }
 
+        /// <summary>A finite double, written so that it reads back to the same bits.</summary>
+        public static JsonValue Of(double value)
+        {
+            if (double.IsNaN(value) || double.IsInfinity(value))
+                throw new ArgumentException($"Non-finite value {value} cannot be saved as a number.", nameof(value));
+            return Number(value.ToString("R", CultureInfo.InvariantCulture));
+        }
+
         /// <summary>A float that may be NaN or infinite (e.g. an invalid fitness), written as a string in that case.</summary>
         public static JsonValue OfAnyFloat(float value) =>
             float.IsNaN(value) ? Of("NaN")
@@ -181,6 +189,16 @@ namespace Eden.Persistence
             var value = ParseFloat(Text);
             if (float.IsNaN(value) || float.IsInfinity(value))
                 throw new CheckpointException($"{Path}: {Text} is not a finite float.");
+            return value;
+        }
+
+        /// <summary>A finite double written by <see cref="Of(double)"/>.</summary>
+        public double Double()
+        {
+            RequireKind(JsonKind.Number);
+            if (!double.TryParse(Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ||
+                double.IsNaN(value) || double.IsInfinity(value))
+                throw new CheckpointException($"{Path}: {Text} is not a finite number.");
             return value;
         }
 

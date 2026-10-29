@@ -381,6 +381,7 @@ namespace Eden.Editor
             string output = null;
             string seedGenomes = null;
             var scenario = new ScenarioSettings();
+            var profile = new ProfileChoice();
             var args = Environment.GetCommandLineArgs();
             for (var i = 0; i + 1 < args.Length; i++)
             {
@@ -464,10 +465,14 @@ namespace Eden.Editor
                     case "-eden-output":
                         output = value;
                         break;
+                    default:
+                        profile.TryRead(args[i], value);
+                        break;
                 }
             }
 
             scenario.Apply(settings);
+            profile.Apply(settings, scenario);
             seedGenomesDirectory = seedGenomes;
             scenarioDescription = scenario.Describe();
             return output;

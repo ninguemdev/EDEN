@@ -40,6 +40,7 @@ namespace Eden.Persistence
         private CsvFile generations;
         private CsvFile individuals;
         private CsvFile episodes;
+        private CsvFile stages;
 
         public EvolutionCsvLog(string directory, ExperimentHeader header)
         {
@@ -57,6 +58,9 @@ namespace Eden.Persistence
             generations = new CsvFile(Path.Combine(directory, "generations.csv"), GenerationsHeader);
             individuals = new CsvFile(Path.Combine(directory, "individuals.csv"), IndividualsHeader);
             episodes = new CsvFile(Path.Combine(directory, "episodes.csv"), EvaluationCsv.Header);
+            // Only a profile other than the legacy one has stages and components; legacy exports stay as they were.
+            if (!header.Plan.Profile.IsLegacy)
+                stages = new CsvFile(Path.Combine(directory, "stages.csv"), StageCsv.Header(header.Plan.Profile));
             if (!header.IsNeat)
                 return;
             neatGenerations = new CsvFile(Path.Combine(directory, "neat-generations.csv"), NeatGenerationsHeader);
@@ -78,7 +82,11 @@ namespace Eden.Persistence
             for (var c = 0; c < report.Individuals.Count; c++)
                 individuals.Append(FormatIndividual(report, c));
             foreach (var episode in report.Evaluation.Episodes)
+            {
                 episodes.Append(EvaluationCsv.FormatRow(episode));
+                stages?.Append(StageCsv.FormatRow(Header.Plan.Profile, episode));
+            }
+
             if (report.Neat != null && neatGenerations != null)
             {
                 neatGenerations.Append(FormatNeatGeneration(report));
@@ -181,6 +189,8 @@ namespace Eden.Persistence
             generations?.Dispose();
             individuals?.Dispose();
             episodes?.Dispose();
+            stages?.Dispose();
+            stages = null;
             neatGenerations?.Dispose();
             neatIndividuals?.Dispose();
             generations = null;

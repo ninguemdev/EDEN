@@ -133,8 +133,44 @@ namespace Eden.Persistence
                 .Add("columns", files)
                 .Add("resumedFrom", header.ResumedFrom == null ? JsonValue.Null() : header.ResumedFrom.ToJson());
             if (!header.Plan.Profile.IsLegacy)
+            {
                 root.Add("fitnessProfileHash", JsonValue.Of(header.Plan.Profile.ParameterHash));
+                root.Add("stages", Stages(header.Plan));
+            }
+
             return JsonText.Write(root);
+        }
+
+        private static JsonValue Stages(EvaluationPlan plan)
+        {
+            var stages = JsonValue.NewArray();
+            foreach (var stage in plan.Stages)
+            {
+                var components = JsonValue.NewArray();
+                foreach (var component in stage.Reward.Components)
+                    components.Add(JsonValue.NewObject().Add("name", JsonValue.Of(component.Name))
+                        .Add("unit", JsonValue.Of(component.Unit)));
+                var value = JsonValue.NewObject()
+                    .Add("index", JsonValue.Of(stage.Index))
+                    .Add("name", JsonValue.Of(stage.Name))
+                    .Add("scoring", JsonValue.Of(stage.Reward.Scoring.ToString()))
+                    .Add("weight", JsonValue.Of((float)stage.Reward.Weight))
+                    .Add("episodeSeconds", JsonValue.Of(stage.EpisodeSeconds))
+                    .Add("episodeTicks", JsonValue.Of(stage.EpisodeTicks))
+                    .Add("trainingSeeds", JsonValue.Of(stage.TrainingSeedsPerGeneration))
+                    .Add("validationSeeds", JsonValue.Of(stage.ValidationSeedCount))
+                    .Add("arena", Arena(stage.TemplateConfig))
+                    .Add("components", components);
+                if (stage.IsSearch)
+                    value.Add("search", JsonValue.NewObject()
+                        .Add("foodTargets", JsonValue.Of(stage.Search.Targets.Food))
+                        .Add("waterTargets", JsonValue.Of(stage.Search.Targets.Water))
+                        .Add("minDistance", JsonValue.Of(stage.Search.Targets.MinDistance))
+                        .Add("arenaUsed", JsonValue.Of(stage.Search.ArenaSide)));
+                stages.Add(value);
+            }
+
+            return stages;
         }
 
         internal static string Summary(ExperimentHeader header, ExportTally tally)

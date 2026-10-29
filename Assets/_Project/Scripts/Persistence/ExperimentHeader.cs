@@ -87,6 +87,7 @@ namespace Eden.Persistence
                 "population=" + Rules.PopulationSize.ToString(culture)
             };
             lines.AddRange(ProfileLines(Plan.Profile));
+            lines.AddRange(StageLines(Plan));
             if (Plan.Senses == Senses.Eyes)
             {
                 var eye = Eye.Frontal;
@@ -189,6 +190,32 @@ namespace Eden.Persistence
         /// The parameter hash, stages and parameters of a profile other than the legacy one, which needs no more than its
         /// id; nothing for the legacy profile.
         /// </summary>
+        /// <summary>One line per stage of a profile other than the legacy one: length, seeds, arena and, in a search stage, the arena it was enlarged to.</summary>
+        internal static IEnumerable<string> StageLines(EvaluationPlan plan)
+        {
+            if (plan.Profile.IsLegacy)
+                yield break;
+            var culture = CultureInfo.InvariantCulture;
+            foreach (var stage in plan.Stages)
+            {
+                var world = stage.TemplateConfig;
+                var line = "stage=" + stage.Index.ToString(culture) + ";" + stage.Name + ";episode_seconds " +
+                           stage.EpisodeSeconds.ToString(culture) + ";episode_ticks " + stage.EpisodeTicks.ToString(culture) +
+                           ";training_seeds " + stage.TrainingSeedsPerGeneration.ToString(culture) + ";validation_seeds " +
+                           stage.ValidationSeedCount.ToString(culture) + ";arena " + world.ArenaWidth.ToString(culture) + "x" +
+                           world.ArenaHeight.ToString(culture) + ";obstacles " +
+                           (ObstacleLayouts.Identify(world) is ObstacleLayout layout ? ObstacleLayouts.Name(layout) : "custom");
+                if (stage.IsSearch)
+                    line += ";rules search (needs frozen, no respawn);targets " + stage.Search.Targets.Food.ToString(culture) +
+                            " food " + stage.Search.Targets.Water.ToString(culture) + " water;min_distance " +
+                            stage.Search.Targets.MinDistance.ToString(culture) + ";arena_used " +
+                            stage.Search.ArenaSide.ToString(culture);
+                else
+                    line += ";food " + world.InitialFood.ToString(culture) + ";water " + world.Water.Count.ToString(culture);
+                yield return line;
+            }
+        }
+
         internal static IEnumerable<string> ProfileLines(RewardProfile profile)
         {
             if (profile.IsLegacy)

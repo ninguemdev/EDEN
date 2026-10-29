@@ -36,8 +36,15 @@ namespace Eden.Persistence
     {
         public const string Format = "eden-checkpoint";
 
-        /// <summary>Newest schema: parallel evaluation progress. Sequential NEAT stays schema 6, MLP schema 5.</summary>
-        public const int SchemaVersion = 7;
+        /// <summary>
+        /// Newest schema: runs scored by a reward profile other than the legacy one (profile, stages, stage and components
+        /// of every episode, what the running episodes measured). Legacy runs keep schema 7 with parallel evaluation,
+        /// 6 for sequential NEAT and 5 for MLP.
+        /// </summary>
+        public const int SchemaVersion = 8;
+
+        /// <summary>Schema of a legacy-profile run with parallel evaluation progress.</summary>
+        public const int SchemaWithParallel = 7;
 
         /// <summary>Schema of every checkpoint without NEAT, unchanged since plasticity.</summary>
         public const int SchemaWithoutNeat = 5;
@@ -58,7 +65,8 @@ namespace Eden.Persistence
         {
             if (checkpoint == null)
                 throw new ArgumentNullException(nameof(checkpoint));
-            var schema = checkpoint.Evolution?.Job.WorkerCount > 1 ? SchemaVersion
+            var schema = checkpoint.Evolution?.Settings.Profile?.IsLegacy == false ? SchemaVersion
+                : checkpoint.Evolution?.Job.WorkerCount > 1 ? SchemaWithParallel
                 : checkpoint.Evolution?.Neat != null ? 6 : SchemaWithoutNeat;
             var config = EncodeConfig(checkpoint);
             var state = EncodeState(checkpoint);
@@ -150,9 +158,6 @@ namespace Eden.Persistence
         private static JsonValue EncodeConfig(Checkpoint checkpoint)
         {
             var evolution = checkpoint.Evolution;
-            if (evolution?.Settings.Profile != null && !evolution.Settings.Profile.IsLegacy)
-                throw new CheckpointException($"Runs scored by reward profile \"{evolution.Settings.Profile.Id}\" " +
-                                              "cannot be saved as checkpoints by this build.");
             return JsonValue.NewObject()
                 .Add("lab", JsonValue.NewObject()
                     .Add("mode", JsonValue.Of(checkpoint.Mode))
@@ -197,9 +202,16 @@ namespace Eden.Persistence
                 settings.Add("evolvingEyes", JsonValue.Of(true));
             // The legacy profile is implied, so the text and hash of every earlier experiment stay the same.
             if (s.Profile != null && !s.Profile.IsLegacy)
+            {
+                var parameters = JsonValue.NewArray();
+                foreach (var parameter in s.Profile.Parameters)
+                    parameters.Add(JsonValue.NewObject().Add("name", JsonValue.Of(parameter.Name))
+                        .Add("value", JsonValue.Of(parameter.Value)));
                 settings.Add("rewardProfile", JsonValue.NewObject()
                     .Add("id", JsonValue.Of(s.Profile.Id))
-                    .Add("hash", JsonValue.Of(s.Profile.ParameterHash)));
+                    .Add("hash", JsonValue.Of(s.Profile.ParameterHash))
+                    .Add("parameters", parameters));
+            }
             // Only profiles of several stages have further stages, so single-stage texts stay the same.
             if (s.FurtherStages != null && s.FurtherStages.Count > 0)
             {
@@ -359,8 +371,34 @@ namespace Eden.Persistence
 
             var profile = saved.TryGet("rewardProfile");
             if (profile != null)
-                throw new CheckpointException($"{profile.Path}: reward profile \"{profile["id"].String()}\" cannot be " +
-                                              "continued by this build.");
+            {
+                var values = profile["parameters"].ArrayOf(256);
+                var parameters = new RewardParameter[values.Count];
+                for (var i = 0; i < parameters.Length; i++)
+                    parameters[i] = new RewardParameter(values[i]["name"].String(), values[i]["value"].Double());
+                var id = profile["id"].String();
+                var rebuilt = Guard(() => RewardProfiles.Create(id, parameters));
+                if (rebuilt == null || rebuilt.IsLegacy)
+                    throw new CheckpointException($"{profile.Path}: reward profile \"{id}\" is unknown to this build.");
+                if (rebuilt.ParameterHash != profile["hash"].String())
+                    throw new CheckpointException($"{profile.Path}: reward profile \"{id}\" with these parameters has " +
+                                                  $"hash {rebuilt.ParameterHash}, not the saved {profile["hash"].String()}.");
+                settings.Profile = rebuilt;
+            }
+
+            var stages = saved.TryGet("furtherStages");
+            if (stages != null)
+            {
+                settings.FurtherStages = new List<StageSettings>();
+                foreach (var stage in stages.ArrayOf(16).Items)
+                    settings.FurtherStages.Add(new StageSettings
+                    {
+                        EpisodeSeconds = stage["episodeSeconds"].Float(),
+                        TrainingSeedsPerGeneration = stage["trainingSeedsPerGeneration"].Int(),
+                        ValidationSeedCount = stage["validationSeedCount"].Int(),
+                        World = DecodeSettings(stage["world"])
+                    });
+            }
 
             // They validate every value and report all problems together.
             new EvaluationPlan(settings);
@@ -813,13 +851,67 @@ namespace Eden.Persistence
                 .Add("completed", EncodeEpisodes(progress.Completed))
                 .Add("world", EncodeWorld(progress.CurrentWorld))
                 .Add("brains", EncodeBrains(progress.CurrentBrains));
+            if (progress.CurrentTracker != null)
+                job.Add("tracker", EncodeTracker(progress.CurrentTracker));
             if (progress.WorkerCount == 1) return job;
             var ahead = JsonValue.NewArray();
             foreach (var episode in progress.Ahead)
-                ahead.Add(episode.Completed.HasValue
-                    ? JsonValue.NewObject().Add("result", EncodeEpisodes(new[] { episode.Completed.Value }))
-                    : JsonValue.NewObject().Add("world", EncodeWorld(episode.World)).Add("brains", EncodeBrains(episode.Brains)));
+            {
+                if (episode.Completed.HasValue)
+                {
+                    ahead.Add(JsonValue.NewObject().Add("result", EncodeEpisodes(new[] { episode.Completed.Value })));
+                    continue;
+                }
+
+                var running = JsonValue.NewObject().Add("world", EncodeWorld(episode.World))
+                    .Add("brains", EncodeBrains(episode.Brains));
+                if (episode.Tracker != null)
+                    running.Add("tracker", EncodeTracker(episode.Tracker));
+                ahead.Add(running);
+            }
+
             return job.Add("workers", JsonValue.Of(progress.WorkerCount)).Add("ahead", ahead);
+        }
+
+        private static JsonValue EncodeTracker(EpisodeTracker tracker)
+        {
+            var collected = JsonValue.NewArray();
+            for (var i = 0; i < tracker.Collected.Count; i++)
+                collected.Add(JsonValue.NewObject()
+                    .Add("target", JsonValue.Of(tracker.Collected[i]))
+                    .Add("tick", JsonValue.Of(tracker.CollectionTicks[i]))
+                    .Add("speed", JsonValue.Of(tracker.Speeds[i])));
+            return JsonValue.NewObject()
+                .Add("absorbedEnergy", JsonValue.Of(tracker.AbsorbedEnergy))
+                .Add("wastedEnergy", JsonValue.Of(tracker.WastedEnergy))
+                .Add("drunk", JsonValue.Of(tracker.Drunk))
+                .Add("unchargedEnergy", JsonValue.Of(tracker.UnchargedEnergy))
+                .Add("collected", collected)
+                .Add("segmentStartTick", JsonValue.Of(tracker.SegmentStartTick))
+                .Add("segmentStart", Pair(tracker.SegmentStart))
+                .Add("segmentDistance", JsonValue.OfAnyFloat(tracker.SegmentDistance))
+                .Add("bestDistance", JsonValue.OfAnyFloat(tracker.BestDistance));
+        }
+
+        private static EpisodeTracker DecodeTracker(JsonValue saved)
+        {
+            if (saved == null)
+                return null;
+            var values = saved["collected"].ArrayOf(SearchTargets.MaxTargets);
+            var targets = new int[values.Count];
+            var ticks = new long[values.Count];
+            var speeds = new float[values.Count];
+            for (var i = 0; i < values.Count; i++)
+            {
+                targets[i] = values[i]["target"].Int(0, SearchTargets.MaxTargets - 1);
+                ticks[i] = values[i]["tick"].Long(0);
+                speeds[i] = values[i]["speed"].Float();
+            }
+
+            return new EpisodeTracker(saved["absorbedEnergy"].Double(), saved["wastedEnergy"].Double(),
+                saved["drunk"].Double(), saved["unchargedEnergy"].Double(), targets, ticks, speeds,
+                saved["segmentStartTick"].Long(0), ReadPair(saved["segmentStart"]), saved["segmentDistance"].AnyFloat(),
+                saved["bestDistance"].AnyFloat());
         }
 
         private static JsonValue EncodeNeatState(NeatEvolutionState neat)
@@ -984,14 +1076,14 @@ namespace Eden.Persistence
                     }
                     else
                         ahead.Add(new EvaluationAhead(
-                            DecodeWorld(episode["world"], 1, settings.World.InitialFood, plan.EpisodeConfig(0)),
-                            DecodeBrains(episode["brains"])));
+                            DecodeWorld(episode["world"], 1, MaxEpisodeFood(settings), plan.EpisodeConfig(0)),
+                            DecodeBrains(episode["brains"]), DecodeTracker(episode.TryGet("tracker"))));
                 }
             }
-            // Bodies do not depend on the episode seed.
+            // Bodies do not depend on the episode seed nor, as every stage shares the body rules, on the stage.
             var progress = new EvaluationProgress(DecodeEpisodes(job["completed"], plan),
-                DecodeWorld(job["world"], 1, settings.World.InitialFood, plan.EpisodeConfig(0)),
-                DecodeBrains(job["brains"]), workers, ahead);
+                DecodeWorld(job["world"], 1, MaxEpisodeFood(settings), plan.EpisodeConfig(0)),
+                DecodeBrains(job["brains"]), workers, ahead, DecodeTracker(job.TryGet("tracker")));
             var neat = settings.Algorithm == EvolutionAlgorithm.Neat
                 ? DecodeNeatState(saved["neat"], settings.PopulationSize)
                 : null;
@@ -1121,12 +1213,21 @@ namespace Eden.Persistence
             return members;
         }
 
+        // Food an episode world may hold: the experiment's, or the targets of a search stage.
+        private static int MaxEpisodeFood(EvolutionSettings settings)
+        {
+            var most = Math.Max(settings.World.InitialFood, SearchTargets.MaxTargets);
+            foreach (var stage in settings.FurtherStages ?? new List<StageSettings>())
+                most = Math.Max(most, stage.World.InitialFood);
+            return most;
+        }
+
         private static JsonValue EncodeEpisodes(IReadOnlyList<EpisodeResult> episodes)
         {
             var values = JsonValue.NewArray();
             foreach (var episode in episodes)
             {
-                values.Add(JsonValue.NewObject()
+                var value = JsonValue.NewObject()
                     .Add("mode", JsonValue.Of(EvaluationCsv.ModeName(episode.Mode)))
                     .Add("generation", JsonValue.Of(episode.Generation))
                     .Add("candidate", JsonValue.Of(episode.Candidate))
@@ -1135,7 +1236,19 @@ namespace Eden.Persistence
                     .Add("foodEnergy", JsonValue.Of(episode.FoodEnergy))
                     .Add("survivedTicks", JsonValue.Of(episode.SurvivedTicks))
                     .Add("survived", JsonValue.Of(episode.Survived))
-                    .Add("finalEnergy", JsonValue.Of(episode.FinalEnergy)));
+                    .Add("finalEnergy", JsonValue.Of(episode.FinalEnergy));
+                // Only a profile other than the legacy one scores and stages episodes; legacy texts stay the same.
+                if (episode.HasScore || episode.Stage != 0)
+                {
+                    var components = JsonValue.NewArray();
+                    foreach (var component in episode.Components ?? Array.Empty<float>())
+                        components.Add(JsonValue.OfAnyFloat(component));
+                    value.Add("stage", JsonValue.Of(episode.Stage))
+                        .Add("score", JsonValue.OfAnyFloat(episode.Fitness))
+                        .Add("components", components);
+                }
+
+                values.Add(value);
             }
 
             return values;
@@ -1148,10 +1261,23 @@ namespace Eden.Persistence
             for (var i = 0; i < episodes.Length; i++)
             {
                 var value = values[i];
+                var stage = value.TryGet("stage")?.Int(0, plan.Stages.Count - 1) ?? 0;
+                float? score = null;
+                float[] components = null;
+                if (value.TryGet("score") is JsonValue savedScore)
+                {
+                    score = savedScore.AnyFloat();
+                    var componentValues = value["components"].ArrayOf(64);
+                    components = new float[componentValues.Count];
+                    for (var c = 0; c < components.Length; c++)
+                        components[c] = componentValues[c].AnyFloat();
+                }
+
                 episodes[i] = new EpisodeResult(ParseMode(value["mode"]), value["generation"].Int(0),
-                    value["candidate"].Int(0), value["seedIndex"].Int(0), value["seed"].ULong(), plan.EpisodeTicks,
-                    plan.EpisodeSeconds, value["foodEnergy"].Float(), value["survivedTicks"].Long(0),
-                    value["survived"].Boolean(), value["finalEnergy"].Float());
+                    value["candidate"].Int(0), value["seedIndex"].Int(0), value["seed"].ULong(),
+                    plan.Stages[stage].EpisodeTicks, plan.Stages[stage].EpisodeSeconds, value["foodEnergy"].Float(),
+                    value["survivedTicks"].Long(0), value["survived"].Boolean(), value["finalEnergy"].Float(), components,
+                    stage, score);
             }
 
             return episodes;

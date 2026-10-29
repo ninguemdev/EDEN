@@ -177,8 +177,9 @@ namespace Eden.Tests.EditMode
             var session = new EvolutionSession(settings, 1);
             session.Advance(5);
             var checkpoint = new Checkpoint("evolution", "minimal", 3, "neural", session.Capture(), null);
-            Assert.That(() => CheckpointCodec.Encode(checkpoint, "test", "test", SavedAt),
-                Throws.TypeOf<CheckpointException>().With.Message.Contains("\"test-food-v1\""));
+            var text = CheckpointCodec.Encode(checkpoint, "test", "test", SavedAt);
+            Assert.That(() => CheckpointCodec.Decode(text, out _),
+                Throws.TypeOf<CheckpointException>().With.Message.Contains("\"test-food-v1\" is unknown"));
         }
 
         private static RewardStage StageOf(string name, double weight) =>
