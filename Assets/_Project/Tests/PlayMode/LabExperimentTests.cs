@@ -7,7 +7,6 @@ using System.Text.RegularExpressions;
 using Eden.Application;
 using Eden.Brains;
 using Eden.Domain;
-using Eden.Application;
 using Eden.Evolution;
 using Eden.Persistence;
 using Eden.Presentation;
@@ -582,7 +581,7 @@ namespace Eden.Tests.PlayMode
             yield return Step(20);
             Assert.That(Position(), Is.EqualTo(later));
 
-            File.WriteAllText(runner.CheckpointPath, "{\"format\": \"eden-checkpoint\", \"schemaVersion\": 7}");
+            File.WriteAllText(runner.CheckpointPath, "{\"format\": \"eden-checkpoint\", \"schemaVersion\": " + (CheckpointCodec.SchemaVersion + 1) + "}");
             File.Delete(runner.CheckpointPath + ".bak");
             var simulation = runner.Simulation;
             yield return Press("load-button");
