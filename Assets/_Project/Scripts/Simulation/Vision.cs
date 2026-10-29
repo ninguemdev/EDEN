@@ -4,14 +4,14 @@ using Eden.Domain;
 namespace Eden.Simulation
 {
     /// <summary>
-    /// What eyes see, for <see cref="NeuralContract.Eyes"/>. An eye sits on the body's surface (the body's radius, for
-    /// now its eating radius, in the eye's direction; kept inside the arena) and sees a target only when it is within
-    /// the eye's range (the body's sensor range × <see cref="Eye.Range"/>) <b>and</b> within half the aperture of the eye's
-    /// axis, borders included. Food is a point; on equal distance the lower id wins, because food is kept in ascending id
-    /// order. The arena's border is a barrier the eye sees at the nearest point of the border inside its cone and range;
-    /// nothing outside the cone is ever reported, so there is no radar. Directions are given in the body's frame (sine
-    /// positive to the left, cosine 1 straight ahead). Objects do not hide each other yet: occlusion comes with the
-    /// physical arena.
+    /// What eyes see, for <see cref="NeuralContract.Eyes"/>. An eye sits on the body's surface (the solid disc's radius
+    /// with solid bodies, otherwise the eating radius, in the eye's direction; kept inside the arena) and sees a target
+    /// only when it is within the eye's range (the body's sensor range × <see cref="Eye.Range"/>) <b>and</b> within
+    /// half the aperture of the eye's axis, borders included. Food is a point; on equal distance the lower id wins,
+    /// because food is kept in ascending id order. The arena's border is a barrier the eye sees at the nearest point of
+    /// the border inside its cone and range; nothing outside the cone is ever reported, so there is no radar.
+    /// Directions are given in the body's frame (sine positive to the left, cosine 1 straight ahead). Objects do not
+    /// hide each other yet: occlusion comes with the physical arena.
     /// </summary>
     public static class Vision
     {
@@ -72,7 +72,7 @@ namespace Eden.Simulation
         public static Float2 EyePosition(SimulationConfig config, CreatureState creature, Eye eye)
         {
             var axis = creature.Heading + eye.Orientation;
-            var radius = creature.Body.EatRadius;
+            var radius = config.SolidBodies ? creature.Body.Radius : creature.Body.EatRadius;
             var x = creature.Position.X + radius * MathF.Cos(axis);
             var y = creature.Position.Y + radius * MathF.Sin(axis);
             return new Float2(Math.Min(config.ArenaWidth, Math.Max(0f, x)), Math.Min(config.ArenaHeight, Math.Max(0f, y)));

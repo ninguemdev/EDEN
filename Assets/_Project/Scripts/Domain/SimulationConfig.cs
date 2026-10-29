@@ -17,6 +17,13 @@ namespace Eden.Domain
         public const float MaxArenaSize = 10000f;
         public const float MaxDurationSeconds = 1000000f;
         public const float MaxCostExponent = 4f;
+        public const int MaxSolidSubsteps = 64;
+
+        /// <summary>
+        /// Most separation passes after each solid-body move (they stop as soon as nothing overlaps). Bodies jammed against
+        /// a wall by a crowd may keep an overlap of a couple of percent of their radii.
+        /// </summary>
+        public const int ContactPasses = 16;
 
         public SimulationConfig(SimulationSettings settings)
         {
@@ -53,6 +60,18 @@ namespace Eden.Domain
             RequireRange(errors, nameof(s.EfficiencyPowerExponent), s.EfficiencyPowerExponent, 0f, MaxCostExponent);
             RequireRange(errors, nameof(s.FoodShiftSeconds), s.FoodShiftSeconds, 0f, MaxDurationSeconds);
             RequireRange(errors, nameof(s.TurnCostFraction), s.TurnCostFraction, 0f, MaxCostExponent);
+            RequirePositive(errors, nameof(s.BodyRadius), s.BodyRadius, MaxArenaSize);
+            var substeps = SubstepsFor(s);
+            if (s.SolidBodies && errors.Count == 0)
+            {
+                var largest = 2f * s.BodyRadius * CreatureBody.Factor(BodyGenes.MaxAbsValue);
+                if (largest > Math.Min(s.ArenaWidth, s.ArenaHeight))
+                    errors.Add($"the largest solid body ({largest} across) does not fit the arena");
+                if (substeps > MaxSolidSubsteps)
+                    errors.Add($"solid bodies would need {substeps} substeps per tick (at most {MaxSolidSubsteps}): " +
+                               $"{nameof(s.MaxSpeed)} is too high for {nameof(s.BodyRadius)} at this tick rate");
+            }
+
             RequireRange(errors, nameof(s.PopulationCap), s.PopulationCap, 1, MaxPopulation);
             if (s.Reproduction && s.PopulationCap < s.InitialPopulation)
                 errors.Add($"{nameof(s.PopulationCap)} ({s.PopulationCap}) must not be below {nameof(s.InitialPopulation)} " +
@@ -95,6 +114,9 @@ namespace Eden.Domain
             EfficiencyPowerExponent = s.EfficiencyPowerExponent;
             FoodShiftSeconds = s.FoodShiftSeconds;
             TurnCostFraction = s.TurnCostFraction;
+            SolidBodies = s.SolidBodies;
+            BodyRadius = s.BodyRadius;
+            SolidSubsteps = s.SolidBodies ? substeps : 1;
             Reproduction = s.Reproduction;
             PopulationCap = s.PopulationCap;
             MaturitySeconds = s.MaturitySeconds;
@@ -170,6 +192,18 @@ namespace Eden.Domain
         /// <summary>Turning cost of creatures with eyes as a fraction of their movement cost (see the settings).</summary>
         public float TurnCostFraction { get; }
 
+        /// <summary>Whether creatures are solid discs that do not overlap and push each other (see the settings).</summary>
+        public bool SolidBodies { get; }
+
+        /// <summary>Radius of the reference body's solid disc.</summary>
+        public float BodyRadius { get; }
+
+        /// <summary>
+        /// Moves a tick is split into with solid bodies, so no body moves farther than the smallest body's radius in one:
+        /// two bodies then cannot pass through each other between contact checks. 1 without solid bodies.
+        /// </summary>
+        public int SolidSubsteps { get; }
+
         /// <summary>Tick at the start of which food moves; 0 when it never does.</summary>
         public long FoodShiftTicks { get; }
 
@@ -195,6 +229,17 @@ namespace Eden.Domain
 
         public long MaxAgeTicks { get; }
         public long FoodRespawnTicks { get; }
+
+        // Fastest possible step over the smallest possible radius, rounded up; meaningless if the values are invalid.
+        private static int SubstepsFor(SimulationSettings s)
+        {
+            var fastest = (double)s.MaxSpeed * CreatureBody.Factor(BodyGenes.MaxAbsValue) / s.TicksPerSecond;
+            var smallest = (double)s.BodyRadius * CreatureBody.Factor(-BodyGenes.MaxAbsValue);
+            var substeps = Math.Ceiling(fastest / smallest);
+            if (!(substeps <= MaxSolidSubsteps))
+                return MaxSolidSubsteps + 1;
+            return substeps < 1.0 ? 1 : (int)substeps;
+        }
 
         private static void RequireRange(List<string> errors, string name, float value, float min, float max)
         {

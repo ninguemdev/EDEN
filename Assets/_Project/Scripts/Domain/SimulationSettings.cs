@@ -64,6 +64,19 @@ namespace Eden.Domain
         /// </summary>
         public float TurnCostFraction = 0.25f;
 
+        /// <summary>
+        /// Physical arena: creatures are solid discs of their body radius that never overlap each other or leave the
+        /// arena, and push one another (see the simulation's contacts). Off by default: creatures are points that pass
+        /// through each other, as before.
+        /// </summary>
+        public bool SolidBodies;
+
+        /// <summary>
+        /// Radius of the reference body's solid disc, scaled by the size gene like the eat radius. Only solid bodies use it;
+        /// it is distinct from the eat radius because food is a point eaten within the eat radius.
+        /// </summary>
+        public float BodyRadius = 0.5f;
+
         // Continuous mode: local asexual reproduction. Off by default; isolated episodes never reproduce.
         /// <summary>Living, mature creatures with enough energy and no cooldown give birth near themselves.</summary>
         public bool Reproduction;
