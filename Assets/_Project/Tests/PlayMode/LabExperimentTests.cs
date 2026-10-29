@@ -302,6 +302,77 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Controls_ASolidArenaWithPillars_IsDrawnAndInspected_AndTheEvolutionUsesTheSameArena()
+        {
+            var arenaField = runner.Hud.Root.Q<DropdownField>("arena-field");
+            Assert.That(arenaField.value, Is.EqualTo(LabHud.ArenaChoices[0]), "the open arena is the default");
+            arenaField.index = 2;
+            yield return StartFromControls(LabMode.SharedWorld, preset: 2, seed: 5);
+
+            var world = runner.Simulation.World;
+            Assert.That(runner.SolidBodies, Is.True);
+            Assert.That(runner.Obstacles, Is.EqualTo(ObstacleLayout.Pillars));
+            Assert.That(world.Config.SolidBodies, Is.True);
+            Assert.That(world.Config.Obstacles.Count, Is.EqualTo(9));
+            Assert.That(runner.View.DrawnObstacles, Is.EqualTo(9));
+            StringAssert.Contains("Arena: corpos sólidos (raio ", runner.Hud.RunText);
+            StringAssert.Contains("pilares (9 obstáculos)", runner.Hud.RunText);
+            StringAssert.Contains("Contatos no último tick", runner.Hud.RunText);
+            Assert.That(File.ReadAllLines(Path.Combine(runner.MetricsDirectory, "run-info.txt")),
+                Does.Contain("obstacle_layout=pillars"));
+
+            // At full speed the heuristic crowd meets at the food: contacts are found and drawn.
+            var pairs = new List<TouchingPair>();
+            for (var attempt = 0; attempt < 10 && new PhysicalInspection().FindPairs(world, pairs) == 0; attempt++)
+            {
+                yield return Press("max-button");
+                yield return WaitUntil(() => runner.View.DrawnContacts > 0, 30f);
+                yield return Press("max-button");
+                if (!runner.Clock.IsPaused)
+                    yield return Press("pause-button");
+                yield return null;
+            }
+
+            Assert.That(new PhysicalInspection().FindPairs(world, pairs), Is.GreaterThan(0), "paused while bodies touch");
+            Assert.That(runner.View.DrawnContacts, Is.EqualTo(new PhysicalInspection().FindPairs(world, pairs)));
+            foreach (var creature in world.Creatures)
+            {
+                foreach (var obstacle in world.Config.Obstacles)
+                    Assert.That(obstacle.DistanceTo(creature.Position), Is.GreaterThanOrEqualTo(creature.Body.Radius - 1e-3f),
+                        $"{creature.Id} inside an obstacle");
+            }
+
+            runner.Select(world.Creatures[pairs[0].First].Id);
+            yield return null;
+            StringAssert.Contains("Arena física", runner.Hud.InspectorText);
+            StringAssert.Contains("Corpo sólido: disco de raio", runner.Hud.InspectorText);
+            StringAssert.Contains("Encostada em: criatura", runner.Hud.InspectorText);
+            var selected = runner.Selected.Value;
+            Assert.That(runner.View.TryGetDrawnBody(selected, out var scale, out _), Is.True);
+            Assert.That(scale, Is.EqualTo(2f * world.Creatures[pairs[0].First].Body.Radius).Within(1e-5f),
+                "the body drawn is the solid disc");
+            Assert.That(runner.View.TryGetDrawnReach(selected, out var reach), Is.True);
+            Assert.That(reach, Is.EqualTo(2f * world.Config.EatRadius).Within(1e-5f), "the mouth's reach around it");
+
+            yield return StartFromControls(LabMode.IsolatedEvolution, preset: 0, seed: 3);
+            Assert.That(arenaField.index, Is.EqualTo(2), "the arena choice stays");
+            var episode = runner.Simulation.World.Config;
+            Assert.That(episode.SolidBodies, Is.True);
+            Assert.That(episode.Obstacles.Count, Is.EqualTo(9), "the episodes have the same arena");
+            Assert.That(runner.View.DrawnObstacles, Is.EqualTo(9));
+            StringAssert.Contains("Arena dos episódios: corpos sólidos", runner.Hud.RunText);
+            Assert.That(File.ReadAllLines(Path.Combine(runner.EvolutionDirectory, "experiment.txt")),
+                Does.Contain("obstacle_layout=pillars"));
+
+            arenaField.index = 0;
+            yield return StartFromControls(LabMode.SharedWorld, preset: 0, seed: 5);
+            Assert.That(runner.Simulation.World.Config.SolidBodies, Is.False);
+            Assert.That(runner.View.DrawnObstacles, Is.Zero);
+            Assert.That(runner.View.DrawnContacts, Is.Zero);
+            StringAssert.Contains("Arena: aberta", runner.Hud.RunText);
+        }
+
+        [UnityTest]
         public IEnumerator Controls_SaveAndLoadAnEvolutionInTheMiddleOfAnEpisode()
         {
             UseTemporaryCheckpoint();

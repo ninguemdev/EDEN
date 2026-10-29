@@ -10,7 +10,7 @@ namespace Eden.Persistence
 {
     /// <summary>
     /// JSON files of an experiment export: <c>experiment.json</c> (format, app, algorithms, the canonical settings and
-    /// their hash, the evaluation mode, the unit of every CSV column and, for a resumed run, its origin) and
+    /// their hash, the physical arena in short, the evaluation mode, the unit of every CSV column and, for a resumed run, its origin) and
     /// <c>summary.json</c> (what the export holds so far, rewritten after every generation). Numbers use the invariant
     /// culture and floats round-trip exactly; an invalid fitness is written as the string "NaN".
     /// </summary>
@@ -116,6 +116,7 @@ namespace Eden.Persistence
                 .Add("preset", header.Preset == null ? JsonValue.Null() : JsonValue.Of(header.Preset))
                 .Add("configHash", JsonValue.Of(CheckpointCodec.Hex(header.ConfigHash)))
                 .Add("settings", header.SettingsJson())
+                .Add("arena", Arena(header.Plan.EpisodeConfig(0)))
                 .Add("episodeTicks", JsonValue.Of(header.Plan.EpisodeTicks))
                 .Add("validationSeeds", validationSeeds)
                 .Add("fitnessUnit", JsonValue.Of(FitnessUnit))
@@ -178,6 +179,14 @@ namespace Eden.Persistence
             else
                 File.Move(temporary, path);
         }
+
+        // The physical scenario at a glance; its whole geometry is in "settings".
+        private static JsonValue Arena(SimulationConfig world) =>
+            JsonValue.NewObject()
+                .Add("bodies", JsonValue.Of(world.SolidBodies ? "solid" : "points"))
+                .Add("obstacleLayout", JsonValue.Of(ExperimentHeader.LayoutName(world)))
+                .Add("obstacles", JsonValue.Of(world.Obstacles.Count))
+                .Add("freeRegions", world.FreeSpace == null ? JsonValue.Null() : JsonValue.Of(world.FreeSpace.Regions));
 
         private static JsonValue SummaryOrNull(GenerationSummary summary) =>
             summary == null ? JsonValue.Null() : CheckpointCodec.EncodeSummary(summary);

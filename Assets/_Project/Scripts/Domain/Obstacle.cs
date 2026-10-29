@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Eden.Domain
 {
@@ -98,8 +99,52 @@ namespace Eden.Domain
         {
             if (settings == null)
                 throw new ArgumentNullException(nameof(settings));
-            var width = settings.ArenaWidth;
-            var height = settings.ArenaHeight;
+            return Create(layout, settings.ArenaWidth, settings.ArenaHeight, settings.BodyRadius);
+        }
+
+        /// <summary>
+        /// The named layout the config's obstacles are for its arena, or null when they are none of them (placed by
+        /// hand). For records and the lab: the simulation only knows the rectangles.
+        /// </summary>
+        public static ObstacleLayout? Identify(SimulationConfig config)
+        {
+            if (config == null)
+                throw new ArgumentNullException(nameof(config));
+            return Identify(config.Obstacles, config.ArenaWidth, config.ArenaHeight, config.BodyRadius);
+        }
+
+        /// <inheritdoc cref="Identify(SimulationConfig)"/>
+        public static ObstacleLayout? Identify(SimulationSettings settings)
+        {
+            if (settings == null)
+                throw new ArgumentNullException(nameof(settings));
+            return Identify(settings.Obstacles ?? Array.Empty<Obstacle>(), settings.ArenaWidth, settings.ArenaHeight,
+                settings.BodyRadius);
+        }
+
+        /// <summary>Name of a layout in files and on the command line: none, pillars, corridor.</summary>
+        public static string Name(ObstacleLayout layout) => layout.ToString().ToLowerInvariant();
+
+        private static ObstacleLayout? Identify(IReadOnlyList<Obstacle> obstacles, float width, float height,
+            float bodyRadius)
+        {
+            foreach (ObstacleLayout layout in Enum.GetValues(typeof(ObstacleLayout)))
+            {
+                var expected = Create(layout, width, height, bodyRadius);
+                if (expected.Length != obstacles.Count)
+                    continue;
+                var same = true;
+                for (var i = 0; i < expected.Length && same; i++)
+                    same = expected[i].Equals(obstacles[i]);
+                if (same)
+                    return layout;
+            }
+
+            return null;
+        }
+
+        private static Obstacle[] Create(ObstacleLayout layout, float width, float height, float bodyRadius)
+        {
             switch (layout)
             {
                 case ObstacleLayout.None:
@@ -125,8 +170,8 @@ namespace Eden.Domain
                 case ObstacleLayout.Corridor:
                 {
                     // A wall two body radii thick at mid-width, broken by a gap eight body radii high at mid-height.
-                    var half = settings.BodyRadius;
-                    var gap = 4f * settings.BodyRadius;
+                    var half = bodyRadius;
+                    var gap = 4f * bodyRadius;
                     var x = width * 0.5f;
                     var y = height * 0.5f;
                     return new[]
