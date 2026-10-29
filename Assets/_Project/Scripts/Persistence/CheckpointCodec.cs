@@ -377,6 +377,17 @@ namespace Eden.Persistence
             if (s.SolidBodies)
                 settings.Add("solidBodies", JsonValue.Of(true));
             AddIfNotDefault(settings, "bodyRadius", s.BodyRadius, Defaults.BodyRadius);
+            if (s.Obstacles != null && s.Obstacles.Length > 0)
+            {
+                var obstacles = JsonValue.NewArray();
+                foreach (var o in s.Obstacles)
+                {
+                    obstacles.Add(JsonValue.NewArray().Add(JsonValue.Of(o.MinX)).Add(JsonValue.Of(o.MinY))
+                        .Add(JsonValue.Of(o.MaxX)).Add(JsonValue.Of(o.MaxY)));
+                }
+
+                settings.Add("obstacles", obstacles);
+            }
             if (s.Reproduction)
             {
                 settings.Add("reproduction", JsonValue.NewObject()
@@ -402,6 +413,23 @@ namespace Eden.Persistence
 
         private static float FloatOr(JsonValue settings, string name, float defaultValue) =>
             settings.TryGet(name)?.Float() ?? defaultValue;
+
+        private static Obstacle[] DecodeObstacles(JsonValue saved)
+        {
+            if (saved == null)
+                return Array.Empty<Obstacle>();
+            saved.ArrayOf(SimulationConfig.MaxObstacles);
+            var obstacles = new Obstacle[saved.Count];
+            for (var i = 0; i < obstacles.Length; i++)
+            {
+                var corners = saved[i].ArrayOf(4);
+                if (corners.Count != 4)
+                    throw new CheckpointException($"{corners.Path}: an obstacle needs minX, minY, maxX and maxY.");
+                obstacles[i] = new Obstacle(corners[0].Float(), corners[1].Float(), corners[2].Float(), corners[3].Float());
+            }
+
+            return obstacles;
+        }
 
         private static SimulationSettings DecodeSettings(JsonValue saved)
         {
@@ -436,7 +464,9 @@ namespace Eden.Persistence
                 TurnCostFraction = FloatOr(saved, "turnCostFraction", Defaults.TurnCostFraction),
                 // Absent means point bodies; an explicit false does not read back the same and is refused.
                 SolidBodies = saved.TryGet("solidBodies")?.Boolean() ?? false,
-                BodyRadius = FloatOr(saved, "bodyRadius", Defaults.BodyRadius)
+                BodyRadius = FloatOr(saved, "bodyRadius", Defaults.BodyRadius),
+                // Absent means the open arena; an empty list does not read back the same and is refused.
+                Obstacles = DecodeObstacles(saved.TryGet("obstacles"))
             };
             // Absent means off; the other reproduction values then keep their defaults and change nothing.
             var reproduction = saved.TryGet("reproduction");

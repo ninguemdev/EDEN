@@ -18,6 +18,7 @@ namespace Eden.Domain
         public const float MaxDurationSeconds = 1000000f;
         public const float MaxCostExponent = 4f;
         public const int MaxSolidSubsteps = 64;
+        public const int MaxObstacles = 256;
 
         /// <summary>
         /// Most separation passes after each solid-body move (they stop as soon as nothing overlaps). Bodies jammed against
@@ -72,6 +73,9 @@ namespace Eden.Domain
                                $"{nameof(s.MaxSpeed)} is too high for {nameof(s.BodyRadius)} at this tick rate");
             }
 
+            var obstacles = s.Obstacles ?? Array.Empty<Obstacle>();
+            CheckObstacles(errors, s, obstacles);
+
             RequireRange(errors, nameof(s.PopulationCap), s.PopulationCap, 1, MaxPopulation);
             if (s.Reproduction && s.PopulationCap < s.InitialPopulation)
                 errors.Add($"{nameof(s.PopulationCap)} ({s.PopulationCap}) must not be below {nameof(s.InitialPopulation)} " +
@@ -117,6 +121,7 @@ namespace Eden.Domain
             SolidBodies = s.SolidBodies;
             BodyRadius = s.BodyRadius;
             SolidSubsteps = s.SolidBodies ? substeps : 1;
+            Obstacles = (Obstacle[])obstacles.Clone();
             Reproduction = s.Reproduction;
             PopulationCap = s.PopulationCap;
             MaturitySeconds = s.MaturitySeconds;
@@ -204,6 +209,9 @@ namespace Eden.Domain
         /// </summary>
         public int SolidSubsteps { get; }
 
+        /// <summary>Static obstacles solid bodies cannot enter, in the order given; empty for the open arena.</summary>
+        public IReadOnlyList<Obstacle> Obstacles { get; }
+
         /// <summary>Tick at the start of which food moves; 0 when it never does.</summary>
         public long FoodShiftTicks { get; }
 
@@ -229,6 +237,31 @@ namespace Eden.Domain
 
         public long MaxAgeTicks { get; }
         public long FoodRespawnTicks { get; }
+
+        // Obstacles need solid bodies and lie inside the arena. A side is at least the smallest body's diameter, so a body
+        // that neighbours push into one is still nearest to the side it came in from and leaves through it.
+        private static void CheckObstacles(List<string> errors, SimulationSettings s, Obstacle[] obstacles)
+        {
+            if (obstacles.Length == 0)
+                return;
+            if (!s.SolidBodies)
+                errors.Add("obstacles need solid bodies");
+            if (obstacles.Length > MaxObstacles)
+            {
+                errors.Add($"{obstacles.Length} obstacles exceed the limit of {MaxObstacles}");
+                return;
+            }
+
+            var smallest = 2f * s.BodyRadius * CreatureBody.Factor(-BodyGenes.MaxAbsValue);
+            for (var i = 0; i < obstacles.Length; i++)
+            {
+                var o = obstacles[i];
+                if (!(o.MinX >= 0f && o.MinY >= 0f && o.MaxX <= s.ArenaWidth && o.MaxY <= s.ArenaHeight))
+                    errors.Add($"obstacle {i} {o} is not inside the arena");
+                else if (!(o.Width >= smallest && o.Height >= smallest))
+                    errors.Add($"obstacle {i} {o} is thinner than the smallest body ({smallest} across)");
+            }
+        }
 
         // Fastest possible step over the smallest possible radius, rounded up; meaningless if the values are invalid.
         private static int SubstepsFor(SimulationSettings s)

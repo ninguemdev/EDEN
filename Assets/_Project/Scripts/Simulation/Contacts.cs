@@ -6,13 +6,14 @@ namespace Eden.Simulation
 {
     /// <summary>
     /// Moves solid bodies (<see cref="SimulationConfig.SolidBodies"/>): every creature is a disc of its body's
-    /// <see cref="CreatureBody.Radius"/> that stays whole inside the arena and does not overlap another. Each tick,
+    /// <see cref="CreatureBody.Radius"/> that stays whole inside the arena, out of every
+    /// <see cref="SimulationConfig.Obstacles">obstacle</see> and does not overlap another. Each tick,
     /// after all creatures steered, the tick is split into <see cref="SimulationConfig.SolidSubsteps"/> moves, so no body
     /// moves farther than the smallest radius in one and two bodies cannot pass through each other. After each move:
     /// <list type="bullet">
     /// <item>up to <see cref="SimulationConfig.ContactPasses"/> separation passes push each overlapping pair apart along
     /// the line between their centres, each body by the share of the other's mass (mass ∝ radius²); a body held by a
-    /// wall cannot give way, so the other takes the rest;</item>
+    /// wall or an obstacle cannot give way, so the other takes the rest;</item>
     /// <item>touching pairs lose the speed at which they approach each other (an inelastic contact that keeps
     /// momentum), so a creature that thrusts into another pushes it, paying the effort of its thrust as always.</item>
     /// </list>
@@ -25,6 +26,9 @@ namespace Eden.Simulation
         // Bodies this close beyond touching still count as touching (for the velocity rule and the count), and overlaps
         // up to this little do not ask for another pass.
         private const float TouchSlack = 1e-4f;
+
+        // Most rounds of pushing a body out of the obstacles it overlaps.
+        private const int ObstacleRounds = 4;
 
         // Centres closer than this have no usable direction between them.
         private const float Coincident = 1e-6f;
@@ -215,11 +219,24 @@ namespace Eden.Simulation
             return pairs;
         }
 
-        // The whole disc stays inside the arena and speed into a wall is lost; true when a wall held the body.
+        // The whole disc stays out of the obstacles and inside the arena, and speed into them is lost; true when an
+        // obstacle or a wall held the body. Walls come last: they always win.
         private bool KeepInside(int i, SimulationConfig config)
         {
             var r = radius[i];
             var held = false;
+            var obstacles = config.Obstacles;
+            for (var round = 0; round < ObstacleRounds; round++)
+            {
+                // A push out of one obstacle can press the body into another (a wedge between two corners).
+                var pushed = false;
+                for (var o = 0; o < obstacles.Count; o++)
+                    pushed |= PushOut(i, obstacles[o], r);
+                held |= pushed;
+                if (!pushed)
+                    break;
+            }
+
             if (x[i] < r)
             {
                 x[i] = r;
@@ -251,6 +268,64 @@ namespace Eden.Simulation
             }
 
             return held;
+        }
+
+        // Pushes the disc out of a rectangle it overlaps: away from the nearest point of the rectangle, or, when its
+        // centre is inside, through the nearest side (left, right, bottom, top on ties). Speed into the rectangle is lost.
+        private bool PushOut(int i, Obstacle obstacle, float r)
+        {
+            var nearestX = x[i] < obstacle.MinX ? obstacle.MinX : x[i] > obstacle.MaxX ? obstacle.MaxX : x[i];
+            var nearestY = y[i] < obstacle.MinY ? obstacle.MinY : y[i] > obstacle.MaxY ? obstacle.MaxY : y[i];
+            var dx = x[i] - nearestX;
+            var dy = y[i] - nearestY;
+            var distanceSquared = dx * dx + dy * dy;
+            if (distanceSquared >= r * r)
+                return false;
+
+            if (distanceSquared > 0f)
+            {
+                var distance = MathF.Sqrt(distanceSquared);
+                var normalX = dx / distance;
+                var normalY = dy / distance;
+                x[i] = nearestX + normalX * r;
+                y[i] = nearestY + normalY * r;
+                var into = velocityX[i] * normalX + velocityY[i] * normalY;
+                if (into < 0f)
+                {
+                    velocityX[i] -= normalX * into;
+                    velocityY[i] -= normalY * into;
+                }
+
+                return true;
+            }
+
+            var left = x[i] - obstacle.MinX;
+            var right = obstacle.MaxX - x[i];
+            var bottom = y[i] - obstacle.MinY;
+            var top = obstacle.MaxY - y[i];
+            var least = Math.Min(Math.Min(left, right), Math.Min(bottom, top));
+            if (left == least)
+            {
+                x[i] = obstacle.MinX - r;
+                velocityX[i] = Math.Min(velocityX[i], 0f);
+            }
+            else if (right == least)
+            {
+                x[i] = obstacle.MaxX + r;
+                velocityX[i] = Math.Max(velocityX[i], 0f);
+            }
+            else if (bottom == least)
+            {
+                y[i] = obstacle.MinY - r;
+                velocityY[i] = Math.Min(velocityY[i], 0f);
+            }
+            else
+            {
+                y[i] = obstacle.MaxY + r;
+                velocityY[i] = Math.Max(velocityY[i], 0f);
+            }
+
+            return true;
         }
 
         // Indices by x, ties in index order: a stable bottom-up merge sort that starts from index order every time, so

@@ -32,7 +32,8 @@ namespace Eden.Editor
     /// commands accept both. -eden-algorithm mlp|neat chooses how generations are bred (default mlp, the legacy
     /// control); a NEAT run only takes a pool of NEAT genomes, which are renumbered on import. -eden-senses legacy|eyes
     /// chooses how creatures sense (eyes need NEAT; default legacy); -eden-eyes fixed|evolving lets eyes mutate (default
-    /// fixed); -eden-solid on|off makes creatures solid bodies that push each other (default off).
+    /// fixed); -eden-solid on|off makes creatures solid bodies that push each other (default off); -eden-obstacles
+    /// none|pillars|corridor puts that layout in the arena (needs -eden-solid on; default none).
     /// -eden-seed-genomes DIR starts generation 0 of RunFromCommandLine from every genome file (see GenomeFile) in DIR
     /// instead of random weights (see GenerationalEvolution.FromSeedPool); a genome exported without a fitness of its
     /// own, or with one from another fitness profile, counts as 0. -eden-export-top N DIR writes the N best genomes of the last generation RunFromCommandLine
@@ -405,6 +406,11 @@ namespace Eden.Editor
                         break;
                     case "-eden-solid" when value == "on" || value == "off":
                         settings.World.SolidBodies = value == "on";
+                        break;
+                    case "-eden-obstacles" when value == "none" || value == "pillars" || value == "corridor":
+                        settings.World.Obstacles = ObstacleLayouts.Create(
+                            value == "pillars" ? ObstacleLayout.Pillars
+                            : value == "corridor" ? ObstacleLayout.Corridor : ObstacleLayout.None, settings.World);
                         break;
                     case "-eden-output":
                         output = value;
