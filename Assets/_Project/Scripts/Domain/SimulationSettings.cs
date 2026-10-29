@@ -57,6 +57,13 @@ namespace Eden.Domain
         /// </summary>
         public float FoodShiftSeconds;
 
+        /// <summary>
+        /// Turning cost of a creature with eyes, as a fraction of its movement cost at the same intensity: it pays
+        /// movement cost × fraction × turn² per second (proposed 0.25). Turning was free before eyes; it now costs, so
+        /// sweeping a narrow eye around is not free. Creatures with the legacy senses keep the old rule.
+        /// </summary>
+        public float TurnCostFraction = 0.25f;
+
         // Continuous mode: local asexual reproduction. Off by default; isolated episodes never reproduce.
         /// <summary>Living, mature creatures with enough energy and no cooldown give birth near themselves.</summary>
         public bool Reproduction;

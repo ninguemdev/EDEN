@@ -255,8 +255,23 @@ namespace Eden.Simulation
                 var action = actions[i];
                 var effort = action.Thrust * action.Thrust + action.Strafe * action.Strafe;
                 var body = creature.Body;
-                var cost = config.TickDuration *
+                float cost;
+                if (creature.Eyes == null)
+                {
+                    cost = config.TickDuration *
                            (body.MetabolismPerSecond + body.MovementCostPerSecond * effort + body.SensorCostPerSecond);
+                }
+                else
+                {
+                    // Eyes replace the circular sense and its cost, and turning costs a share of moving.
+                    var eyeCost = EyeCost.PerSecond(body, creature.Eyes);
+                    var turning = config.TurnCostFraction * action.Turn * action.Turn;
+                    cost = config.TickDuration *
+                           (body.MetabolismPerSecond + body.MovementCostPerSecond * (effort + turning) + eyeCost);
+                    energy.EyeCosts += (double)config.TickDuration * eyeCost;
+                    energy.TurnCosts += (double)config.TickDuration * body.MovementCostPerSecond * turning;
+                }
+
                 // Kept as one expression: splitting it would round the intermediate sum and change every run.
                 var left = creature.Energy + foodGains[i] - cost;
                 // A creature pays at most what it holds; food that does not fit is lost.

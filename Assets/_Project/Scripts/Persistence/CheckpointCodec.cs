@@ -354,6 +354,7 @@ namespace Eden.Persistence
             AddIfNotDefault(settings, "sensorCostExponent", s.SensorCostExponent, Defaults.SensorCostExponent);
             AddIfNotDefault(settings, "efficiencyPowerExponent", s.EfficiencyPowerExponent, Defaults.EfficiencyPowerExponent);
             AddIfNotDefault(settings, "foodShiftSeconds", s.FoodShiftSeconds, Defaults.FoodShiftSeconds);
+            AddIfNotDefault(settings, "turnCostFraction", s.TurnCostFraction, Defaults.TurnCostFraction);
             if (s.Reproduction)
             {
                 settings.Add("reproduction", JsonValue.NewObject()
@@ -409,7 +410,8 @@ namespace Eden.Persistence
                 SpeedCostExponent = FloatOr(saved, "speedCostExponent", Defaults.SpeedCostExponent),
                 SensorCostExponent = FloatOr(saved, "sensorCostExponent", Defaults.SensorCostExponent),
                 EfficiencyPowerExponent = FloatOr(saved, "efficiencyPowerExponent", Defaults.EfficiencyPowerExponent),
-                FoodShiftSeconds = FloatOr(saved, "foodShiftSeconds", Defaults.FoodShiftSeconds)
+                FoodShiftSeconds = FloatOr(saved, "foodShiftSeconds", Defaults.FoodShiftSeconds),
+                TurnCostFraction = FloatOr(saved, "turnCostFraction", Defaults.TurnCostFraction)
             };
             // Absent means off; the other reproduction values then keep their defaults and change nothing.
             var reproduction = saved.TryGet("reproduction");
