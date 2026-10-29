@@ -68,7 +68,7 @@ namespace Eden.Application
             for (var i = 0; i < genomes.Count; i++)
             {
                 var genome = genomes[i] ?? throw new ArgumentException($"Genome {i} is null.", nameof(genomes));
-                candidates[i] = () => new MlpBrain(genome);
+                candidates[i] = () => GenomeBrains.Create(genome);
             }
 
             return candidates;
