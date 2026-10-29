@@ -65,6 +65,12 @@ namespace Eden.Evolution
         /// </summary>
         public bool EvolvingEyes;
 
+        /// <summary>
+        /// How genomes are scored. <see cref="RewardProfile.Legacy"/> (the default and the control) is food energy per
+        /// second, recorded exactly as before profiles existed. Immutable, so copies share it.
+        /// </summary>
+        public RewardProfile Profile = RewardProfile.Legacy;
+
         /// <summary>Genomes per generation (proposed 64).</summary>
         public int PopulationSize = 64;
 
@@ -177,6 +183,11 @@ namespace Eden.Evolution
                 errors.Add("eyes need NEAT; the MLP control keeps the legacy senses");
             if (settings.EvolvingEyes && settings.Senses != Senses.Eyes)
                 errors.Add("evolving eyes need the eye senses");
+            if (settings.Profile == null)
+                errors.Add("a reward profile is required");
+            else if (settings.Profile.Stages.Count != 1)
+                errors.Add($"reward profile \"{settings.Profile.Id}\" has {settings.Profile.Stages.Count} stages; " +
+                           "episodes are evaluated in a single stage");
             if (errors.Count > 0)
                 throw new ArgumentException("Invalid evolution settings: " + string.Join("; ", errors));
 
@@ -188,6 +199,7 @@ namespace Eden.Evolution
             episodeTemplate = validated;
 
             ExperimentSeed = settings.ExperimentSeed;
+            Profile = settings.Profile;
             Algorithm = settings.Algorithm;
             Senses = settings.Senses;
             Contract = Senses == Senses.Eyes ? NeuralContract.ForEyes(validated.HasWater) : NeuralContract.Legacy;
@@ -206,6 +218,9 @@ namespace Eden.Evolution
         }
 
         public ulong ExperimentSeed { get; }
+
+        /// <summary>How episodes are scored and recorded.</summary>
+        public RewardProfile Profile { get; }
 
         public EvolutionAlgorithm Algorithm { get; }
 

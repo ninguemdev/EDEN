@@ -583,7 +583,8 @@ namespace Eden.Presentation
             var source = Evolution == null
                 ? (GenomeSource?)null
                 : new GenomeSource(Evolution.Plan.ExperimentSeed, sharedGeneration, individualId);
-            return new GenomeRecord(genome, fitness, source);
+            var profile = Evolution?.Plan.Profile ?? RewardProfile.Legacy;
+            return new GenomeRecord(genome, fitness, source, profile.Id, profile.ParameterHash);
         }
 
         /// <summary>Switches the brain kind of the shared world and restarts it with the same seed.</summary>
@@ -1015,7 +1016,7 @@ namespace Eden.Presentation
                 for (var i = 0; i < pool.Length; i++)
                 {
                     genomes[i] = pool[i].Genome;
-                    fitness[i] = pool[i].FitnessFor(Fitness.Profile) ?? 0f;
+                    fitness[i] = pool[i].FitnessFor(evolutionSettings.Profile) ?? 0f;
                 }
 
                 return EvolutionSession.FromSeedPool(evolutionSettings, genomes, fitness, evaluationWorkers: TrainingWorkers);

@@ -120,7 +120,7 @@ namespace Eden.Persistence
                 .Add("episodeTicks", JsonValue.Of(header.Plan.EpisodeTicks))
                 .Add("validationSeeds", validationSeeds)
                 .Add("fitnessUnit", JsonValue.Of(FitnessUnit))
-                .Add("fitnessProfile", JsonValue.Of(Fitness.Profile))
+                .Add("fitnessProfile", JsonValue.Of(header.Plan.Profile.Id))
                 .Add("neuralContract", JsonValue.Of(header.Plan.Contract.Id))
                 .Add("network", JsonValue.Of(neat ? NeatNetwork.Kind : Genome.MlpNetwork))
                 .Add("topology", neat
@@ -132,6 +132,8 @@ namespace Eden.Persistence
                 .Add("evolutionAlgorithm", JsonValue.Of(EvolutionAlgorithmOf(header.Plan.Algorithm)))
                 .Add("columns", files)
                 .Add("resumedFrom", header.ResumedFrom == null ? JsonValue.Null() : header.ResumedFrom.ToJson());
+            if (!header.Plan.Profile.IsLegacy)
+                root.Add("fitnessProfileHash", JsonValue.Of(header.Plan.Profile.ParameterHash));
             return JsonText.Write(root);
         }
 

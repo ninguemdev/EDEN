@@ -150,6 +150,9 @@ namespace Eden.Persistence
         private static JsonValue EncodeConfig(Checkpoint checkpoint)
         {
             var evolution = checkpoint.Evolution;
+            if (evolution?.Settings.Profile != null && !evolution.Settings.Profile.IsLegacy)
+                throw new CheckpointException($"Runs scored by reward profile \"{evolution.Settings.Profile.Id}\" " +
+                                              "cannot be saved as checkpoints by this build.");
             return JsonValue.NewObject()
                 .Add("lab", JsonValue.NewObject()
                     .Add("mode", JsonValue.Of(checkpoint.Mode))
@@ -192,6 +195,11 @@ namespace Eden.Persistence
                 settings.Add("senses", JsonValue.Of("eyes"));
             if (s.EvolvingEyes)
                 settings.Add("evolvingEyes", JsonValue.Of(true));
+            // The legacy profile is implied, so the text and hash of every earlier experiment stay the same.
+            if (s.Profile != null && !s.Profile.IsLegacy)
+                settings.Add("rewardProfile", JsonValue.NewObject()
+                    .Add("id", JsonValue.Of(s.Profile.Id))
+                    .Add("hash", JsonValue.Of(s.Profile.ParameterHash)));
             return settings;
         }
 
@@ -335,6 +343,11 @@ namespace Eden.Persistence
 
             // Absent means fixed eyes; an explicit false does not read back the same and is refused.
             settings.EvolvingEyes = saved.TryGet("evolvingEyes")?.Boolean() ?? false;
+
+            var profile = saved.TryGet("rewardProfile");
+            if (profile != null)
+                throw new CheckpointException($"{profile.Path}: reward profile \"{profile["id"].String()}\" cannot be " +
+                                              "continued by this build.");
 
             // They validate every value and report all problems together.
             new EvaluationPlan(settings);

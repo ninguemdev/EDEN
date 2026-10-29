@@ -28,15 +28,28 @@ namespace Eden.Persistence
     public sealed class GenomeRecord
     {
         /// <param name="fitnessProfile">Scoring rule of <paramref name="fitness"/>; ignored without a fitness.</param>
+        /// <param name="fitnessProfileHash">
+        /// <see cref="RewardProfile.ParameterHash"/> of that rule; null for the legacy profile and ignored without a fitness.
+        /// </param>
         public GenomeRecord(Genome genome, float? fitness = null, GenomeSource? source = null,
-            string fitnessProfile = Evolution.Fitness.Profile)
+            string fitnessProfile = Evolution.Fitness.Profile, string fitnessProfileHash = null)
         {
             Genome = genome ?? throw new ArgumentNullException(nameof(genome));
             if (fitness.HasValue && string.IsNullOrEmpty(fitnessProfile))
                 throw new ArgumentException("A fitness needs the profile that produced it.", nameof(fitnessProfile));
+            if (fitness.HasValue && fitnessProfileHash == string.Empty)
+                throw new ArgumentException("A profile hash cannot be empty.", nameof(fitnessProfileHash));
             Fitness = fitness;
             FitnessProfile = fitness.HasValue ? fitnessProfile : null;
+            FitnessProfileHash = fitness.HasValue ? fitnessProfileHash : null;
             Source = source;
+        }
+
+        /// <summary>A genome scored by <paramref name="profile"/>, recorded with its id and parameter hash.</summary>
+        public GenomeRecord(Genome genome, float fitness, RewardProfile profile, GenomeSource? source = null)
+            : this(genome, fitness, source, (profile ?? throw new ArgumentNullException(nameof(profile))).Id,
+                profile.ParameterHash)
+        {
         }
 
         public Genome Genome { get; }
@@ -45,13 +58,21 @@ namespace Eden.Persistence
         /// <summary>Scoring rule of <see cref="Fitness"/> (e.g. <see cref="Evolution.Fitness.Profile"/>); null without a fitness.</summary>
         public string FitnessProfile { get; }
 
+        /// <summary>Parameter hash of <see cref="FitnessProfile"/>; null for the legacy profile or without a fitness.</summary>
+        public string FitnessProfileHash { get; }
+
         public GenomeSource? Source { get; }
 
         /// <summary>
-        /// The fitness when it was scored by <paramref name="profile"/>, otherwise null: a score from another profile is
-        /// history, not something to rank against this profile's scores.
+        /// The fitness when it was scored by <paramref name="profile"/> with the same parameters, otherwise null: a score
+        /// from another profile, or from the same one with other stages, weights or parameters, is history, not something
+        /// to rank against this profile's scores.
         /// </summary>
-        public float? FitnessFor(string profile) => FitnessProfile == profile ? Fitness : null;
+        public float? FitnessFor(RewardProfile profile) =>
+            profile != null && profile.Matches(FitnessProfile, FitnessProfileHash) ? Fitness : null;
+
+        /// <summary>The fitness when it was scored by the profile with this id and no parameter hash, otherwise null.</summary>
+        public float? FitnessFor(string profile) => FitnessProfile == profile && FitnessProfileHash == null ? Fitness : null;
     }
 
     /// <summary>
@@ -61,12 +82,17 @@ namespace Eden.Persistence
     /// the profile of its fitness. An MLP is written as <c>topology</c> and flat <c>weights</c>; a NEAT network as
     /// <c>connections</c>, each <c>[innovation, from, to, weight, enabled]</c> in innovation order (its nodes follow from
     /// the contract and the connections). Schema 1 files (before those fields) are read as MLP genomes of the legacy
-    /// contract scored by <see cref="Fitness.Profile"/> "food-energy-per-second-v1", the only ones that existed.
+    /// contract scored by <see cref="Fitness.Profile"/> "food-energy-per-second-v1", the only ones that existed. Schema 3
+    /// adds <c>fitnessProfileHash</c> and is written only for a fitness that has one, so every other file is still
+    /// schema 2.
     /// </summary>
     public static class GenomeCodec
     {
         public const string Format = "eden-genome";
-        public const int SchemaVersion = 2;
+        public const int SchemaVersion = 3;
+
+        // The newest schema a file needs when its fitness has no profile hash.
+        private const int SchemaWithoutProfileHash = 2;
 
         public static string Encode(GenomeRecord record, string appVersion, DateTime savedUtc)
         {
@@ -75,7 +101,7 @@ namespace Eden.Persistence
             var genome = record.Genome;
             var root = JsonValue.NewObject()
                 .Add("format", JsonValue.Of(Format))
-                .Add("schemaVersion", JsonValue.Of(SchemaVersion))
+                .Add("schemaVersion", JsonValue.Of(record.FitnessProfileHash == null ? SchemaWithoutProfileHash : SchemaVersion))
                 .Add("app", JsonValue.NewObject().Add("version", JsonValue.Of(appVersion ?? string.Empty)))
                 .Add("savedUtc", JsonValue.Of(savedUtc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)))
                 .Add("genomeSchema", JsonValue.Of(Genome.CurrentSchemaVersion))
@@ -112,6 +138,8 @@ namespace Eden.Persistence
             {
                 root.Add("fitness", JsonValue.OfAnyFloat(record.Fitness.Value));
                 root.Add("fitnessProfile", JsonValue.Of(record.FitnessProfile));
+                if (record.FitnessProfileHash != null)
+                    root.Add("fitnessProfileHash", JsonValue.Of(record.FitnessProfileHash));
             }
             if (record.Source.HasValue)
             {
@@ -164,6 +192,15 @@ namespace Eden.Persistence
             var profile = schema >= 2 ? savedProfile?.String() : Fitness.Profile;
             if (fitness.HasValue && string.IsNullOrEmpty(profile))
                 throw new CheckpointException("A fitness needs the profile that produced it (fitnessProfile).");
+            var savedHash = root.TryGet("fitnessProfileHash");
+            if (savedHash != null && (schema < 3 || savedProfile == null))
+                throw new CheckpointException($"{savedHash.Path}: a profile hash needs schema 3 and a fitness profile.");
+            if (savedHash == null && schema >= 3)
+                throw new CheckpointException("Schema 3 is written only with a profile hash (fitnessProfileHash).");
+            var hash = savedHash?.String();
+            if (hash != null && (hash.Length != 16 || !ulong.TryParse(hash, NumberStyles.AllowHexSpecifier,
+                    CultureInfo.InvariantCulture, out _)))
+                throw new CheckpointException($"{savedHash.Path}: expected 16 hexadecimal digits.");
             GenomeSource? source = null;
             var sourceValue = root.TryGet("source");
             if (sourceValue != null)
@@ -172,7 +209,7 @@ namespace Eden.Persistence
                     sourceValue["individualId"].Long(1));
             }
 
-            return new GenomeRecord(genome, fitness, source, profile);
+            return new GenomeRecord(genome, fitness, source, profile, hash);
         }
 
         private static Genome DecodeMlp(JsonValue root, NeuralContract contract)

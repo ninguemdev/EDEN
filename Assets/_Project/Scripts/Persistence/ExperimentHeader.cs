@@ -69,7 +69,7 @@ namespace Eden.Persistence
                 "config_hash=" + CheckpointCodec.Hex(ConfigHash),
                 "evaluation_mode=isolated",
                 "fitness_unit=" + ExperimentJson.FitnessUnit,
-                "fitness_profile=" + Fitness.Profile,
+                "fitness_profile=" + Plan.Profile.Id,
                 "neural_contract=" + Plan.Contract.Id,
                 "network=" + (IsNeat ? NeatNetwork.Kind : NetworkTopology.Mlp12x16x3.ToString()),
                 "evolution_algorithm=" + ExperimentJson.EvolutionAlgorithmOf(Plan.Algorithm),
@@ -86,6 +86,7 @@ namespace Eden.Persistence
                 "episode_food=" + world.InitialFood.ToString(culture),
                 "population=" + Rules.PopulationSize.ToString(culture)
             };
+            lines.AddRange(ProfileLines(Plan.Profile));
             if (Plan.Senses == Senses.Eyes)
             {
                 var eye = Eye.Frontal;
@@ -182,6 +183,34 @@ namespace Eden.Persistence
             if (ResumedFrom != null)
                 lines.AddRange(ResumedFrom.Describe());
             return lines;
+        }
+
+        /// <summary>
+        /// The parameter hash, stages and parameters of a profile other than the legacy one, which needs no more than its
+        /// id; nothing for the legacy profile.
+        /// </summary>
+        internal static IEnumerable<string> ProfileLines(RewardProfile profile)
+        {
+            if (profile.IsLegacy)
+                yield break;
+            var culture = CultureInfo.InvariantCulture;
+            yield return "fitness_profile_hash=" + profile.ParameterHash;
+            foreach (var stage in profile.Stages)
+            {
+                var components = new List<string>();
+                foreach (var component in stage.Components)
+                    components.Add(component.Name + " " + component.Unit);
+                yield return "reward_stage=" + stage.Name + ";weight " + stage.Weight.ToString(culture) + ";scoring " +
+                             stage.Scoring + ";components " + string.Join(",", components);
+            }
+
+            if (profile.Parameters.Count > 0)
+            {
+                var parameters = new List<string>();
+                foreach (var parameter in profile.Parameters)
+                    parameters.Add(parameter.Name + " " + parameter.Value.ToString(culture));
+                yield return "reward_parameters=" + string.Join(";", parameters);
+            }
         }
 
         /// <summary>

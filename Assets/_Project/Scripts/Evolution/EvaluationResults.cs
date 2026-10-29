@@ -32,9 +32,15 @@ namespace Eden.Evolution
     /// <summary>Outcome of one candidate on one seed. Survival and energy are kept apart from fitness.</summary>
     public readonly struct EpisodeResult
     {
+        /// <param name="components">
+        /// Values of the stage's reward components beyond the fields kept here, in the stage's order; null (the legacy
+        /// profile) when there are none.
+        /// </param>
         public EpisodeResult(EvaluationMode mode, int generation, int candidate, int seedIndex, ulong episodeSeed,
-            long episodeTicks, float episodeSeconds, float foodEnergy, long survivedTicks, bool survived, float finalEnergy)
+            long episodeTicks, float episodeSeconds, float foodEnergy, long survivedTicks, bool survived, float finalEnergy,
+            IReadOnlyList<float> components = null)
         {
+            Components = components;
             Mode = mode;
             Generation = generation;
             Candidate = candidate;
@@ -70,6 +76,10 @@ namespace Eden.Evolution
         public bool Survived { get; }
 
         public float FinalEnergy { get; }
+
+        /// <summary>Further reward components of the episode's stage; null when the stage reports none beyond the fields.</summary>
+        public IReadOnlyList<float> Components { get; }
+
         public bool IsValid => Evolution.Fitness.IsValid(Fitness);
     }
 
