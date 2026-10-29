@@ -7,7 +7,7 @@ namespace Eden.Simulation
     /// <summary>
     /// Moves solid bodies (<see cref="SimulationConfig.SolidBodies"/>): every creature is a disc of its body's
     /// <see cref="CreatureBody.Radius"/> that stays whole inside the arena, out of every
-    /// <see cref="SimulationConfig.Obstacles">obstacle</see> and does not overlap another. Each tick,
+    /// <see cref="SimulationConfig.Barriers">obstacle and water source</see> and does not overlap another. Each tick,
     /// after all creatures steered, the tick is split into <see cref="SimulationConfig.SolidSubsteps"/> moves, so no body
     /// moves farther than the smallest radius in one and two bodies cannot pass through each other. After each move:
     /// <list type="bullet">
@@ -225,7 +225,7 @@ namespace Eden.Simulation
         {
             var r = radius[i];
             var held = false;
-            var obstacles = config.Obstacles;
+            var obstacles = config.Barriers;
             for (var round = 0; round < ObstacleRounds; round++)
             {
                 // A push out of one obstacle can press the body into another (a wedge between two corners).

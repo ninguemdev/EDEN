@@ -62,7 +62,7 @@ namespace Eden.Presentation
             {
                 var sample = metrics.LastSample;
                 text.AppendLine($"Último segundo: {sample.FoodEatenInWindow} comidas, " +
-                                $"{sample.StarvationDeathsInWindow + sample.OldAgeDeathsInWindow} mortes, " +
+                                $"{sample.DeathsInWindow} mortes, " +
                                 $"energia média {sample.MeanEnergy:0.0}");
             }
 
@@ -218,6 +218,9 @@ namespace Eden.Presentation
                     ? "Cérebro: rede NEAT com genoma próprio (topologia evolutiva, sem memória)"
                     : "Cérebro: " + BrainLabel(brainName));
             text.AppendLine($"Energia {creature.Energy:0.0} / {creature.Body.MaxEnergy:0.#}");
+            if (config.HasWater)
+                text.AppendLine($"Hidratação {creature.Hydration:0.0} / {config.MaxHydration:0.#} (bebe na margem da água; " +
+                                "morre de sede em 0)");
             text.AppendLine($"Idade {creature.AgeTicks * (double)config.TickDuration:0.0} s de {config.MaxAgeSeconds:0} s");
             text.AppendLine($"Comida ingerida {creature.FoodEnergyEaten:0} de energia");
             text.AppendLine($"Posição ({creature.Position.X:0.0}; {creature.Position.Y:0.0}) — só inspeção");
@@ -451,7 +454,9 @@ namespace Eden.Presentation
         {
             if (!death.HasValue)
                 return $"Criatura {id}\nnão está mais no mundo";
-            var cause = death.Value.Cause == DeathCause.Starvation ? "fome" : "idade";
+            var cause = death.Value.Cause == DeathCause.Starvation ? "fome"
+                : death.Value.Cause == DeathCause.Dehydration ? "sede"
+                : "idade";
             return $"Criatura {id}\nmorreu de {cause} no tick {death.Value.Tick}";
         }
 

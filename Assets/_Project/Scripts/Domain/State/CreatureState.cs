@@ -4,7 +4,10 @@ namespace Eden.Domain
     {
         None = 0,
         Starvation = 1,
-        OldAge = 2
+        OldAge = 2,
+
+        /// <summary>Hydration ran out (only in runs with water).</summary>
+        Dehydration = 3
     }
 
     /// <summary>
@@ -49,6 +52,12 @@ namespace Eden.Domain
         public float Heading { get; set; }
 
         public float Energy { get; set; }
+
+        /// <summary>
+        /// Water held, apart from energy: lost with time, refilled only by drinking, death at 0. Always 0 in a run
+        /// without water (<see cref="SimulationConfig.HasWater"/>), where it means nothing.
+        /// </summary>
+        public float Hydration { get; set; }
 
         /// <summary>Age in simulated ticks; never derived from wall-clock time.</summary>
         public long AgeTicks { get; set; }

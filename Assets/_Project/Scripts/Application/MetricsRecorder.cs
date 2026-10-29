@@ -9,8 +9,10 @@ namespace Eden.Application
     {
         public MetricsSample(long tick, double simulatedSeconds, int population, int foodAvailable, int foodEatenInWindow,
             int starvationDeathsInWindow, int oldAgeDeathsInWindow, float meanEnergy, long totalFoodEaten,
-            int birthsInWindow = 0, int birthsRefusedInWindow = 0, int maxGeneration = 0, bool extinct = false)
+            int birthsInWindow = 0, int birthsRefusedInWindow = 0, int maxGeneration = 0, bool extinct = false,
+            int dehydrationDeathsInWindow = 0)
         {
+            DehydrationDeathsInWindow = dehydrationDeathsInWindow;
             Tick = tick;
             SimulatedSeconds = simulatedSeconds;
             Population = population;
@@ -35,6 +37,12 @@ namespace Eden.Application
         public int FoodEatenInWindow { get; }
         public int StarvationDeathsInWindow { get; }
         public int OldAgeDeathsInWindow { get; }
+
+        /// <summary>Deaths of thirst (only in runs with water; not yet a column of metrics.csv).</summary>
+        public int DehydrationDeathsInWindow { get; }
+
+        /// <summary>Deaths of every cause in the window.</summary>
+        public int DeathsInWindow => StarvationDeathsInWindow + OldAgeDeathsInWindow + DehydrationDeathsInWindow;
 
         /// <summary>Mean energy of living creatures; 0 when the population is extinct.</summary>
         public float MeanEnergy { get; }
@@ -62,6 +70,7 @@ namespace Eden.Application
         private int foodEaten;
         private int starvationDeaths;
         private int oldAgeDeaths;
+        private int dehydrationDeaths;
         private int births;
         private int birthsRefused;
 
@@ -99,6 +108,8 @@ namespace Eden.Application
                     starvationDeaths++;
                 else if (death.Cause == DeathCause.OldAge)
                     oldAgeDeaths++;
+                else if (death.Cause == DeathCause.Dehydration)
+                    dehydrationDeaths++;
             }
 
             var world = simulation.World;
@@ -119,11 +130,13 @@ namespace Eden.Application
             var population = world.Creatures.Count;
             LastSample = new MetricsSample(world.Tick, (double)world.Tick / config.TicksPerSecond, population,
                 world.Food.Count, foodEaten, starvationDeaths, oldAgeDeaths,
-                population > 0 ? energy / population : 0f, TotalFoodEaten, births, birthsRefused, generation, extinct);
+                population > 0 ? energy / population : 0f, TotalFoodEaten, births, birthsRefused, generation, extinct,
+                dehydrationDeaths);
             HasSample = true;
             foodEaten = 0;
             starvationDeaths = 0;
             oldAgeDeaths = 0;
+            dehydrationDeaths = 0;
             births = 0;
             birthsRefused = 0;
             return true;

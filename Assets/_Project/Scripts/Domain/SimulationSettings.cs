@@ -84,6 +84,22 @@ namespace Eden.Domain
         /// </summary>
         public Obstacle[] Obstacles = Array.Empty<Obstacle>();
 
+        /// <summary>
+        /// Water sources (they need <see cref="SolidBodies"/>; see <see cref="WaterLayouts"/>). Empty, the default, means
+        /// no water and no hydration at all: runs are exactly as before. With water every creature also has a hydration
+        /// reserve, apart from its energy, that it loses with time, refills only by drinking and dies of when it runs out.
+        /// </summary>
+        public WaterSource[] Water = Array.Empty<WaterSource>();
+
+        /// <summary>Hydration a creature holds when full; founders start full. Only used with water.</summary>
+        public float MaxHydration = 100f;
+
+        /// <summary>Hydration lost per second, whatever the creature does (proposed; to be calibrated).</summary>
+        public float HydrationLossPerSecond = 1f;
+
+        /// <summary>Most hydration a creature takes in per second while it touches the water (proposed).</summary>
+        public float DrinkRatePerSecond = 20f;
+
         // Continuous mode: local asexual reproduction. Off by default; isolated episodes never reproduce.
         /// <summary>Living, mature creatures with enough energy and no cooldown give birth near themselves.</summary>
         public bool Reproduction;
@@ -119,6 +135,7 @@ namespace Eden.Domain
         {
             var copy = (SimulationSettings)MemberwiseClone();
             copy.Obstacles = (Obstacle[])Obstacles?.Clone();
+            copy.Water = (WaterSource[])Water?.Clone();
             return copy;
         }
     }

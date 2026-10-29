@@ -41,6 +41,8 @@ namespace Eden.Persistence
                 lines.Add("free_regions=" + config.FreeSpace.Regions.ToString(culture));
             }
 
+            lines.AddRange(ExperimentHeader.WaterLines(config));
+
             return lines;
         }
     }

@@ -186,6 +186,7 @@ namespace Eden.Persistence
                 .Add("bodies", JsonValue.Of(world.SolidBodies ? "solid" : "points"))
                 .Add("obstacleLayout", JsonValue.Of(ExperimentHeader.LayoutName(world)))
                 .Add("obstacles", JsonValue.Of(world.Obstacles.Count))
+                .Add("waterSources", JsonValue.Of(world.Water.Count))
                 .Add("freeRegions", world.FreeSpace == null ? JsonValue.Null() : JsonValue.Of(world.FreeSpace.Regions));
 
         private static JsonValue SummaryOrNull(GenerationSummary summary) =>

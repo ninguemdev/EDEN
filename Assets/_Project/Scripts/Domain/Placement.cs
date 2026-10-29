@@ -5,8 +5,8 @@ namespace Eden.Domain
 {
     /// <summary>
     /// Where solid bodies and food may appear (<see cref="SimulationConfig.SolidBodies"/>). A body fits where its whole
-    /// disc is inside the arena, out of every obstacle and clear of every living creature. Food is a point; it fits where
-    /// it is not inside an obstacle, not under a living body and within reach of a place the reference body can stand
+    /// disc is inside the arena, out of every obstacle and water source (<see cref="SimulationConfig.Barriers"/>) and clear
+    /// of every living creature. Food is a point; it fits where it is not inside an obstacle or water, not under a living body and within reach of a place the reference body can stand
     /// (see <see cref="FreeSpace"/>), so it never appears in a nook no body can eat from. Placement draws positions from a
     /// random stream and gives up after a bounded number of tries; callers decide what giving up means.
     /// </summary>
@@ -28,10 +28,10 @@ namespace Eden.Domain
             if (!(position.X >= radius && position.X <= config.ArenaWidth - radius && position.Y >= radius &&
                   position.Y <= config.ArenaHeight - radius))
                 return false;
-            var obstacles = config.Obstacles;
-            for (var i = 0; i < obstacles.Count; i++)
+            var barriers = config.Barriers;
+            for (var i = 0; i < barriers.Count; i++)
             {
-                if (obstacles[i].DistanceTo(position) < radius)
+                if (barriers[i].DistanceTo(position) < radius)
                     return false;
             }
 
@@ -53,10 +53,10 @@ namespace Eden.Domain
         /// <summary>Whether food may appear at <paramref name="position"/>.</summary>
         public static bool FoodFits(SimulationConfig config, IReadOnlyList<CreatureState> creatures, Float2 position)
         {
-            var obstacles = config.Obstacles;
-            for (var i = 0; i < obstacles.Count; i++)
+            var barriers = config.Barriers;
+            for (var i = 0; i < barriers.Count; i++)
             {
-                if (obstacles[i].Contains(position))
+                if (barriers[i].Contains(position))
                     return false;
             }
 
@@ -71,7 +71,7 @@ namespace Eden.Domain
                     return false;
             }
 
-            return config.FreeSpace == null || config.FreeSpace.Reaches(position, config.EatRadius, obstacles);
+            return config.FreeSpace == null || config.FreeSpace.Reaches(position, config.EatRadius, config.Obstacles);
         }
 
         /// <summary>
