@@ -80,8 +80,20 @@ namespace Eden.Persistence
         {
             if (double.IsNaN(value) || double.IsInfinity(value))
                 throw new ArgumentException($"Non-finite value {value} cannot be saved as a number.", nameof(value));
-            return Number(value.ToString("R", CultureInfo.InvariantCulture));
+            var text = value.ToString("R", CultureInfo.InvariantCulture);
+            // Mono can choose a 15-digit R representation that parses to an adjacent double.
+            // Keep the historical text when exact; otherwise use all 17 significant digits.
+            if (value == 0d || SameDoubleBits(value, text))
+                return Number(text);
+            text = value.ToString("G17", CultureInfo.InvariantCulture);
+            if (!SameDoubleBits(value, text))
+                throw new InvalidOperationException($"No round-trip text for double bits {BitConverter.DoubleToInt64Bits(value)}.");
+            return Number(text);
         }
+
+        private static bool SameDoubleBits(double value, string text) =>
+            double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) &&
+            BitConverter.DoubleToInt64Bits(parsed) == BitConverter.DoubleToInt64Bits(value);
 
         /// <summary>A float that may be NaN or infinite (e.g. an invalid fitness), written as a string in that case.</summary>
         public static JsonValue OfAnyFloat(float value) =>

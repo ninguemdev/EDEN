@@ -198,6 +198,28 @@ namespace Eden.Tests.EditMode
         }
 
         [Test]
+        public void CheckpointPreservesDoubleBitsAtTheGeneration750Regression()
+        {
+            // The maintenance total of candidate 113 / seed 1 at g749 triggered Mono's R formatter bug.
+            foreach (var bits in new[] { 4628509548862323434L, 4628509548862323435L, 4628509548862323436L })
+            {
+                var original = new EvolutionSession(Settings());
+                original.Job.Current.Tracker.Active.Maintenance = BitConverter.Int64BitsToDouble(bits);
+                var checkpoint = new Checkpoint("evolution", "minimal", 1, "neural", original.Capture(), null);
+                var time = new DateTime(2026, 10, 30, 12, 0, 0, DateTimeKind.Utc);
+                var text = CheckpointCodec.Encode(checkpoint, "test", "test", time);
+                var decoded = CheckpointCodec.Decode(text, out _);
+                Assert.That(BitConverter.DoubleToInt64Bits(decoded.Evolution.Job.CurrentTracker.Active.Maintenance),
+                    Is.EqualTo(bits), "double bits " + bits);
+                Assert.That(CheckpointCodec.Encode(decoded, "test", "test", time), Is.EqualTo(text));
+                var restored = EvolutionSession.Restore(decoded.Evolution);
+                original.Advance(50); restored.Advance(50);
+                Assert.That(CheckpointCodec.Encode(new Checkpoint("evolution", "minimal", 1, "neural", restored.Capture(), null), "test", "test", time),
+                    Is.EqualTo(CheckpointCodec.Encode(new Checkpoint("evolution", "minimal", 1, "neural", original.Capture(), null), "test", "test", time)));
+            }
+        }
+
+        [Test]
         public void ResumeAroundConsumptionThresholdAndCompletedEpisodes()
         {
             foreach (var waterTicks in new[] { 0, 1, 4, 5, 7 })
