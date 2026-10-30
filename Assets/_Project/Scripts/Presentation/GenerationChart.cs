@@ -14,7 +14,7 @@ namespace Eden.Presentation
     /// curve that only beats random is visible as such. Redrawn only when a generation or validation is added.
     /// Series colors are the validated dark categorical slots 1–4 of the dataviz palette.
     /// </summary>
-    public sealed class GenerationChart : VisualElement
+    public sealed partial class GenerationChart : VisualElement
     {
         public static readonly Color TrainingMedianColor = new Color32(0x39, 0x87, 0xE5, 255);
         public static readonly Color TrainingBestColor = new Color32(0xD9, 0x59, 0x26, 255);
@@ -23,9 +23,9 @@ namespace Eden.Presentation
         public static readonly Color SearchStageColor = new Color32(0xB0, 0x6A, 0xD8, 255);
         public static readonly Color ResourcesStageColor = new Color32(0x6F, 0xB8, 0x3A, 255);
 
-        private const float LeftGutter = 34f;
+        private const float LeftGutter = 56f;
         private const float RightGutter = 92f;
-        private const float TopGutter = 8f;
+        private const float TopGutter = 22f;
         private const float BottomGutter = 16f;
         private const float LineWidth = 2f;
         private const float MarkerRadius = 4f;
@@ -41,6 +41,8 @@ namespace Eden.Presentation
         private readonly Label heuristicLabel;
         private readonly Label randomLabel;
         private readonly Label emptyLabel;
+        private readonly Label[] scaleLabels = new Label[3];
+        private readonly Label unitLabel;
         private EvolutionSession session;
         private int shownTraining = -1;
         private int shownValidation = -1;
@@ -49,7 +51,8 @@ namespace Eden.Presentation
         public GenerationChart()
         {
             name = "generation-chart";
-            pickingMode = PickingMode.Ignore;
+            pickingMode = PickingMode.Position;
+            focusable = true;
             style.flexGrow = 1f;
             topLabel = AddLabel(TextAnchor.UpperRight);
             bottomLabel = AddLabel(TextAnchor.LowerRight);
@@ -58,9 +61,12 @@ namespace Eden.Presentation
             heuristicLabel = AddLabel(TextAnchor.MiddleLeft);
             randomLabel = AddLabel(TextAnchor.MiddleLeft);
             emptyLabel = AddLabel(TextAnchor.MiddleCenter);
+            unitLabel = AddLabel(TextAnchor.UpperLeft);
+            for (var i = 0; i < scaleLabels.Length; i++) scaleLabels[i] = AddLabel(TextAnchor.MiddleRight);
             emptyLabel.text = "aguardando a primeira geração completa";
             generateVisualContent += Generate;
             RegisterCallback<GeometryChangedEvent>(_ => PlaceLabels());
+            BindNavigation();
         }
 
         /// <summary>Number of times the chart was drawn; grows only when new results arrive.</summary>
@@ -76,31 +82,18 @@ namespace Eden.Presentation
             var validation = data?.Validation.Count ?? 0;
             if (data == session && training == shownTraining && validation == shownValidation)
                 return;
+            if (session != data) { selected = null; following = true; }
             session = data;
             shownTraining = training;
             shownValidation = validation;
+            if (following) { last = Math.Max(1, training - 1); first = Math.Max(0, last - 100); }
             top = ComputeTop();
             PlaceLabels();
             MarkDirtyRepaint();
+            if (selected.HasValue) Selected?.Invoke(Describe(selected.Value));
         }
 
-        private float ComputeTop()
-        {
-            var max = 0f;
-            if (session != null)
-            {
-                foreach (var summary in session.Training)
-                    max = Mathf.Max(max, Finite(summary.Best));
-                foreach (var point in session.Validation)
-                    max = Mathf.Max(max, Mathf.Max(Finite(point.Validation.Median), Finite(point.ChampionFitness)));
-                if (!RewardProfiles.IsActive(session.Plan.Profile) && session.HeuristicBaseline != null)
-                    max = Mathf.Max(max, Finite(session.HeuristicBaseline.MeanFitness));
-                if (!RewardProfiles.IsActive(session.Plan.Profile) && session.RandomBaseline != null)
-                    max = Mathf.Max(max, Finite(session.RandomBaseline.MeanFitness));
-            }
-
-            return max <= 0f ? 1f : max * 1.1f;
-        }
+        private float ComputeTop() => ComputeRange();
 
         private Label AddLabel(TextAnchor anchor)
         {
@@ -128,12 +121,19 @@ namespace Eden.Presentation
 
             SetLabel(topLabel, generations > 0, top.ToString("0.0", CultureInfo.CurrentCulture), 0f, plot.yMin - 2f,
                 LeftGutter - 4f);
-            SetLabel(bottomLabel, generations > 0, "0", 0f, plot.yMax - 12f, LeftGutter - 4f);
-            SetLabel(firstGenerationLabel, generations > 0, "g0", plot.xMin, plot.yMax + 2f, 40f);
-            SetLabel(lastGenerationLabel, generations > 1, "g" + (generations - 1), plot.xMax - 40f, plot.yMax + 2f, 40f);
+            SetLabel(unitLabel, generations > 0, metric == 0 ? "Pontuação" : metric == 1 ? "Sobrevivência (fração)" : metric == 2 ? "Energia ingerida" : "Desvio dos pesos", plot.xMin, 0, 240);
+            for (var i = 0; i < scaleLabels.Length; i++)
+            {
+                var fraction = (i + 1) / 4f;
+                SetLabel(scaleLabels[i], generations > 0, (bottom + (top - bottom) * fraction).ToString("0.##"), 0,
+                    plot.yMax - plot.height * fraction - 7, LeftGutter - 4);
+            }
+            SetLabel(bottomLabel, generations > 0, bottom.ToString("0.##"), 0f, plot.yMax - 12f, LeftGutter - 4f);
+            SetLabel(firstGenerationLabel, generations > 0, "g" + first.ToString("0"), plot.xMin, plot.yMax + 2f, 40f);
+            SetLabel(lastGenerationLabel, generations > 1, "g" + last.ToString("0"), plot.xMax - 40f, plot.yMax + 2f, 40f);
 
-            var heuristic = session == null || RewardProfiles.IsActive(session.Plan.Profile) ? null : session.HeuristicBaseline;
-            var random = session == null || RewardProfiles.IsActive(session.Plan.Profile) ? null : session.RandomBaseline;
+            var heuristic = session == null || metric != 0 || !series.Contains("references") || RewardProfiles.IsActive(session.Plan.Profile) ? null : session.HeuristicBaseline;
+            var random = session == null || metric != 0 || !series.Contains("references") || RewardProfiles.IsActive(session.Plan.Profile) ? null : session.RandomBaseline;
             SetLabel(heuristicLabel, heuristic != null, heuristic == null ? null :
                 "heurístico " + heuristic.MeanFitness.ToString("0.00", CultureInfo.CurrentCulture),
                 plot.xMax + 4f, (heuristic == null ? 0f : Y(plot, heuristic.MeanFitness)) - 7f, RightGutter - 4f);
@@ -165,9 +165,9 @@ namespace Eden.Presentation
         }
 
         private float X(Rect plot, int generation) =>
-            plot.xMin + plot.width * (shownTraining <= 1 ? 0.5f : generation / (float)(shownTraining - 1));
+            plot.xMin + plot.width * (generation - first) / Math.Max(1, last - first);
 
-        private float Y(Rect plot, float fitness) => plot.yMax - plot.height * Mathf.Clamp01(Finite(fitness) / top);
+        private float Y(Rect plot, float fitness) => plot.yMax - plot.height * (fitness - bottom) / (top - bottom);
 
         private void Generate(MeshGenerationContext context)
         {
@@ -185,7 +185,18 @@ namespace Eden.Presentation
             painter.LineTo(new Vector2(plot.xMax, plot.yMax));
             painter.Stroke();
 
-            if (!RewardProfiles.IsActive(session.Plan.Profile))
+            for (var i = 1; i <= 4; i++)
+            {
+                var y = plot.yMax - plot.height * i / 4;
+                painter.BeginPath(); painter.MoveTo(new Vector2(plot.xMin, y)); painter.LineTo(new Vector2(plot.xMax, y)); painter.Stroke();
+            }
+            if (selected.HasValue && selected.Value >= first && selected.Value <= last)
+            {
+                var x = X(plot, selected.Value); painter.strokeColor = Color.white; painter.BeginPath();
+                painter.MoveTo(new Vector2(x, plot.yMin)); painter.LineTo(new Vector2(x, plot.yMax)); painter.Stroke();
+            }
+
+            if (metric == 0 && series.Contains("references") && !RewardProfiles.IsActive(session.Plan.Profile))
             {
                 DrawReference(painter, plot, session.HeuristicBaseline);
                 DrawReference(painter, plot, session.RandomBaseline);
@@ -193,32 +204,30 @@ namespace Eden.Presentation
 
             var training = session.Training;
             var band = new Color(TrainingMedianColor.r, TrainingMedianColor.g, TrainingMedianColor.b, 0.25f);
-            if (training.Count > 1)
+            if (metric == 0 && series.Contains("training") && training.Count > 1)
             {
                 painter.fillColor = band;
-                painter.BeginPath();
-                painter.MoveTo(new Vector2(X(plot, 0), Y(plot, training[0].UpperQuartile)));
-                for (var g = 1; g < training.Count; g++)
-                    painter.LineTo(new Vector2(X(plot, g), Y(plot, training[g].UpperQuartile)));
-                for (var g = training.Count - 1; g >= 0; g--)
-                    painter.LineTo(new Vector2(X(plot, g), Y(plot, training[g].LowerQuartile)));
-                painter.ClosePath();
-                painter.Fill();
+                for (var i = Math.Max(0, (int)Math.Ceiling(first)); i < Math.Min(training.Count - 1, (int)last); i++)
+                {
+                    var a = training[i]; var b = training[i + 1];
+                    if (!Valid(a.LowerQuartile) || !Valid(a.UpperQuartile) || !Valid(b.LowerQuartile) || !Valid(b.UpperQuartile)) continue;
+                    painter.BeginPath(); painter.MoveTo(Point(plot, i, a.LowerQuartile)); painter.LineTo(Point(plot, i, a.UpperQuartile));
+                    painter.LineTo(Point(plot, i + 1, b.UpperQuartile)); painter.LineTo(Point(plot, i + 1, b.LowerQuartile)); painter.ClosePath(); painter.Fill();
+                }
             }
-
-            DrawSeries(painter, plot, training.Count, g => training[g].Generation, g => training[g].Median,
+            if (series.Contains("training")) DrawSeries(painter, plot, training.Count, g => training[g].Generation, g => Metric(training[g]),
                 TrainingMedianColor, false);
-            DrawSeries(painter, plot, training.Count, g => training[g].Generation, g => training[g].Best,
+            if (metric == 0 && series.Contains("best")) DrawSeries(painter, plot, training.Count, g => training[g].Generation, g => training[g].Best,
                 TrainingBestColor, false);
             var validation = session.Validation;
-            DrawSeries(painter, plot, validation.Count, v => validation[v].Generation, v => validation[v].Validation.Median,
+            if (metric == 0 && series.Contains("validation")) DrawSeries(painter, plot, validation.Count, v => validation[v].Generation, v => validation[v].Validation.Median,
                 ValidationMedianColor, true);
-            DrawSeries(painter, plot, validation.Count, v => validation[v].Generation, v => validation[v].ChampionFitness,
+            if (metric == 0 && series.Contains("champion")) DrawSeries(painter, plot, validation.Count, v => validation[v].Generation, v => validation[v].ChampionFitness,
                 ChampionColor, true);
 
             // Stage medians (S1 search, S2 resources) of a profile with stages, for the generations this session saw.
             var stages = session.StageMedians;
-            if (stages.Count == 0)
+            if (stages.Count == 0 || metric != 0 || !series.Contains("stages"))
                 return;
             var offset = training.Count - stages.Count;
             for (var k = 0; k < session.Plan.Stages.Count; k++)
@@ -231,7 +240,7 @@ namespace Eden.Presentation
 
         private void DrawReference(Painter2D painter, Rect plot, CandidateEvaluation baseline)
         {
-            if (baseline == null)
+            if (baseline == null || !Valid(baseline.MeanFitness))
                 return;
             var y = Y(plot, baseline.MeanFitness);
             painter.lineWidth = 1f;
@@ -249,35 +258,25 @@ namespace Eden.Presentation
         private void DrawSeries(Painter2D painter, Rect plot, int count, Func<int, int> generationAt,
             Func<int, float> valueAt, Color color, bool markers)
         {
-            if (count == 0)
-                return;
-            painter.lineWidth = LineWidth;
-            painter.strokeColor = color;
-            painter.lineJoin = LineJoin.Round;
-            if (count > 1)
-            {
-                painter.BeginPath();
-                painter.MoveTo(Point(plot, generationAt(0), valueAt(0)));
-                for (var i = 1; i < count; i++)
-                    painter.LineTo(Point(plot, generationAt(i), valueAt(i)));
-                painter.Stroke();
-            }
-
-            if (!markers && count > 1)
-                return;
-            painter.fillColor = color;
+            painter.lineWidth = LineWidth; painter.strokeColor = color; painter.fillColor = color;
+            var open = false; var pixel = -1; var min = float.PositiveInfinity; var max = float.NegativeInfinity;
             for (var i = 0; i < count; i++)
             {
-                painter.BeginPath();
-                painter.Arc(Point(plot, generationAt(i), valueAt(i)), MarkerRadius, 0f, 360f);
-                painter.Fill();
+                var generation = generationAt(i); var value = valueAt(i);
+                if (generation < first || generation > last) continue;
+                if (!Valid(value)) { if (open) painter.Stroke(); open = false; pixel = -1; continue; }
+                var point = Point(plot, generation, value); var next = (int)point.x;
+                if (!markers && pixel == next) { min = Mathf.Min(min, point.y); max = Mathf.Max(max, point.y); continue; }
+                if (open && max > min) { painter.LineTo(new Vector2(pixel, min)); painter.LineTo(new Vector2(pixel, max)); }
+                if (!open) { painter.BeginPath(); painter.MoveTo(point); open = true; } else painter.LineTo(point);
+                pixel = next; min = max = point.y;
+                if (markers || count == 1) { painter.Stroke(); open = false; painter.BeginPath(); painter.Arc(point, MarkerRadius, 0, 360); painter.Fill(); }
             }
+            if (open) { if (max > min) { painter.LineTo(new Vector2(pixel, min)); painter.LineTo(new Vector2(pixel, max)); } painter.Stroke(); }
         }
 
         private Vector2 Point(Rect plot, int generation, float fitness) => new Vector2(X(plot, generation), Y(plot, fitness));
 
-        // Invalid fitness (-inf) is drawn at zero; the text report shows the real value.
-        private static float Finite(float value) => float.IsNaN(value) || float.IsInfinity(value) ? 0f : value;
 
         /// <summary>Legend in text ink with a colored mark per series (identity never by color alone).</summary>
         public static string Legend() =>
