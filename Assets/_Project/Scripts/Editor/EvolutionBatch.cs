@@ -59,6 +59,26 @@ namespace Eden.Editor
             Run(new EvolutionSettings { ExperimentSeed = 1 }, DefaultGenerations, null, null, null);
         }
 
+        public static void PreflightSearchFromCommandLine()
+        {
+            RunAndExit(() =>
+            {
+                var settings = new EvolutionSettings { ExperimentSeed = 1 };
+                var battery = new BatterySettings { Generations = 1 };
+                var output = ReadArguments(settings, battery, out _, out _);
+                var lines = new List<string>();
+                try
+                {
+                    ActiveSearchDiagnostics.Preflight(new EvaluationPlan(settings), battery.Generations,
+                        result => { lines.Add(result.ToString()); Debug.Log("EDEN active-search preflight | " + result); });
+                }
+                finally
+                {
+                    if (output != null) { Directory.CreateDirectory(output); File.WriteAllLines(Path.Combine(output, "preflight.txt"), lines); }
+                }
+            });
+        }
+
         public static void RunFromCommandLine()
         {
             RunAndExit(() =>
@@ -120,6 +140,8 @@ namespace Eden.Editor
             if (generations < 1)
                 throw new ArgumentOutOfRangeException(nameof(generations), "At least one generation is required.");
 
+            ActiveSearchDiagnostics.Preflight(new EvaluationPlan(settings), generations,
+                result => Debug.Log("EDEN active-search preflight | " + result));
             GenerationalEvolution evolution;
             if (seedGenomesDirectory == null)
             {
@@ -193,6 +215,9 @@ namespace Eden.Editor
         private static void RunBattery(EvolutionSettings settings, BatterySettings battery, string output,
             string scenario)
         {
+            for (var run = 0; run < battery.Runs; run++)
+                ActiveSearchDiagnostics.Preflight(new EvaluationPlan(settings.WithExperimentSeed(settings.ExperimentSeed + (ulong)run)),
+                    battery.Generations, result => Debug.Log("EDEN active-search preflight | " + result));
             var runner = new EvolutionBattery(settings, battery);
             var directory = output ?? DefaultDirectory($"battery-seed{settings.ExperimentSeed}x{battery.Runs}");
             var logs = new EvolutionCsvLog[battery.Runs];

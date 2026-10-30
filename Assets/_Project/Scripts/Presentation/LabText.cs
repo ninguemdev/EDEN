@@ -153,9 +153,14 @@ namespace Eden.Presentation
                 var random = session.RandomBaseline.MeanFitness;
                 text.AppendLine($"Validação g{point.Generation}: mediana {point.Validation.Median:0.00}  ·  " +
                                 $"campeão #{point.ChampionId} {point.ChampionFitness:0.00}");
-                text.AppendLine($"Referências na validação: aleatório {random:0.00}  ·  heurístico {heuristic:0.00}");
-                text.AppendLine($"Campeão {Compare(point.ChampionFitness, random, "aleatório")} e " +
-                                $"{Compare(point.ChampionFitness, heuristic, "heurístico")}");
+                if (RewardProfiles.IsActive(plan.Profile))
+                    text.AppendLine("Referências com sensores legados: contrato diferente; fora das curvas comparáveis.");
+                else
+                {
+                    text.AppendLine($"Referências na validação: aleatório {random:0.00}  ·  heurístico {heuristic:0.00}");
+                    text.AppendLine($"Campeão {Compare(point.ChampionFitness, random, "aleatório")} e " +
+                                    $"{Compare(point.ChampionFitness, heuristic, "heurístico")}");
+                }
             }
             else
             {
@@ -190,7 +195,7 @@ namespace Eden.Presentation
         {
             var evaluated = plan.Stages[stage];
             if (evaluated.IsSearch)
-                return "Etapa 1 — busca (sem gasto)";
+                return evaluated.ActiveSearch ? "Busca — híbrida (fome e sede ativas)" : "Etapa 1 — busca (sem gasto)";
             if (evaluated.Reward.Scoring == StageScoring.FoodEnergyPerSecond)
                 return null;
             return plan.Stages.Count > 1 ? "Etapa 2 — recursos" : "Recursos equilibrados";
@@ -207,6 +212,18 @@ namespace Eden.Presentation
             if (tracker == null)
                 return;
             var tickSeconds = (double)episode.Simulation.World.Config.TickDuration;
+            if (tracker.Active != null)
+            {
+                var a = tracker.Active; var c = episode.Creature; var config = episode.Simulation.World.Config;
+                text.AppendLine($"E {a.Exploration:0.000} ({a.Unique}/{a.Goal}; máscara {a.Eligible}) · D {a.Detection:0.000} · C {a.Collection:0.000}");
+                text.AppendLine($"Base {a.Base:0.000} × {a.Multiplier:0.000} / 3,5 = {a.Score:0.000000}");
+                text.AppendLine($"Energia {c.Energy:0.0}/{c.Body.MaxEnergy:0.0} (inicial {a.InitialEnergy:0.0}); hidratação {c.Hydration:0.0}/{config.MaxHydration:0.0}");
+                text.AppendLine($"Gastos: metabolismo {a.Maintenance:0.0}, movimento {a.Movement:0.0}, giro {a.Turning:0.0}, olhos {a.Eyes:0.0}");
+                text.AppendLine($"Comida bruta {c.FoodEnergyEaten:0.0}, útil {tracker.AbsorbedEnergy:0.0}, desperdiçada {tracker.WastedEnergy:0.0}; água útil {tracker.Drunk:0.0}");
+                text.AppendLine($"Restam {Math.Max(0, plan.Stages[episode.Stage].EpisodeSeconds - episode.Tick * tickSeconds):0.0} s; morte: {c.DeathCause}");
+                text.AppendLine($"Grade {a.Options.CellSide:0.0}, margem {a.Options.Hysteresis:0.0}; alimento {config.FoodEnergy:0.0}; perdas/s {config.MetabolismPerSecond:0.00} energia basal / {config.HydrationLossPerSecond:0.00} água, beber {config.DrinkRatePerSecond:0.0}/s; coleta ≥ {a.Options.WaterThreshold:0.0}");
+                return;
+            }
             if (episode.Layout != null)
             {
                 var layout = episode.Layout;

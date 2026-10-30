@@ -32,8 +32,8 @@
                         <ui:FloatField name="scenario-initial-energy-field" label="Energia inicial" class="lab-field" />
                     </ui:Foldout>
                     <ui:DropdownField name="training-field" label="Treino" class="lab-field" tooltip="Paralelo usa a CPU para avaliar mundos independentes. Use Máx. para acelerar o treino; a arena mostra um dos episódios." />
-                    <ui:DropdownField name="profile-field" label="Perfil" class="lab-field" tooltip="Como cada genoma é pontuado. Duas etapas: busca sem gasto (alimento e água) + recursos equilibrados." />
-                    <ui:Foldout name="profile-foldout" text="Etapa 1 — busca" value="false" class="lab-field">
+                    <ui:DropdownField name="profile-field" label="Perfil" class="lab-field" tooltip="Como cada genoma é pontuado. Somente busca ou duas etapas com híbrida e fome/sede; o perfil antigo mantém busca sem gasto." />
+                    <ui:Foldout name="profile-foldout" text="Busca — configuração" value="false" class="lab-field">
                         <ui:FloatField name="profile-weight-field" label="Peso da busca (%)" class="lab-field" />
                         <ui:FloatField name="profile-seconds-field" label="Duração da busca (s)" class="lab-field" />
                         <ui:IntegerField name="profile-food-field" label="Alvos de comida" class="lab-field" />

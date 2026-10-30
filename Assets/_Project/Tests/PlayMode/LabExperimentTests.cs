@@ -48,6 +48,45 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Controls_ActiveSearchModesPreserveNeedsAndCheckpoint()
+        {
+            UseTemporaryCheckpoint();
+            var root = runner.Hud.Root;
+            foreach (var kind in new[] { ProfileKind.SearchActive, ProfileKind.TwoStageActive })
+            {
+                root.Q<DropdownField>("mode-field").index = (int)LabMode.IsolatedEvolution;
+                root.Q<DropdownField>("preset-field").index = 0;
+                root.Q<DropdownField>("profile-field").index = (int)kind;
+                Assert.That(root.Q<DropdownField>("algorithm-field").index, Is.EqualTo(1));
+                Assert.That(root.Q<DropdownField>("senses-field").index, Is.GreaterThan(0));
+                root.Q<FloatField>("active-InitialEnergy").value = 85;
+                yield return Press("start-button");
+                yield return Press("pause-button");
+                Assert.That(runner.StartProblem, Is.Null);
+                var plan = runner.Evolution.Plan;
+                Assert.That(plan.Stages.Count, Is.EqualTo(kind == ProfileKind.SearchActive ? 1 : 2));
+                Assert.That(ProfileChoice.Read(runner.Evolution.Evolution.Settings).Active.InitialEnergy, Is.EqualTo(85));
+                if (kind == ProfileKind.SearchActive)
+                {
+                    var episode = runner.Evolution.Job.Current; var energy = episode.Creature.Energy;
+                    var hydration = episode.Creature.Hydration;
+                    yield return Press("step-button");
+                    Assert.That(episode.Simulation.FrozenNeeds, Is.False);
+                    Assert.That(episode.Simulation.RespawnFood, Is.False);
+                    Assert.That(episode.Creature.Energy, Is.LessThan(energy));
+                    Assert.That(episode.Creature.Hydration, Is.LessThan(hydration));
+                    StringAssert.Contains("fome e sede ativas", runner.Hud.RunText);
+                    StringAssert.Contains("Energia", runner.Hud.RunText);
+                    var fingerprint = runner.Simulation.ComputeFingerprint();
+                    yield return Press("save-button"); yield return Press("step-button"); yield return Press("load-button");
+                    Assert.That(runner.Simulation.ComputeFingerprint(), Is.EqualTo(fingerprint));
+                    Assert.That(root.Q<DropdownField>("profile-field").index, Is.EqualTo((int)kind));
+                    Assert.That(root.Q<FloatField>("active-InitialEnergy").value, Is.EqualTo(85));
+                }
+            }
+        }
+
+        [UnityTest]
         public IEnumerator Controls_ParallelTrainingSupportsPauseStepAndCheckpoint()
         {
             UseTemporaryCheckpoint();

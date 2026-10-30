@@ -99,7 +99,7 @@ namespace Eden.Presentation
 
         /// <summary>In <see cref="ProfileKind"/> order.</summary>
         public static readonly string[] ProfileChoices =
-            { "Legado (controle)", "Duas etapas (busca + recursos)", "Recursos equilibrados" };
+            { "Legado (controle)", "Duas etapas (busca + recursos)", "Recursos equilibrados", "Somente busca (híbrida, fome e sede)", "Duas etapas (híbrida, fome e sede)" };
 
         public static readonly string[] SearchObstacleChoices = { "Nenhum", "Pilares", "Corredor" };
         public static readonly string[] SensesChoices =
@@ -398,9 +398,22 @@ namespace Eden.Presentation
                 trainingField.index == 1, ReadProfile());
         }
 
+        private readonly Dictionary<string, FloatField> activeFields = new Dictionary<string, FloatField>();
+        private Foldout activeFoldout;
+        private void RefreshProfileFields()
+        {
+            var active = profileField.index >= (int)ProfileKind.SearchActive;
+            profileFoldout.style.display = profileField.index == (int)ProfileKind.TwoStage || active ? DisplayStyle.Flex : DisplayStyle.None;
+            activeFoldout.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
+            profileWeightField.style.display = profileField.index == (int)ProfileKind.SearchActive ? DisplayStyle.None : DisplayStyle.Flex;
+            profileAlphaField.style.display = active ? DisplayStyle.None : DisplayStyle.Flex;
+            profileBetaField.style.display = active ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+        private ActiveSearchOptions activeSearchOptions = new ActiveSearchOptions();
+
         private ProfileChoice ReadProfile()
         {
-            var profile = new ProfileChoice { Kind = (ProfileKind)Math.Max(0, profileField.index) };
+            var profile = new ProfileChoice { Kind = (ProfileKind)Math.Max(0, profileField.index), Active = activeSearchOptions.Clone() };
             var options = profile.TwoStage;
             options.SearchWeight = profileWeightField.value / 100.0;
             options.SearchSeconds = profileSecondsField.value;
@@ -415,6 +428,9 @@ namespace Eden.Presentation
 
         private void ShowProfile(ProfileChoice profile)
         {
+            activeSearchOptions = profile.Active.Clone();
+            foreach (var field in typeof(ActiveSearchOptions).GetFields())
+                activeFields[field.Name].SetValueWithoutNotify((float)(double)field.GetValue(activeSearchOptions));
             var options = profile.TwoStage;
             profileField.SetValueWithoutNotify(ProfileChoices[(int)profile.Kind]);
             profileWeightField.SetValueWithoutNotify((float)(options.SearchWeight * 100.0));
@@ -425,7 +441,7 @@ namespace Eden.Presentation
             profileAlphaField.SetValueWithoutNotify((float)options.Alpha);
             profileBetaField.SetValueWithoutNotify((float)options.Beta);
             profileObstaclesField.SetValueWithoutNotify(SearchObstacleChoices[(int)options.SearchObstacles]);
-            profileFoldout.style.display = profile.Kind == ProfileKind.TwoStage ? DisplayStyle.Flex : DisplayStyle.None;
+            RefreshProfileFields();
         }
 
         // The scenario fields; a food count of 0 keeps the mode's own (the preset's or the episodes'), and a size that is
@@ -609,9 +625,11 @@ namespace Eden.Presentation
             profileField.index = 0;
             profileFoldout = root.Q<Foldout>("profile-foldout");
             profileField.RegisterValueChangedCallback(_ =>
-                profileFoldout.style.display = profileField.index == (int)ProfileKind.TwoStage
-                    ? DisplayStyle.Flex
-                    : DisplayStyle.None);
+            {
+                if (profileField.index >= (int)ProfileKind.SearchActive)
+                { algorithmField.index = 1; if (sensesField.index == 0) sensesField.index = 2; }
+                RefreshProfileFields();
+            });
             profileFoldout.style.display = DisplayStyle.None;
             profileWeightField = Between("profile-weight-field", (float)(defaults.SearchWeight * 100), 1f, 99f);
             profileSecondsField = Between("profile-seconds-field", defaults.SearchSeconds, 1f, EvaluationPlan.MaxEpisodeSeconds);
@@ -623,6 +641,31 @@ namespace Eden.Presentation
             profileObstaclesField = root.Q<DropdownField>("profile-obstacles-field");
             profileObstaclesField.choices = new List<string>(SearchObstacleChoices);
             profileObstaclesField.index = (int)defaults.SearchObstacles;
+            activeFoldout = new Foldout { text = "Fome, sede e exploração", value = false, name = "active-search-options" };
+            activeFoldout.Add(new Label("E = células/meta · D = alvos vistos · C = alvos coletados\nR = (0,65E + 0,35C) × (1 + 0,5D + 2C) / 3,5"));
+            profileFoldout.Add(activeFoldout);
+            var labels = new Dictionary<string, string>
+            {
+                { "CellSide", "Lado da célula" }, { "Hysteresis", "Margem de entrada" }, { "ExplorationGoal", "Meta de células" },
+                { "WaterThreshold", "Água útil por coleta" }, { "MaxEnergy", "Energia máxima" }, { "InitialEnergy", "Energia inicial" },
+                { "FoodEnergy", "Energia por alimento" }, { "Metabolism", "Metabolismo/s" }, { "Movement", "Movimento/s" },
+                { "Sensor", "Sensor de referência/s" }, { "Turn", "Fração de custo do giro" }, { "MaxHydration", "Hidratação máxima" },
+                { "HydrationLoss", "Perda de água/s" }, { "DrinkRate", "Taxa de beber/s" }, { "MaxAge", "Idade máxima (s)" }
+            };
+            foreach (var field in typeof(ActiveSearchOptions).GetFields())
+            {
+                var input = new FloatField(labels[field.Name]) { name = "active-" + field.Name };
+                input.AddToClassList("lab-field"); input.SetValueWithoutNotify((float)(double)field.GetValue(activeSearchOptions));
+                input.RegisterValueChangedCallback(change =>
+                {
+                    if (float.IsNaN(change.newValue) || float.IsInfinity(change.newValue) || change.newValue <= 0)
+                        input.SetValueWithoutNotify(change.previousValue);
+                    else field.SetValue(activeSearchOptions, (double)change.newValue);
+                });
+                activeFields.Add(field.Name, input); activeFoldout.Add(input);
+            }
+            RefreshProfileFields();
+
 
             FloatField Between(string name, float initial, float min, float max)
             {
@@ -724,11 +767,13 @@ namespace Eden.Presentation
             // Eyes need NEAT: choosing eyes picks NEAT, and choosing the MLP control goes back to the legacy senses.
             sensesField.RegisterValueChangedCallback(change =>
             {
+                if (profileField.index >= (int)ProfileKind.SearchActive && sensesField.index == 0) sensesField.index = 2;
                 if (sensesField.index >= 1)
                     algorithmField.index = 1;
             });
             algorithmField.RegisterValueChangedCallback(change =>
             {
+                if (profileField.index >= (int)ProfileKind.SearchActive && algorithmField.index == 0) algorithmField.index = 1;
                 if (algorithmField.index == 0)
                     sensesField.index = 0;
             });

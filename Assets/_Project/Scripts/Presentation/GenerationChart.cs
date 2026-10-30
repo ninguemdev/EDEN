@@ -93,9 +93,9 @@ namespace Eden.Presentation
                     max = Mathf.Max(max, Finite(summary.Best));
                 foreach (var point in session.Validation)
                     max = Mathf.Max(max, Mathf.Max(Finite(point.Validation.Median), Finite(point.ChampionFitness)));
-                if (session.HeuristicBaseline != null)
+                if (!RewardProfiles.IsActive(session.Plan.Profile) && session.HeuristicBaseline != null)
                     max = Mathf.Max(max, Finite(session.HeuristicBaseline.MeanFitness));
-                if (session.RandomBaseline != null)
+                if (!RewardProfiles.IsActive(session.Plan.Profile) && session.RandomBaseline != null)
                     max = Mathf.Max(max, Finite(session.RandomBaseline.MeanFitness));
             }
 
@@ -132,8 +132,8 @@ namespace Eden.Presentation
             SetLabel(firstGenerationLabel, generations > 0, "g0", plot.xMin, plot.yMax + 2f, 40f);
             SetLabel(lastGenerationLabel, generations > 1, "g" + (generations - 1), plot.xMax - 40f, plot.yMax + 2f, 40f);
 
-            var heuristic = session?.HeuristicBaseline;
-            var random = session?.RandomBaseline;
+            var heuristic = session == null || RewardProfiles.IsActive(session.Plan.Profile) ? null : session.HeuristicBaseline;
+            var random = session == null || RewardProfiles.IsActive(session.Plan.Profile) ? null : session.RandomBaseline;
             SetLabel(heuristicLabel, heuristic != null, heuristic == null ? null :
                 "heurístico " + heuristic.MeanFitness.ToString("0.00", CultureInfo.CurrentCulture),
                 plot.xMax + 4f, (heuristic == null ? 0f : Y(plot, heuristic.MeanFitness)) - 7f, RightGutter - 4f);
@@ -185,8 +185,11 @@ namespace Eden.Presentation
             painter.LineTo(new Vector2(plot.xMax, plot.yMax));
             painter.Stroke();
 
-            DrawReference(painter, plot, session.HeuristicBaseline);
-            DrawReference(painter, plot, session.RandomBaseline);
+            if (!RewardProfiles.IsActive(session.Plan.Profile))
+            {
+                DrawReference(painter, plot, session.HeuristicBaseline);
+                DrawReference(painter, plot, session.RandomBaseline);
+            }
 
             var training = session.Training;
             var band = new Color(TrainingMedianColor.r, TrainingMedianColor.g, TrainingMedianColor.b, 0.25f);
