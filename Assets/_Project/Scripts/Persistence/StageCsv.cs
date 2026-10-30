@@ -1,67 +1,79 @@
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Runtime.CompilerServices;
+using System.Text;
 using Eden.Evolution;
 
 namespace Eden.Persistence
 {
-    /// <summary>
-    /// <c>stages.csv</c>, written only for a profile other than the legacy one: one row per episode with its stage, its
-    /// score, the legacy fitness of the same episode and one column per component of any stage (empty when the episode's
-    /// stage does not report it).
-    /// </summary>
+    /// <summary>Legacy CSV layout, with a column map compiled once per immutable reward profile.</summary>
     public static class StageCsv
     {
+        private sealed class Layout
+        {
+            public readonly string[] Columns;
+            public readonly int[][] Indices;
+            public Layout(RewardProfile profile)
+            {
+                var columns = new List<string>();
+                foreach (var stage in profile.Stages)
+                    foreach (var component in stage.Components) columns.Add(stage.Name + "." + component.Name);
+                Columns = columns.ToArray();
+                Indices = new int[profile.Stages.Count][];
+                for (var s = 0; s < Indices.Length; s++)
+                {
+                    var stage = profile.Stages[s];
+                    var own = new Dictionary<string, int>();
+                    for (var c = 0; c < stage.Components.Count; c++) own.Add(stage.Name + "." + stage.Components[c].Name, c);
+                    Indices[s] = new int[Columns.Length];
+                    for (var c = 0; c < Columns.Length; c++)
+                        Indices[s][c] = own.TryGetValue(Columns[c], out var at) ? at : -1;
+                }
+            }
+        }
+        private static readonly ConditionalWeakTable<RewardProfile, Layout> Layouts = new ConditionalWeakTable<RewardProfile, Layout>();
+        [ThreadStatic] private static StringBuilder buffer;
+        private static Layout Of(RewardProfile profile) => Layouts.GetValue(profile, p => new Layout(p));
+        private static StringBuilder Buffer()
+        {
+            var text = buffer ?? (buffer = new StringBuilder(2048)); text.Clear(); return text;
+        }
         public static string Header(RewardProfile profile) =>
             "evaluation_mode,generation,candidate,seed_index,stage,stage_name,episode_seed,valid,score,legacy_fitness," +
-            string.Join(",", Columns(profile));
+            string.Join(",", Of(profile).Columns);
 
         public static string FormatRow(RewardProfile profile, in EpisodeResult result)
         {
             var culture = CultureInfo.InvariantCulture;
-            var stage = profile.Stages[result.Stage];
-            var fields = new List<string>
+            var text = Buffer();
+            text.Append(EvaluationCsv.ModeName(result.Mode)).Append(',').Append(result.Generation).Append(',')
+                .Append(result.Candidate).Append(',').Append(result.SeedIndex).Append(',').Append(result.Stage).Append(',')
+                .Append(profile.Stages[result.Stage].Name).Append(',').Append(result.EpisodeSeed).Append(',')
+                .Append(result.IsValid ? "1" : "0").Append(',');
+            var active = RewardProfiles.IsActive(profile);
+            if (result.IsValid) text.Append(result.Fitness.ToString(active ? "R" : "0.######", culture));
+            text.Append(',');
+            if (Fitness.IsValid(result.LegacyFitness)) text.Append(result.LegacyFitness.ToString("0.######", culture));
+            foreach (var index in Of(profile).Indices[result.Stage])
             {
-                EvaluationCsv.ModeName(result.Mode),
-                result.Generation.ToString(culture),
-                result.Candidate.ToString(culture),
-                result.SeedIndex.ToString(culture),
-                result.Stage.ToString(culture),
-                stage.Name,
-                result.EpisodeSeed.ToString(culture),
-                result.IsValid ? "1" : "0",
-                result.IsValid ? result.Fitness.ToString(RewardProfiles.IsActive(profile) ? "R" : "0.######", culture) : string.Empty,
-                Evolution.Fitness.IsValid(result.LegacyFitness)
-                    ? result.LegacyFitness.ToString("0.######", culture)
-                    : string.Empty
-            };
-            foreach (var column in Columns(profile))
-            {
-                var value = string.Empty;
-                for (var i = 0; i < stage.Components.Count && result.Components != null; i++)
+                text.Append(',');
+                if (index < 0 || result.Components == null) continue;
+                if (!active) text.Append(result.Components[index].ToString("0.######", culture));
+                else
                 {
-                    if (stage.Name + "." + stage.Components[i].Name == column)
-                    {
-                        if (RewardProfiles.IsActive(profile))
-                        {
-                            var measured = result.PreciseComponents != null ? result.PreciseComponents[i] : result.Components[i];
-                            value = double.IsNaN(measured) ? string.Empty : measured.ToString("R", culture);
-                        }
-                        else
-                            value = result.Components[i].ToString("0.######", culture);
-                    }
+                    var value = result.PreciseComponents != null ? result.PreciseComponents[index] : result.Components[index];
+                    if (!double.IsNaN(value)) text.Append(value.ToString("R", culture));
                 }
-
-                fields.Add(value);
             }
-
-            return string.Join(",", fields);
+            return text.ToString();
         }
-
         public static string SummaryHeader(RewardProfile profile) =>
-            "evaluation_mode,generation,stage,stage_name,episodes,score_mean," + string.Join(",", Columns(profile));
+            "evaluation_mode,generation,stage,stage_name,episodes,score_mean," + string.Join(",", Of(profile).Columns);
 
         public static IEnumerable<string> Summaries(RewardProfile profile, GenerationEvaluation evaluation)
         {
+            var layout = Of(profile);
             for (var s = 0; s < profile.Stages.Count; s++)
             {
                 var stage = profile.Stages[s]; var n = 0; double score = 0;
@@ -77,28 +89,15 @@ namespace Eden.Persistence
                         sums[c] += value; counts[c]++;
                     }
                 }
-                var fields = new List<string> { EvaluationCsv.ModeName(evaluation.Mode),
-                    evaluation.Generation.ToString(CultureInfo.InvariantCulture), s.ToString(CultureInfo.InvariantCulture),
-                    stage.Name, n.ToString(CultureInfo.InvariantCulture), n == 0 ? "" : (score / n).ToString("R", CultureInfo.InvariantCulture) };
-                foreach (var column in Columns(profile))
+                var text = Buffer(); text.Append(EvaluationCsv.ModeName(evaluation.Mode)).Append(',').Append(evaluation.Generation)
+                    .Append(',').Append(s).Append(',').Append(stage.Name).Append(',').Append(n).Append(',');
+                if (n > 0) text.Append((score / n).ToString("R", CultureInfo.InvariantCulture));
+                foreach (var c in layout.Indices[s])
                 {
-                    var text = "";
-                    for (var c = 0; c < sums.Length; c++)
-                        if (column == stage.Name + "." + stage.Components[c].Name && counts[c] > 0)
-                            text = (sums[c] / counts[c]).ToString("R", CultureInfo.InvariantCulture);
-                    fields.Add(text);
+                    text.Append(',');
+                    if (c >= 0 && counts[c] > 0) text.Append((sums[c] / counts[c]).ToString("R", CultureInfo.InvariantCulture));
                 }
-                yield return string.Join(",", fields);
-            }
-        }
-
-        // "stage.component" for every component of every stage, in stage and component order.
-        private static IEnumerable<string> Columns(RewardProfile profile)
-        {
-            foreach (var stage in profile.Stages)
-            {
-                foreach (var component in stage.Components)
-                    yield return stage.Name + "." + component.Name;
+                yield return text.ToString();
             }
         }
     }
