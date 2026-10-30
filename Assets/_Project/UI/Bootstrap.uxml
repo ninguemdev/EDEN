@@ -74,8 +74,13 @@
                         <ui:DropdownField name="senses-field" label="Sentidos" class="lab-field" />
                         <ui:TextField name="seed-genomes-field" label="Pool de genomas" class="lab-field" />
                         <ui:Button name="use-export-directory-button" text="Usar exportação" class="lab-button" />
+                        <ui:Button name="clear-genomes-directory-button" text="Remover pool" class="lab-button" tooltip="Limpa a seleção da pool sem apagar os arquivos exportados." />
                     </ui:ScrollView>
                     <ui:ScrollView mode="Vertical" name="config-page-3" class="config-page">
+                        <ui:VisualElement name="training-mode-hint">
+                            <ui:Label text="Treino e objetivos usam o modo Evolução. Com Rede aleatória, alterar estas opções muda o rascunho para Evolução e mantém corpo, algoritmo e sentidos. Clique em Iniciar para aplicar." class="muted" />
+                            <ui:Button name="configure-evolution-button" text="Configurar evolução" class="lab-button" />
+                        </ui:VisualElement>
                         <ui:DropdownField name="training-field" label="Treino" class="lab-field" tooltip="Paralelo usa a CPU para avaliar mundos independentes. Use Máx. para acelerar o treino; a arena mostra um dos episódios." />
                         <ui:DropdownField name="profile-field" label="Perfil" class="lab-field" tooltip="Como cada genoma é pontuado. Somente busca ou duas etapas com híbrida e fome/sede; o perfil antigo mantém busca sem gasto." />
                         <ui:Foldout name="profile-foldout" text="Busca — configuração" value="false" class="lab-field">

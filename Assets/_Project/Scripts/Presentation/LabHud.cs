@@ -188,6 +188,8 @@ namespace Eden.Presentation
         private Button exportGenomeButton;
         private Button copyGenomeDirectoryButton;
         private Button useExportDirectoryButton;
+        private Button clearPoolButton;
+        private VisualElement trainingModeHint;
         private bool inspectorVisible;
         private LabChoice? shownChoice;
         private bool shownEvolution;
@@ -228,7 +230,7 @@ namespace Eden.Presentation
         public void SetSeedGenomesDirectory(string path)
         {
             if (Bind())
-                seedGenomesField.SetValueWithoutNotify(path ?? string.Empty);
+                seedGenomesField.value = path ?? string.Empty;
         }
 
         public bool NetworkVisible { get; private set; }
@@ -578,18 +580,24 @@ namespace Eden.Presentation
             brainField.choices = choices;
         }
 
-        // The brain applies to the shared world; the body choice and the seed-pool directory to a new evolution.
+        // Random neural founders use the same body, algorithm and sensory choices as a new evolution.
         private void UpdateBrainField()
         {
+            var evolution = modeField.index == (int)LabMode.IsolatedEvolution;
+            var neural = modeField.index == (int)LabMode.SharedWorld &&
+                         Array.IndexOf(BrainChoices, brainField.value) == (int)LabBrainKind.Neural;
             brainField.SetEnabled(modeField.index == (int)LabMode.SharedWorld);
-            bodyField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
-            algorithmField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
-            sensesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
-            trainingField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
-            profileField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+            bodyField.SetEnabled(evolution || neural);
+            algorithmField.SetEnabled(evolution || neural);
+            sensesField.SetEnabled(evolution || neural);
+            trainingField.SetEnabled(evolution || neural);
+            profileField.SetEnabled(evolution || neural);
+            trainingModeHint.style.display = evolution ? DisplayStyle.None : DisplayStyle.Flex;
             var composing = modeField.index == (int)LabMode.SharedWorld &&
                             Array.IndexOf(BrainChoices, brainField.value) == (int)LabBrainKind.Composition;
             seedGenomesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution || composing);
+            // An unused selection can still be removed after switching modes.
+            clearPoolButton.SetEnabled(!string.IsNullOrWhiteSpace(seedGenomesField.value));
             episodeField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             compositionRow.style.display = composing ? DisplayStyle.Flex : DisplayStyle.None;
         }
@@ -655,7 +663,7 @@ namespace Eden.Presentation
             profileFoldout = root.Q<Foldout>("profile-foldout");
             profileField.RegisterValueChangedCallback(_ =>
             {
-                if (profileField.index >= (int)ProfileKind.SearchActive)
+                if (modeField.index == (int)LabMode.IsolatedEvolution && profileField.index >= (int)ProfileKind.SearchActive)
                 { algorithmField.index = 1; if (sensesField.index == 0) sensesField.index = 2; }
                 RefreshProfileFields();
             });
@@ -792,7 +800,24 @@ namespace Eden.Presentation
             trainingField = root.Q<DropdownField>("training-field");
             trainingField.choices = new List<string>(TrainingChoices);
             trainingField.index = 0;
+            trainingModeHint = root.Q<VisualElement>("training-mode-hint");
+            root.Q<Button>("configure-evolution-button").clicked += () => modeField.index = (int)LabMode.IsolatedEvolution;
+            // Choosing training changes only the draft; starting it still goes through the normal review/confirmation.
+            var trainingPage = root.Q<VisualElement>("config-page-3");
+            void UseEvolution()
+            {
+                if (modeField.index != (int)LabMode.IsolatedEvolution)
+                    modeField.index = (int)LabMode.IsolatedEvolution;
+                if (profileField.index >= (int)ProfileKind.SearchActive)
+                {
+                    algorithmField.index = 1;
+                    if (sensesField.index == 0) sensesField.index = 2;
+                }
+            }
             BindProfile(root);
+            trainingPage.RegisterCallback<ChangeEvent<string>>(_ => UseEvolution());
+            trainingPage.RegisterCallback<ChangeEvent<int>>(_ => UseEvolution());
+            trainingPage.RegisterCallback<ChangeEvent<float>>(_ => UseEvolution());
             root.Q<Button>("follow-refresh-button").clicked += () => RefreshReplayClicked?.Invoke();
             autoCheckpointField = root.Q<IntegerField>("auto-checkpoint-field");
             followTopField = root.Q<IntegerField>("follow-top-field");
@@ -821,13 +846,13 @@ namespace Eden.Presentation
             // Eyes need NEAT: choosing eyes picks NEAT, and choosing the MLP control goes back to the legacy senses.
             sensesField.RegisterValueChangedCallback(change =>
             {
-                if (profileField.index >= (int)ProfileKind.SearchActive && sensesField.index == 0) sensesField.index = 2;
+                if (modeField.index == (int)LabMode.IsolatedEvolution && profileField.index >= (int)ProfileKind.SearchActive && sensesField.index == 0) sensesField.index = 2;
                 if (sensesField.index >= 1)
                     algorithmField.index = 1;
             });
             algorithmField.RegisterValueChangedCallback(change =>
             {
-                if (profileField.index >= (int)ProfileKind.SearchActive && algorithmField.index == 0) algorithmField.index = 1;
+                if (modeField.index == (int)LabMode.IsolatedEvolution && profileField.index >= (int)ProfileKind.SearchActive && algorithmField.index == 0) algorithmField.index = 1;
                 if (algorithmField.index == 0)
                     sensesField.index = 0;
             });
@@ -838,6 +863,10 @@ namespace Eden.Presentation
                     seedField.SetValueWithoutNotify(0);
             });
             seedGenomesField = root.Q<TextField>("seed-genomes-field");
+            clearPoolButton = root.Q<Button>("clear-genomes-directory-button");
+            clearPoolButton.clicked += () => SetSeedGenomesDirectory(string.Empty);
+            seedGenomesField.RegisterValueChangedCallback(_ =>
+                clearPoolButton.SetEnabled(!string.IsNullOrWhiteSpace(seedGenomesField.value)));
             compositionRow = root.Q<VisualElement>("composition-panel");
             compositionField = root.Q<TextField>("composition-field");
             compositionModeField = root.Q<DropdownField>("composition-mode-field");

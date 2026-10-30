@@ -43,7 +43,8 @@ namespace Eden.Persistence
         /// </summary>
         // Schema 10 adds per-target detection flags to completed episode audits. Files without those flags
         // retain their previous schema (9/8/7/6/5); reward identity, RNG and scoring do not change.
-        public const int SchemaVersion = 10;
+        // Schema 11 records random neural founders' body, algorithm and senses. Older runs retain their schema.
+        public const int SchemaVersion = 11;
 
         /// <summary>Schema of a legacy-profile run with parallel evaluation progress.</summary>
         public const int SchemaWithParallel = 7;
@@ -67,7 +68,8 @@ namespace Eden.Persistence
         {
             if (checkpoint == null)
                 throw new ArgumentNullException(nameof(checkpoint));
-            var schema = checkpoint.Evolution?.Settings.Profile != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile) ? TargetAuditSchema(checkpoint.Evolution)
+            var schema = checkpoint.SharedWorld?.RandomNetwork != null ? 11
+                : checkpoint.Evolution?.Settings.Profile != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile) ? TargetAuditSchema(checkpoint.Evolution)
                 : checkpoint.Evolution?.Settings.Profile?.IsLegacy == false ? 8
                 : checkpoint.Evolution?.Job.WorkerCount > 1 ? SchemaWithParallel
                 : checkpoint.Evolution?.Neat != null ? 6 : SchemaWithoutNeat;
@@ -85,7 +87,7 @@ namespace Eden.Persistence
                     .Add("version", JsonValue.Of(info.AppVersion))
                     .Add("runtime", JsonValue.Of(info.Runtime)))
                 .Add("savedUtc", JsonValue.Of(utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)))
-                .Add("algorithms", EncodeAlgorithms(schema >= 9 ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion))
+                .Add("algorithms", EncodeAlgorithms(EvaluationSeedScheme(checkpoint)))
                 .Add("configHash", JsonValue.Of(Hex(configHash)))
                 .Add("stateHash", JsonValue.Of(Hex(stateHash)))
                 .Add("config", config)
@@ -119,7 +121,8 @@ namespace Eden.Persistence
             if (schema > SchemaVersion)
                 throw new CheckpointException($"Checkpoint schema version {schema} is newer than version {SchemaVersion}, " +
                                               "the newest this build reads; open it with a newer EDEN.");
-            CheckAlgorithms(root["algorithms"], schema >= 9 ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion);
+            CheckAlgorithms(root["algorithms"], schema >= 11 ? root["algorithms"]["evaluationSeedScheme"].Int(1, 3)
+                : schema >= 9 ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion);
 
             var config = root["config"];
             var state = root["state"];
@@ -137,6 +140,8 @@ namespace Eden.Persistence
                 ParseUtc(root["savedUtc"]), configHash, stateHash);
 
             var checkpoint = Guard(() => DecodeCheckpoint(config, state));
+            if (schema >= 11)
+                CheckAlgorithms(root["algorithms"], EvaluationSeedScheme(checkpoint));
             if (EncodeConfig(checkpoint).ToCompactString() != configText ||
                 EncodeState(checkpoint).ToCompactString() != stateText)
                 throw new CheckpointException("The checkpoint does not read back exactly (unknown or non-canonical values).");
@@ -145,6 +150,10 @@ namespace Eden.Persistence
             Guard(() => CheckRestorable(checkpoint));
             return checkpoint;
         }
+
+        private static int EvaluationSeedScheme(Checkpoint checkpoint) =>
+            checkpoint.Evolution?.Settings.Profile != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile)
+                ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion;
 
         internal static JsonValue EncodeAlgorithms(int evaluationSeedScheme = EvaluationPlan.SeedSchemeVersion) =>
             JsonValue.NewObject()
@@ -635,6 +644,12 @@ namespace Eden.Persistence
                 sharedWorld = JsonValue.NewObject()
                     .Add("world", EncodeWorld(shared.World))
                     .Add("brains", EncodeBrains(shared.Brains));
+                if (shared.RandomNetwork != null)
+                    sharedWorld.Add("randomNetwork", JsonValue.NewObject()
+                        .Add("evolvingBody", JsonValue.Of(shared.RandomNetwork.EvolvingBody))
+                        .Add("neat", JsonValue.Of(shared.RandomNetwork.Neat))
+                        .Add("eyes", JsonValue.Of(shared.RandomNetwork.Eyes))
+                        .Add("evolvingEyes", JsonValue.Of(shared.RandomNetwork.EvolvingEyes)));
                 if (shared.BornGenomes.Count > 0)
                 {
                     var genomes = JsonValue.NewArray();
@@ -777,9 +792,14 @@ namespace Eden.Persistence
                                                       $"{settings.InitialPopulation}.");
                 }
 
+                RandomNetworkSettings randomNetwork = null;
+                var random = saved.TryGet("randomNetwork");
+                if (random != null)
+                    randomNetwork = new RandomNetworkSettings(random["evolvingBody"].Boolean(),
+                        random["neat"].Boolean(), random["eyes"].Boolean(), random["evolvingEyes"].Boolean());
                 shared = new SharedWorldSnapshot(settings,
                     DecodeWorld(saved["world"], most, settings.InitialFood, new SimulationConfig(settings)),
-                    DecodeBrains(saved["brains"]), genomes, genealogy, composition);
+                    DecodeBrains(saved["brains"]), genomes, genealogy, composition, randomNetwork);
             }
             else if (!state["sharedWorld"].IsNull)
             {

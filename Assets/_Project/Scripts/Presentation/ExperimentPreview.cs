@@ -61,6 +61,9 @@ namespace Eden.Presentation
                     settings.InitialPopulation = individuals.Count; settings.PopulationCap = Math.Max(settings.PopulationCap, individuals.Count);
                     World = WorldFactory.CreateInitial(new SimulationConfig(settings), i => individuals[i].Genome.Body);
                 }
+                else if (choice.Brain == LabBrainKind.Neural)
+                    World = new RandomNetworkSettings(choice.EvolvingBody, choice.Neat, choice.Eyes, choice.EvolvingEyes)
+                        .CreateWorld(new SimulationConfig(settings));
                 else World = WorldFactory.CreateInitial(new SimulationConfig(settings));
                 Description = $"{World.Creatures.Count} criaturas simultâneas · seed {choice.Seed}\n" +
                     $"{World.Config.ArenaWidth} × {World.Config.ArenaHeight} u · {World.Food.Count} alimentos";

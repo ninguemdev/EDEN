@@ -342,6 +342,8 @@ namespace Eden.Presentation
             {
                 if (mode == LabMode.IsolatedEvolution)
                     WorldFactory.CreateInitial(new EvaluationPlan(EvolutionRunSettings()).EpisodeConfig(0));
+                else if (brain == LabBrainKind.Neural)
+                    RandomNetworkChoice().CreateWorld(new SimulationConfig(SharedRunSettings()));
                 else
                     WorldFactory.CreateInitial(new SimulationConfig(SharedRunSettings()));
                 return null;
@@ -407,7 +409,8 @@ namespace Eden.Presentation
         {
             var shared = mode == LabMode.SharedWorld
                 ? new SharedWorldSnapshot(sharedSettings, Simulation.Capture(), controller.Capture(),
-                    sharedGenomes?.Capture(), genealogy?.Capture(), composition) : null;
+                    sharedGenomes?.Capture(), genealogy?.Capture(), composition,
+                    brain == LabBrainKind.Neural ? RandomNetworkChoice() : null) : null;
             return new Checkpoint(ModeName(mode), Preset.Name, (ulong)seed, KindName(brain), Evolution?.Capture(), shared);
         }
         public void RequestCheckpoint()
@@ -514,7 +517,9 @@ namespace Eden.Presentation
                         throw new CheckpointException("Only a world by composition holds a composition, and it needs one.");
                     loadedComposition?.RequireFits(config);
                     genomes = loadedComposition?.CreateGenomes(config) ??
-                              CreateGenomes(config, loadedBrain, individuals, session);
+                              CreateGenomes(config, loadedBrain, individuals, session, saved.SharedWorld.RandomNetwork);
+                    if (saved.SharedWorld.RandomNetwork != null && loadedBrain != LabBrainKind.Neural)
+                        throw new CheckpointException("Only random neural brains have random founder settings.");
                     if (genomes == null && saved.SharedWorld.BornGenomes.Count > 0)
                         throw new CheckpointException("Only neural brains have genomes to restore.");
                     genomes?.Restore(saved.SharedWorld.BornGenomes, world.World);
@@ -543,6 +548,14 @@ namespace Eden.Presentation
             neat = session != null && session.Evolution.Plan.Algorithm == EvolutionAlgorithm.Neat;
             eyes = session != null && session.Evolution.Plan.Senses == Senses.Eyes;
             evolvingEyes = session != null && session.Evolution.Plan.EvolvingEyes;
+            if (loadedMode == LabMode.SharedWorld && loadedBrain == LabBrainKind.Neural)
+            {
+                var randomNetwork = saved.SharedWorld.RandomNetwork ?? new RandomNetworkSettings();
+                evolvingBody = randomNetwork.EvolvingBody;
+                neat = randomNetwork.Neat;
+                eyes = randomNetwork.Eyes;
+                evolvingEyes = randomNetwork.EvolvingEyes;
+            }
             profileChoice = ProfileChoice.Read(session?.Evolution.Settings);
             if (loadedMode == LabMode.IsolatedEvolution)
                 ReadArena(session.Evolution.Settings.World, session.Evolution.Settings.EpisodeSeconds);
@@ -1028,16 +1041,16 @@ namespace Eden.Presentation
 
             var config = composed?.Config ?? new SimulationConfig(runSettings);
             sharedSettings = runSettings;
-            // Evolved creatures live with the bodies their genes express in the evolution, composed ones with their
-            // genome's body; any other brain gets the reference body.
+            // Neural founders express the selected genes; evolved and composed creatures keep their source genomes.
             var individuals = sharedIndividuals;
             var plan = Evolution?.Evolution.Plan;
             Simulation = new WorldSimulation(composed ?? (individuals == null
-                ? WorldFactory.CreateInitial(config)
+                ? brain == LabBrainKind.Neural ? RandomNetworkChoice().CreateWorld(config) : WorldFactory.CreateInitial(config)
                 : WorldFactory.CreateInitial(config, i => plan.ExpressedGenes(individuals[i].Genome.Body))));
             for (var i = 0; individuals != null && i < individuals.Count; i++)
                 Simulation.World.Creatures[i].Eyes = individuals[i].Genome.Eyes;
-            sharedGenomes = composition?.CreateGenomes(config) ?? CreateGenomes(config, brain, individuals, Evolution);
+            sharedGenomes = composition?.CreateGenomes(config) ??
+                            CreateGenomes(config, brain, individuals, Evolution, RandomNetworkChoice());
             Simulation.Heredity = sharedGenomes;
             genealogy = config.Reproduction ? new Genealogy(Simulation.World) : null;
             controller = CreateController(config, brain, sharedGenomes, out var name);
@@ -1499,8 +1512,10 @@ namespace Eden.Presentation
 
         // Founder genomes: evolved creature id i is individuals[i - 1] (the same individuals give the same brains after a
         // restart or a load), neural ones are random per id. Children's genomes come from their parents (SharedGenomes).
+        private RandomNetworkSettings RandomNetworkChoice() => new RandomNetworkSettings(evolvingBody, neat, eyes, evolvingEyes);
+
         private static SharedGenomes CreateGenomes(SimulationConfig config, LabBrainKind kind,
-            IReadOnlyList<Individual> individuals, EvolutionSession evolution)
+            IReadOnlyList<Individual> individuals, EvolutionSession evolution, RandomNetworkSettings randomNetwork = null)
         {
             switch (kind)
             {
@@ -1509,7 +1524,7 @@ namespace Eden.Presentation
                         evolution.Evolution.Plan.ExpressedBodyGenes, evolution.Evolution.Plan.Plasticity,
                         evolution.Evolution.Plan.EvolvingEyes ? evolution.Evolution.NeatRules.EyeMutation : default);
                 case LabBrainKind.Neural:
-                    return new SharedGenomes(config, id => InitialGenomes.RandomFor(config, id), BodyGeneSet.None);
+                    return (randomNetwork ?? new RandomNetworkSettings()).CreateGenomes(config);
                 default:
                     return null;
             }

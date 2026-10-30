@@ -329,6 +329,7 @@ namespace Eden.Tests.PlayMode
             StringAssert.Contains("Espécie", inspector);
             Assert.That(runner.Hud.NetworkVisible, Is.True);
             Assert.That(runner.Hud.NeatNetworkShown, Is.True, "a NEAT network is not drawn as 12-16-3");
+            yield return WaitUntil(() => runner.Hud.NeatGraph.RepaintCount > 0, 10f);
             Assert.That(runner.Hud.NeatGraph.RepaintCount, Is.GreaterThan(0), "the NEAT diagram was drawn");
             Assert.That(runner.Evolution.Job.Current.Controller.TryGetBrain(runner.Selected.Value, out var selectedBrain), Is.True);
             var brain = (NeatBrain)selectedBrain;
