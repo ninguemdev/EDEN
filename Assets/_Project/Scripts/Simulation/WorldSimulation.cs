@@ -26,6 +26,12 @@ namespace Eden.Simulation
         private float[] drunk = Array.Empty<float>();
         private float[] thirst = Array.Empty<float>();
         private readonly Contacts contacts = new Contacts();
+        private readonly List<FoodConsumption> foodConsumed = new List<FoodConsumption>();
+        private readonly List<WaterConsumption> waterConsumed = new List<WaterConsumption>();
+        public IReadOnlyList<FoodConsumption> LastFoodConsumption => foodConsumed;
+        public IReadOnlyList<WaterConsumption> LastWaterConsumption => waterConsumed;
+        public Action<CreatureId, int, bool> TargetSeen { get; set; }
+        public bool RespawnFood { get; set; } = true;
         private EnergyFlows energy;
         private HydrationFlows hydration;
 
@@ -43,6 +49,8 @@ namespace Eden.Simulation
             // cap), so ticks do not allocate as lists grow; a new isolated episode is allocation-free from its first tick.
             var config = world.Config;
             var most = Math.Max(config.Reproduction ? config.PopulationCap : config.InitialPopulation, world.Creatures.Count);
+            foodConsumed.Capacity = Math.Max(config.InitialFood, world.Food.Count);
+            waterConsumed.Capacity = most * config.Water.Count;
             agenda.Reserve(config.InitialFood);
             dueEvents.Capacity = config.InitialFood;
             deaths.Capacity = most;
@@ -169,6 +177,8 @@ namespace Eden.Simulation
             var tick = World.Tick;
             var creatures = World.Creatures;
             deaths.Clear();
+            foodConsumed.Clear();
+            waterConsumed.Clear();
             births.Clear();
             refusals.Clear();
             LastBirthsRefused = 0;
@@ -191,7 +201,7 @@ namespace Eden.Simulation
             {
                 var observed = Sensors.Observe(World, creatures[i]);
                 if (creatures[i].Eyes != null)
-                    observed = Sensors.WithEyes(observed, World, creatures[i], EyeInputs(i));
+                    observed = Sensors.WithEyes(observed, World, creatures[i], EyeInputs(i), TargetSeen);
                 observations[i] = ObservationLimits.Sanitize(observed, out var corrected);
                 LastCorrectedInputValues += corrected;
             }
@@ -328,11 +338,12 @@ namespace Eden.Simulation
                 if (winner < 0)
                     continue;
 
+                foodConsumed.Add(new FoodConsumption(creatures[winner].Id, item.Id, item.Energy));
                 item.MarkEaten();
                 foodGains[winner] += item.Energy;
                 creatures[winner].FoodEnergyEaten += item.Energy;
                 LastFoodEaten++;
-                if (!FrozenNeeds)
+                if (!FrozenNeeds && RespawnFood)
                     agenda.Schedule(tick + World.Config.FoodRespawnTicks, FoodRespawn);
             }
         }
@@ -382,6 +393,8 @@ namespace Eden.Simulation
                         var creature = creatures[c];
                         var before = creature.Hydration;
                         creature.Hydration = Math.Min(config.MaxHydration, before + thirst[c] * share);
+                        if (creature.Hydration > before)
+                            waterConsumed.Add(new WaterConsumption(creature.Id, s, creature.Hydration - before));
                         drunk[c] += creature.Hydration - before;
                         given += creature.Hydration - before;
                     }

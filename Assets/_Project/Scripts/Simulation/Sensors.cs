@@ -67,7 +67,7 @@ namespace Eden.Simulation
         /// (<see cref="Vision.See"/>, water included with water).
         /// </summary>
         public static Observation WithEyes(in Observation observation, WorldState world, CreatureState creature,
-            float[] buffer)
+            float[] buffer, Action<CreatureId, int, bool> targetSeen = null)
         {
             if (creature?.Eyes == null)
                 throw new ArgumentException("Only a creature with eyes senses through them.", nameof(creature));
@@ -82,7 +82,7 @@ namespace Eden.Simulation
             if (water)
                 buffer[NeuralContract.HydrationInput] = Clamp(creature.Hydration / world.Config.MaxHydration, 0f, 1f);
             for (var slot = 0; slot < EyeSet.MaxEyes; slot++)
-                Vision.See(world, creature, creature.Eyes, slot, buffer, contract.EyeInput(slot, EyeChannel.Present), water);
+                Vision.See(world, creature, creature.Eyes, slot, buffer, contract.EyeInput(slot, EyeChannel.Present), water, targetSeen);
             return new Observation(observation.Energy, observation.Age, observation.VelocityForward,
                 observation.VelocityLeft, observation.FoodSin, observation.FoodCos, observation.FoodProximity,
                 observation.FoodVisible, observation.WallFront, observation.WallRight, observation.WallBack,

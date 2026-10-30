@@ -37,7 +37,7 @@ namespace Eden.Simulation
         /// line to it.
         /// </summary>
         public static void See(WorldState world, CreatureState creature, EyeSet eyes, int slot, float[] buffer, int offset,
-            bool water)
+            bool water, Action<CreatureId, int, bool> targetSeen = null)
         {
             if (world == null)
                 throw new ArgumentNullException(nameof(world));
@@ -65,8 +65,9 @@ namespace Eden.Simulation
             var forwardX = MathF.Cos(heading);
             var forwardY = MathF.Sin(heading);
 
-            if (NearestFood(world, origin, axisX, axisY, cosHalf, range, out var food, out var foodDistance))
+            if (NearestFood(world, origin, axisX, axisY, cosHalf, range, out var food, out var foodDistance, out var foodId))
             {
+                targetSeen?.Invoke(creature.Id, foodId, false);
                 buffer[offset + (int)EyeChannel.FoodVisible] = 1f;
                 WriteDirection(buffer, offset + (int)EyeChannel.FoodSin, food, origin, foodDistance, axisX, axisY,
                     forwardX, forwardY);
@@ -83,8 +84,9 @@ namespace Eden.Simulation
             }
 
             if (water && NearestWater(world.Config, origin, axis, eye.Aperture * 0.5f, cosHalf, axisX, axisY, range,
-                    out var pond, out var pondDistance))
+                    out var pond, out var pondDistance, out var waterId))
             {
+                targetSeen?.Invoke(creature.Id, waterId, true);
                 buffer[offset + (int)EyeChannel.WaterVisible] = 1f;
                 WriteDirection(buffer, offset + (int)EyeChannel.WaterSin, pond, origin, pondDistance, axisX, axisY,
                     forwardX, forwardY);
@@ -136,8 +138,9 @@ namespace Eden.Simulation
         }
 
         private static bool NearestFood(WorldState world, Float2 origin, float axisX, float axisY, float cosHalf,
-            float range, out Float2 position, out float bestDistance)
+            float range, out Float2 position, out float bestDistance, out int foodId)
         {
+            foodId = -1;
             position = default;
             bestDistance = float.MaxValue;
             var found = false;
@@ -150,6 +153,7 @@ namespace Eden.Simulation
                     continue;
                 if (occluded && !LineOfSight(world.Config, origin, item))
                     continue;
+                foodId = food[i].Id.Value;
                 position = item;
                 bestDistance = distance;
                 found = true;
@@ -214,8 +218,9 @@ namespace Eden.Simulation
         // nearest the eye when it lies in the cone, and where the edge rays first hit it), keeping only those with a free
         // line past the obstacles. A source hidden at those points counts as unseen even if a sliver of it shows elsewhere.
         private static bool NearestWater(SimulationConfig config, Float2 origin, float axis, float half, float cosHalf,
-            float axisX, float axisY, float range, out Float2 position, out float bestDistance)
+            float axisX, float axisY, float range, out Float2 position, out float bestDistance, out int waterId)
         {
+            waterId = -1;
             position = default;
             bestDistance = float.MaxValue;
             var found = false;
@@ -223,6 +228,7 @@ namespace Eden.Simulation
             var occluded = config.Obstacles.Count > 0;
             for (var i = 0; i < water.Count; i++)
             {
+                var previousBest = bestDistance;
                 var area = water[i].Area;
                 var nearest = new Float2(Math.Min(area.MaxX, Math.Max(area.MinX, origin.X)),
                     Math.Min(area.MaxY, Math.Max(area.MinY, origin.Y)));
@@ -238,6 +244,7 @@ namespace Eden.Simulation
                         ConsiderVisible(config, occluded, new Float2(origin.X + dirX * t, origin.Y + dirY * t), origin,
                             axisX, axisY, cosHalf, range, ref position, ref bestDistance, ref found);
                 }
+                if (bestDistance < previousBest) waterId = i;
             }
 
             return found;
