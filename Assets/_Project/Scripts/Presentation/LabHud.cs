@@ -200,6 +200,12 @@ namespace Eden.Presentation
         public event Action SlowerClicked;
         public event Action FasterClicked;
         public event Action MaxClicked;
+        public event Action RefreshReplayClicked;
+        public event Action<int> AutoCheckpointChanged;
+        public event Action<bool, int, int, float> FollowChanged;
+        private IntegerField autoCheckpointField, followTopField, followRankField;
+        private DropdownField followField;
+        private FloatField replaySpeedField;
         public event Action SaveClicked;
         public event Action LoadClicked;
         public event Action ExportGenomeClicked;
@@ -233,6 +239,15 @@ namespace Eden.Presentation
 
         /// <summary>Root of the UI, for tests that drive the controls like a user.</summary>
         public VisualElement Root => Bind() ? GetComponent<UIDocument>().rootVisualElement : null;
+
+        public void ShowServices(int interval, bool follow, int top, int rank, float speed)
+        {
+            if (!Bind()) return;
+            autoCheckpointField.SetValueWithoutNotify(interval);
+            followField.SetValueWithoutNotify(followField.choices[follow ? 1 : 0]);
+            followTopField.SetValueWithoutNotify(top); followRankField.SetValueWithoutNotify(rank);
+            replaySpeedField.SetValueWithoutNotify(speed);
+        }
 
         public void ShowRun(string text)
         {
@@ -764,6 +779,31 @@ namespace Eden.Presentation
             trainingField.choices = new List<string>(TrainingChoices);
             trainingField.index = 0;
             BindProfile(root);
+            root.Q<Button>("follow-refresh-button").clicked += () => RefreshReplayClicked?.Invoke();
+            autoCheckpointField = root.Q<IntegerField>("auto-checkpoint-field");
+            followTopField = root.Q<IntegerField>("follow-top-field");
+            followRankField = root.Q<IntegerField>("follow-rank-field");
+            replaySpeedField = root.Q<FloatField>("replay-speed-field");
+            followField = root.Q<DropdownField>("follow-field");
+            followField.choices = new List<string> { "Avaliação atual", "Melhores avaliados (replay)" }; followField.index = 0;
+            autoCheckpointField.RegisterValueChangedCallback(change =>
+            {
+                var value = Math.Max(0, change.newValue); autoCheckpointField.SetValueWithoutNotify(value);
+                AutoCheckpointChanged?.Invoke(value);
+            });
+            void Follow()
+            {
+                var top = Math.Max(1, Math.Min(ReproductionRules.MaxPopulationSize, followTopField.value));
+                var rank = Math.Max(1, Math.Min(top, followRankField.value));
+                var speed = replaySpeedField.value;
+                if (float.IsNaN(speed) || float.IsInfinity(speed)) speed = 1;
+                speed = Mathf.Clamp(speed, 0.125f, 64f);
+                FollowChanged?.Invoke(followField.index == 1, top, rank, speed);
+            }
+            followField.RegisterValueChangedCallback(_ => Follow());
+            followTopField.RegisterValueChangedCallback(_ => Follow()); followRankField.RegisterValueChangedCallback(_ => Follow());
+            replaySpeedField.RegisterValueChangedCallback(_ => Follow());
+
             // Eyes need NEAT: choosing eyes picks NEAT, and choosing the MLP control goes back to the legacy senses.
             sensesField.RegisterValueChangedCallback(change =>
             {

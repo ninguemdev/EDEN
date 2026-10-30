@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Threading.Tasks;
 using Eden.Application;
 using Eden.Brains;
 using Eden.Domain;
@@ -114,7 +115,34 @@ namespace Eden.Presentation
         private MetricsCsvLog metricsLog;
         private GenealogyCsvLog genealogyLog;
         private Genealogy genealogy;
-        private EvolutionCsvLog evolutionLog;
+        private BufferedEvolutionLog evolutionLog;
+        private GenerationReport pendingReport;
+        private Task checkpointTask;
+        private string pendingCheckpointPath;
+        private Checkpoint pendingCheckpoint;
+        private bool saveRequested;
+        private bool autoSaveRequested;
+        private int autoSaveAt;
+        private int queuedAutoSaveAt;
+        private string autoRunId;
+        [SerializeField, Min(0)] private int autoCheckpointGenerations = 50;
+        [SerializeField] private bool followRanked;
+        [SerializeField, Min(1)] private int followTopCount = 5;
+        [SerializeField, Min(1)] private int followRank = 1;
+        [SerializeField, Min(0.125f)] private float replaySpeed = 1f;
+        private RankedReplay rankedReplay;
+        private double replayTicks;
+        private double replayFinishedSeconds;
+        public int AutoCheckpointGenerations { get => autoCheckpointGenerations; set => autoCheckpointGenerations = Math.Max(0, value); }
+        public string AutoCheckpointDirectory { get; set; }
+        public string LastAutoCheckpointPath { get; private set; }
+        public bool CheckpointIsBusy => saveRequested || autoSaveRequested || checkpointTask != null || queuedAutoSaveAt > 0;
+        private bool SnapshotPending => queuedAutoSaveAt > 0 || checkpointTask == null && (saveRequested || autoSaveRequested);
+        public bool FollowRanked => followRanked;
+        public RankedReplay Replay => rankedReplay;
+        public bool ExportBlocked => pendingReport != null || evolutionLog?.Error != null;
+        public string ExportStatus { get; private set; }
+        private bool UsingRankedReplay => mode == LabMode.IsolatedEvolution && followRanked && rankedReplay?.Episode != null;
         private SimulationSettings sharedSettings;
         private SharedGenomes sharedGenomes;
         private IReadOnlyList<Individual> sharedIndividuals;
@@ -266,6 +294,7 @@ namespace Eden.Presentation
         // the control arena starts instead, and the problem stays shown.
         private bool TryStartRun()
         {
+            if (CheckpointIsBusy) { StartProblem = "Aguarde o checkpoint terminar antes de iniciar outro experimento."; return false; }
             var problem = ScenarioProblem();
             StartProblem = problem;
             if (problem != null)
@@ -370,21 +399,43 @@ namespace Eden.Presentation
         /// being evaluated, and the shared world while it is shown. Called between ticks; the previous checkpoint
         /// becomes the backup. A failure leaves the files as they were and the run going.
         /// </summary>
+        private Checkpoint CaptureCheckpoint()
+        {
+            var shared = mode == LabMode.SharedWorld
+                ? new SharedWorldSnapshot(sharedSettings, Simulation.Capture(), controller.Capture(),
+                    sharedGenomes?.Capture(), genealogy?.Capture(), composition) : null;
+            return new Checkpoint(ModeName(mode), Preset.Name, (ulong)seed, KindName(brain), Evolution?.Capture(), shared);
+        }
+        public void RequestCheckpoint()
+        {
+            if (CheckpointIsBusy) return;
+            saveRequested = true;
+            ShowCheckpointStatus("Salvando checkpoint em segundo plano…");
+        }
         public bool SaveCheckpoint()
         {
             try
             {
-                var shared = mode == LabMode.SharedWorld
-                    ? new SharedWorldSnapshot(sharedSettings, Simulation.Capture(), controller.Capture(),
-                        sharedGenomes?.Capture(), genealogy?.Capture(), composition)
-                    : null;
-                var checkpoint = new Checkpoint(ModeName(mode), Preset.Name, (ulong)seed, KindName(brain),
-                    Evolution?.Capture(), shared);
-                CheckpointFile.Save(CheckpointPath, checkpoint, UnityEngine.Application.version, Runtime(), DateTime.UtcNow);
+                if (pendingReport != null)
+                {
+                    evolutionLog?.Drain();
+                    if (!evolutionLog.TryAppend(pendingReport)) throw new CheckpointException("Export queue is unavailable.");
+                    pendingReport = null;
+                }
+                evolutionLog?.Drain();
+                var checkpoint = CaptureCheckpoint();
+                if (evolutionLog == null)
+                    CheckpointFile.Save(CheckpointPath, checkpoint, UnityEngine.Application.version, Runtime(), DateTime.UtcNow);
+                else
+                {
+                    var save = evolutionLog.TrySaveCheckpoint(CheckpointPath, checkpoint, UnityEngine.Application.version, Runtime(), DateTime.UtcNow);
+                    if (save == null) throw new CheckpointException("The metrics writer cannot accept a checkpoint.");
+                    save.GetAwaiter().GetResult();
+                }
                 ShowCheckpointStatus(LabText.CheckpointSaved(CheckpointPath, Simulation.World.Tick, EvolutionShown));
                 return true;
             }
-            catch (CheckpointException error)
+            catch (Exception error) when (error is CheckpointException || error is IOException)
             {
                 Debug.LogWarning($"EDEN: checkpoint not saved ({error.Message})");
                 ShowCheckpointStatus(LabText.CheckpointFailed("não salvo", error.Message));
@@ -400,6 +451,7 @@ namespace Eden.Presentation
         /// </summary>
         public bool LoadCheckpoint()
         {
+            if (CheckpointIsBusy) { ShowCheckpointStatus("Aguarde o checkpoint terminar antes de carregar."); return false; }
             Checkpoint saved;
             CheckpointInfo savedInfo;
             string problem;
@@ -487,6 +539,7 @@ namespace Eden.Presentation
             arenaTally = default;
             parallelTraining = session != null && session.EvaluationWorkers > 1;
             Evolution = session;
+            ConfigureSessionServices();
             EvolutionDirectory = null;
             MetricsDirectory = null;
             Simulation = world;
@@ -569,6 +622,10 @@ namespace Eden.Presentation
 
             if (mode == LabMode.IsolatedEvolution)
             {
+                if (UsingRankedReplay)
+                    return new GenomeRecord(rankedReplay.Individual.Genome, rankedReplay.Score,
+                        new GenomeSource(Evolution.Plan.ExperimentSeed, rankedReplay.Generation, rankedReplay.Individual.Id),
+                        Evolution.Plan.Profile.Id, Evolution.Plan.Profile.ParameterHash);
                 var individual = Evolution?.CurrentIndividual;
                 return individual == null
                     ? null
@@ -612,7 +669,11 @@ namespace Eden.Presentation
             RefreshHud();
         }
 
-        public void RequestStep() => Clock.RequestStep();
+        public void RequestStep()
+        {
+            Clock.RequestStep();
+            if (UsingRankedReplay && !rankedReplay.Episode.IsFinished) rankedReplay.Episode.Advance(1);
+        }
 
         /// <summary>Changes the requested speed; leaves maximum speed.</summary>
         public void ScaleSpeed(float factor)
@@ -716,8 +777,14 @@ namespace Eden.Presentation
         public void CloseLogs()
         {
             CloseMetricsLog();
+            if (checkpointTask != null) { try { checkpointTask.GetAwaiter().GetResult(); } catch (Exception error) { Debug.LogWarning("EDEN: save failed: " + error.Message); } }
+            if (pendingReport != null && evolutionLog != null && evolutionLog.Error == null)
+            {
+                evolutionLog.Drain(); evolutionLog.TryAppend(pendingReport); pendingReport = null;
+            }
             evolutionLog?.Dispose();
             evolutionLog = null;
+            pendingReport = null;
         }
 
         private void CloseMetricsLog()
@@ -756,7 +823,10 @@ namespace Eden.Presentation
             {
                 hud.StartClicked += () => StartExperiment(hud.ReadChoice());
                 hud.ResumeEvolutionClicked += ResumeEvolution;
-                hud.SaveClicked += () => SaveCheckpoint();
+                hud.SaveClicked += RequestCheckpoint;
+                hud.AutoCheckpointChanged += value => AutoCheckpointGenerations = value;
+                hud.RefreshReplayClicked += () => ConfigureFollow(followRanked, followTopCount, followRank, replaySpeed);
+                hud.FollowChanged += (enabled, top, rank, speed) => ConfigureFollow(enabled, top, rank, speed);
                 hud.LoadClicked += () => LoadCheckpoint();
                 hud.ExportGenomeClicked += () => ExportGenome();
                 hud.CopyGenomeDirectoryClicked += CopyGenomeDirectory;
@@ -786,11 +856,13 @@ namespace Eden.Presentation
         private void Update()
         {
             HandleInput();
+            PumpPersistence();
             var realDelta = Time.unscaledDeltaTime;
             benchmark?.BeginSimulation();
-            var ticks = Clock.Advance(realDelta);
+            var canRun = !ExportBlocked && !SnapshotPending;
+            var ticks = canRun ? Clock.Advance(realDelta) : 0;
             RunTicks(ticks, rememberLast: true);
-            if (Clock.IsUnpaced && !Clock.IsPaused)
+            if (Clock.IsUnpaced && !Clock.IsPaused && canRun)
             {
                 var ran = RunWithinBudget();
                 // An extinction during these ticks pauses the clock; there is no speed to record then.
@@ -801,10 +873,13 @@ namespace Eden.Presentation
 
             benchmark?.EndSimulation(ticks);
             if (mode == LabMode.IsolatedEvolution)
+            {
+                UpdateReplay(realDelta);
                 ShowEpisode();
+            }
 
             worldView.Render(Simulation.World, Selected, Clock.TickFraction);
-            var shownEpisode = EvolutionShown?.Job.Current;
+            var shownEpisode = UsingRankedReplay ? rankedReplay.Episode : EvolutionShown?.Job.Current;
             if (shownEpisode?.Layout != null && shownEpisode.Simulation == Simulation)
                 worldView.ShowReachedWater(shownEpisode.Layout, shownEpisode.Tracker.IsCollected);
             if (Selected.HasValue)
@@ -836,7 +911,9 @@ namespace Eden.Presentation
                 return 0;
             if (mode == LabMode.IsolatedEvolution)
             {
-                if (rememberLast)
+                if (!CanAdvanceEvolution()) return 0;
+                var before = Evolution.TotalTicks;
+                if (rememberLast && !UsingRankedReplay)
                 {
                     Evolution.Advance(ticks - 1);
                     worldView.RememberPreviousTick(Evolution.Job.Current.Simulation.World);
@@ -847,7 +924,7 @@ namespace Eden.Presentation
                     Evolution.Advance(ticks);
                 }
 
-                return ticks;
+                return (int)(Evolution.TotalTicks - before);
             }
 
             for (var i = 0; i < ticks; i++)
@@ -996,14 +1073,21 @@ namespace Eden.Presentation
 
         private void StartEvolution()
         {
+            if (checkpointTask != null) { try { checkpointTask.GetAwaiter().GetResult(); } catch (Exception error) { Debug.LogWarning("EDEN: save failed: " + error.Message); } }
+            if (pendingReport != null && evolutionLog != null && evolutionLog.Error == null)
+            {
+                evolutionLog.Drain(); evolutionLog.TryAppend(pendingReport); pendingReport = null;
+            }
             evolutionLog?.Dispose();
             evolutionLog = null;
+            pendingReport = null;
             EvolutionDirectory = null;
             sharedIndividuals = null;
             sharedGenomes = null;
             audit = null;
             var evolutionSettings = EvolutionRunSettings();
             Evolution = CreateEvolution(evolutionSettings);
+            ConfigureSessionServices();
             BrainName = EvolutionBrainName(Evolution);
             if (writeMetrics)
                 OpenEvolutionLog();
@@ -1045,14 +1129,14 @@ namespace Eden.Presentation
         // Evolution mode: follows the episode being evaluated; a selection moves on to the new episode's creature.
         private void ShowEpisode()
         {
-            var episode = Evolution.Job.Current;
+            var episode = UsingRankedReplay ? rankedReplay.Episode : Evolution.Job.Current;
             if (episode.Simulation == Simulation)
                 return;
             Simulation = episode.Simulation;
             controller = episode.Controller;
             worldView.Bind(Simulation.World);
-            if (!Selected.HasValue)
-                return;
+            if (UsingRankedReplay) { Selected = episode.Creature.Id; selectedDeath = null; }
+            if (!Selected.HasValue) return;
             Selected = episode.Creature.Id;
             controller.Watch(Selected);
             networkSnapshot.Clear();
@@ -1088,7 +1172,7 @@ namespace Eden.Presentation
                 if (keyboard.leftBracketKey.wasPressedThisFrame) SelectNeighbor(-1);
                 if (keyboard.escapeKey.wasPressedThisFrame) ClearSelection();
                 if (keyboard.rKey.wasPressedThisFrame) StartRun();
-                if (keyboard.f5Key.wasPressedThisFrame) SaveCheckpoint();
+                if (keyboard.f5Key.wasPressedThisFrame) RequestCheckpoint();
                 if (keyboard.f9Key.wasPressedThisFrame) LoadCheckpoint();
                 if (keyboard.bKey.wasPressedThisFrame && mode == LabMode.SharedWorld)
                     UseBrain(brain == LabBrainKind.Heuristic ? LabBrainKind.Random
@@ -1138,6 +1222,9 @@ namespace Eden.Presentation
                             : LabText.Run(Simulation, Clock, BrainName, Preset, metrics, RunDirectory, SharedSource(),
                                 arenaTally, composition, audit)));
             hud.ShowEvolution(evolving || sharedIndividuals != null ? Evolution : null);
+            hud.ShowServices(autoCheckpointGenerations, followRanked, followTopCount, followRank, replaySpeed);
+            if (ExportStatus != null) hud.ShowRun(hud.RunText + "\n" + ExportStatus);
+            if (evolving && followRanked) hud.ShowRun(hud.RunText + "\n" + rankedReplay.Describe());
             hud.ShowInspector(Selected.HasValue ? DescribeSelected(Selected.Value) : null);
             hud.SetExportAvailable(ResolveExportableGenome() != null);
         }
@@ -1189,6 +1276,9 @@ namespace Eden.Presentation
         {
             if (mode == LabMode.IsolatedEvolution)
             {
+                if (UsingRankedReplay)
+                    return "\n\n" + rankedReplay.Describe() + "\n" + LabText.Lineage(rankedReplay.Individual,
+                        Evolution.Evolution.Lineage, rankedReplay.Generation, null);
                 var current = Evolution.CurrentIndividual;
                 return "\n\n" + LabText.Episode(Evolution, Simulation.World.Config) +
                        (current == null ? string.Empty
@@ -1342,6 +1432,14 @@ namespace Eden.Presentation
                     case "-eden-reproduction" when value == "on" || value == "off":
                         settings.Reproduction = value == "on";
                         break;
+                    case "-eden-auto-checkpoint" when int.TryParse(value, out var autoEvery) && autoEvery >= 0:
+                        autoCheckpointGenerations = autoEvery; break;
+                    case "-eden-follow-ranked" when int.TryParse(value, out var top) && top > 0:
+                        followRanked = true; followTopCount = Math.Min(top, ReproductionRules.MaxPopulationSize); break;
+                    case "-eden-follow-rank" when int.TryParse(value, out var rank) && rank > 0:
+                        followRank = rank; break;
+                    case "-eden-replay-speed" when TryNumber(value, out var replayRate) && replayRate > 0:
+                        replaySpeed = Mathf.Clamp(replayRate, 0.125f, 64f); break;
                     case "-eden-training" when value == "sequential" || value == "parallel":
                         parallelTraining = value == "parallel";
                         break;
@@ -1522,7 +1620,7 @@ namespace Eden.Presentation
                 var directory = CreateRunDirectory("EvolutionRuns", $"lab-seed{seed}-{Preset.Name}");
                 var header = new ExperimentHeader(Evolution.Evolution.Settings, Evolution.ValidationInterval,
                     UnityEngine.Application.version, DateTime.UtcNow, Preset.Name, resumedFrom, scenario.Describe());
-                var log = new EvolutionCsvLog(directory, header);
+                var log = new BufferedEvolutionLog(directory, header);
                 evolutionLog = log;
                 EvolutionDirectory = directory;
                 Evolution.ReportCompleted += report => AppendEvolution(log, report);
@@ -1534,21 +1632,115 @@ namespace Eden.Presentation
         }
 
         // Reports reach only the log of their own session; a closed or replaced log receives nothing more.
-        private void AppendEvolution(EvolutionCsvLog log, GenerationReport report)
+        private void AppendEvolution(BufferedEvolutionLog log, GenerationReport report)
         {
             if (log != evolutionLog)
                 return;
-            try
+            if (!log.TryAppend(report)) pendingReport = report;
+        }
+
+        private void ConfigureSessionServices()
+        {
+            pendingReport = null; checkpointTask = null; pendingCheckpoint = null;
+            saveRequested = false; autoSaveRequested = false; queuedAutoSaveAt = 0; ExportStatus = null;
+            LastAutoCheckpointPath = null;
+            autoRunId = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fffffff", CultureInfo.InvariantCulture);
+            rankedReplay = Evolution == null ? null : new RankedReplay(Evolution.Plan);
+            if (Evolution == null) return;
+            followRank = Math.Max(1, Math.Min(followTopCount, followRank));
+            rankedReplay.Configure(followTopCount, followRank);
+            rankedReplay.Offer(Evolution.LastTraining);
+            Evolution.CanAdvance = CanAdvanceEvolution;
+            var session = Evolution;
+            session.ReportCompleted += report =>
             {
-                log.Append(report);
-            }
-            catch (Exception error) when (error is IOException || error is UnauthorizedAccessException)
+                if (Evolution != session || report.Evaluation.Mode != EvaluationMode.Training) return;
+                rankedReplay.Offer(report);
+                var completed = report.Evaluation.Generation + 1;
+                if (autoCheckpointGenerations > 0 && completed % autoCheckpointGenerations == 0)
+                {
+                    if (checkpointTask != null) queuedAutoSaveAt = completed;
+                    else { autoSaveRequested = true; autoSaveAt = completed; }
+                }
+            };
+        }
+        private bool CanAdvanceEvolution() => !ExportBlocked && !SnapshotPending;
+        private void PumpPersistence()
+        {
+            if (checkpointTask != null && checkpointTask.IsCompleted)
             {
-                Debug.LogWarning($"EDEN: evolution log disabled ({error.Message})");
-                evolutionLog.Dispose();
-                evolutionLog = null;
-                EvolutionDirectory = null;
+                if (checkpointTask.IsFaulted)
+                    ShowCheckpointStatus("Falha ao salvar: " + checkpointTask.Exception.GetBaseException().Message);
+                else
+                {
+                    if (autoSaveRequested) LastAutoCheckpointPath = pendingCheckpointPath;
+                    ShowCheckpointStatus("Checkpoint salvo: " + pendingCheckpointPath);
+                }
+                checkpointTask = null; pendingCheckpoint = null; saveRequested = false; autoSaveRequested = false;
+                if (queuedAutoSaveAt > 0)
+                {
+                    autoSaveRequested = true; autoSaveAt = queuedAutoSaveAt; queuedAutoSaveAt = 0;
+                }
             }
+            if (evolutionLog?.Error != null)
+            {
+                if (checkpointTask == null) { saveRequested = false; autoSaveRequested = false; pendingCheckpoint = null; queuedAutoSaveAt = 0; }
+                ExportStatus = "Treino suspenso: falha na gravação — " + evolutionLog.Error.Message;
+                return;
+            }
+            if (pendingReport != null && evolutionLog.TryAppend(pendingReport)) pendingReport = null;
+            ExportStatus = pendingReport == null ? null : "Treino aguardando a gravação dos resultados; interface disponível.";
+            if ((!saveRequested && !autoSaveRequested) || checkpointTask != null || pendingReport != null) return;
+            if (evolutionLog != null && !evolutionLog.HasCapacity) return;
+            if (pendingCheckpoint == null)
+            {
+                ShowCheckpointStatus(autoSaveRequested
+                    ? $"Salvando checkpoint automático após {autoSaveAt} gerações…"
+                    : "Salvando checkpoint em segundo plano…");
+                pendingCheckpoint = CaptureCheckpoint();
+                pendingCheckpointPath = autoSaveRequested
+                    ? Path.Combine(AutoCheckpointDirectory ?? Path.Combine(Path.GetDirectoryName(CheckpointPath), "Automatic", autoRunId),
+                        "generation-" + autoSaveAt.ToString("D6", CultureInfo.InvariantCulture) + ".json")
+                    : CheckpointPath;
+            }
+            var version = UnityEngine.Application.version; var runtime = Runtime(); var utc = DateTime.UtcNow;
+            if (evolutionLog != null)
+                checkpointTask = evolutionLog.TrySaveCheckpoint(pendingCheckpointPath, pendingCheckpoint, version, runtime, utc);
+            else
+            {
+                var path = pendingCheckpointPath; var snapshot = pendingCheckpoint;
+                checkpointTask = Task.Run(() => CheckpointFile.Save(path, snapshot, version, runtime, utc));
+            }
+        }
+        public void ConfigureFollow(bool enabled, int topCount = 5, int rank = 1, float speed = 1f)
+        {
+            followRanked = enabled;
+            followTopCount = Math.Max(1, Math.Min(Evolution?.Evolution.Rules.PopulationSize ?? ReproductionRules.MaxPopulationSize, topCount));
+            followRank = Math.Max(1, Math.Min(followTopCount, rank));
+            if (float.IsNaN(speed) || float.IsInfinity(speed)) speed = 1;
+            replaySpeed = Mathf.Clamp(speed, 0.125f, 64f);
+            rankedReplay?.Configure(followTopCount, followRank);
+            if (enabled) rankedReplay?.BeginLatest();
+            replayTicks = 0; replayFinishedSeconds = 0;
+            if (mode == LabMode.IsolatedEvolution && Evolution != null) ShowEpisode();
+        }
+        private void UpdateReplay(float realDelta)
+        {
+            if (!followRanked || rankedReplay == null) return;
+            if (rankedReplay.Episode == null) rankedReplay.BeginLatest();
+            var episode = rankedReplay.Episode;
+            if (episode == null || Clock.IsPaused) return;
+            if (episode.IsFinished)
+            {
+                replayFinishedSeconds += realDelta;
+                if (replayFinishedSeconds >= 1) { rankedReplay.Next(); replayFinishedSeconds = 0; replayTicks = 0; }
+                return;
+            }
+            replayTicks = Math.Min(64, replayTicks + realDelta * replaySpeed * episode.Simulation.World.Config.TicksPerSecond);
+            var ticks = (long)replayTicks; replayTicks -= ticks;
+            worldView.RememberPreviousTick(episode.Simulation.World);
+            episode.Advance(ticks);
+            if (episode.Simulation.LastDeaths.Count > 0) selectedDeath = episode.Simulation.LastDeaths[0];
         }
 
         private static string CreateRunDirectory(string kind, string name)

@@ -48,6 +48,38 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Controls_AutoCheckpointAt50AndIndependentRankedReplay()
+        {
+            UseTemporaryCheckpoint();
+            var root = runner.Hud.Root;
+            Assert.That(root.Q<IntegerField>("auto-checkpoint-field").value, Is.EqualTo(50));
+            runner.StartExperiment(new LabChoice(LabMode.IsolatedEvolution, 0, 8, LabBrainKind.Heuristic,
+                scenario: new ScenarioSettings { EpisodeSeconds = 0.05f }));
+            root.Q<DropdownField>("follow-field").index = 1;
+            root.Q<IntegerField>("follow-top-field").value = 3;
+            root.Q<IntegerField>("follow-rank-field").value = 1;
+            yield return Press("max-button");
+            yield return WaitUntil(() => runner.LastAutoCheckpointPath != null, 60f);
+            yield return Press("pause-button");
+            Assert.That(runner.LastAutoCheckpointPath, Does.EndWith("generation-000050.json"));
+            var checkpoint = CheckpointFile.Load(runner.LastAutoCheckpointPath, out _);
+            Assert.That(checkpoint.Evolution.Generation, Is.EqualTo(50));
+            Assert.That(checkpoint.Evolution.Training.Count, Is.EqualTo(50));
+            Assert.That(File.Exists(runner.CheckpointPath), Is.False, "automatic saves do not replace the manual file");
+            Assert.That(runner.Replay.Episode, Is.Not.Null);
+            Assert.That(runner.Simulation, Is.SameAs(runner.Replay.Episode.Simulation));
+            StringAssert.Contains("REPLAY", runner.Hud.RunText);
+            var ticks = runner.Evolution.TotalTicks;
+            runner.ConfigureFollow(true, 3, 2, 1);
+            Assert.That(runner.Replay.Rank, Is.EqualTo(2));
+            Assert.That(runner.Evolution.TotalTicks, Is.EqualTo(ticks));
+            root.Q<IntegerField>("auto-checkpoint-field").value = 0;
+            Assert.That(runner.AutoCheckpointGenerations, Is.EqualTo(0));
+            root.Q<DropdownField>("follow-field").index = 0;
+            Assert.That(runner.Simulation, Is.SameAs(runner.Evolution.Job.Current.Simulation));
+        }
+
+        [UnityTest]
         public IEnumerator Controls_ActiveSearchModesPreserveNeedsAndCheckpoint()
         {
             UseTemporaryCheckpoint();
@@ -148,7 +180,7 @@ namespace Eden.Tests.PlayMode
             StringAssert.Contains("efetiva", runner.Hud.RunText);
             Assert.That(effectiveSpeed, Is.GreaterThan(FixedStepClock.MaxSpeed),
                 "maximum speed runs faster than the paced maximum");
-            Assert.That(File.Exists(Path.Combine(runner.EvolutionDirectory, "generations.csv")), Is.True);
+            Assert.That(Directory.Exists(Path.Combine(runner.EvolutionDirectory, "segments")), Is.True);
         }
 
         [UnityTest]
@@ -802,6 +834,8 @@ namespace Eden.Tests.PlayMode
 
             yield return null;
             yield return null;
+            if (buttonName == "save-button")
+                yield return WaitUntil(() => !runner.CheckpointIsBusy, 30f);
             Track();
         }
 

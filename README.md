@@ -458,6 +458,26 @@ O que esses números dizem:
 
 **Rede.** O código do EDEN não usa rede. A engine, porém, abre conexões HTTPS de telemetria da Unity quando há internet. Com todas as rotas HTTP fechadas (proxy inválido), o player não abriu nenhuma conexão e funcionou igual: 60 FPS, 20 ticks/s, mesma população.
 
+## Gravação e acompanhamento da evolução
+
+No laboratório, o painel **Gravação e acompanhamento** configura o checkpoint automático e a observação dos indivíduos avaliados. O intervalo padrão é **50 gerações de treino concluídas** (50, 100, 150…); zero desativa. A geração inicial é g0, portanto o primeiro arquivo contém os resultados até g49 e a população seguinte. Os arquivos ficam em `Checkpoints/Automatic/<execução>/generation-000050.json`, dentro do diretório de dados do aplicativo, separados do checkpoint manual `lab.json`. Salvar/F5 também grava em segundo plano: o estado é capturado entre ticks e o treino pode continuar enquanto esse estado é serializado, conferido e gravado. Fechar a execução aguarda a gravação pendente.
+
+Ative o acompanhamento dos melhores, escolha quantos indivíduos assistir, a posição inicial e a velocidade do replay. A classificação usa a **nota média do treino concluído**, com desempate pelo id do indivíduo. Cada replay mostra seu melhor episódio da etapa de busca (ou da primeira etapa, quando não há busca). O painel identifica geração, posição, indivíduo, nota e seed. Ao terminar o ciclo, passa à classificação mais recente; o botão de atualização antecipa essa troca. O replay tem mundo, cérebro e RNG próprios: não participa da seleção nem modifica o treino. As preferências de observação não fazem parte do experimento salvo. No player: `-eden-auto-checkpoint 50 -eden-follow-ranked 5 -eden-follow-rank 1 -eden-replay-speed 1` (acompanha os cinco melhores).
+
+A evolução interativa usa **métricas v2**, com uma fila limitada e um gravador em segundo plano. Cada geração/avaliação é um segmento em `segments/`, com indivíduos, episódios, fatos por alvo, resumos e o genoma campeão. Cenários compartilhados são gravados uma vez em `scenarios/`. Os episódios guardam os valores usados pela seleção com precisão de ida e volta; campos indisponíveis ficam vazios. Os alvos usam linhas apenas quando há detecção ou interação, evitando centenas de colunas vazias. A exportação antiga também ganhou um formatador linear.
+
+Cada segmento é preparado em uma pasta `.partial`, recebe um manifesto de tamanhos e hashes SHA-256 e só então é publicado por renomeação. Leitores ignoram segmentos parciais e verificam os arquivos publicados. Se a fila encher, o treino aguarda com a interface disponível; falhas de gravação suspendem o treino e aparecem no painel. Uma retomada cria outro diretório e registra sua origem. Checkpoints vinculados às métricas têm um recibo adjacente `.metrics.json`, associado ao hash do estado, indicando o último segmento anterior ao checkpoint. Ao juntar execuções retomadas, considere apenas esse prefixo da execução anterior; resultados posteriores pertencem à linha de tempo abandonada. Checkpoints antigos continuam aceitos; o schema 10 acrescenta as detecções por alvo quando presentes, preservando os formatos anteriores para estados sem esses dados.
+
+Ferramentas que precisam dos CSVs antigos podem converter uma execução v2 **encerrada** para uma pasta nova e vazia, sem simular novamente:
+
+```powershell
+& "C:\Program Files\Unity\Hub\Editor\6000.3.27f1\Editor\Unity.exe" -batchmode -projectPath . `
+  -executeMethod Eden.Editor.MetricsExport.FromCommandLine `
+  -eden-source "C:\dados\execucao-v2" -eden-output "C:\dados\csv-compativel" -logFile export.log
+```
+
+Use um projeto de validação separado quando o Editor já estiver aberto. Os comandos de bateria existentes mantêm sua exportação CSV; a mudança de armazenamento padrão se aplica à evolução interativa do laboratório.
+
 ## Estrutura
 
 O código fica em `Assets/_Project` e é dividido em assemblies com responsabilidades separadas. As regras não dependem da Unity: a cena apenas mostra o estado calculado pela simulação.

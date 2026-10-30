@@ -32,6 +32,15 @@
                         <ui:FloatField name="scenario-initial-energy-field" label="Energia inicial" class="lab-field" />
                     </ui:Foldout>
                     <ui:DropdownField name="training-field" label="Treino" class="lab-field" tooltip="Paralelo usa a CPU para avaliar mundos independentes. Use Máx. para acelerar o treino; a arena mostra um dos episódios." />
+                    <ui:Foldout name="observation-foldout" text="Gravação e acompanhamento" value="false" class="lab-field">
+                        <ui:IntegerField name="auto-checkpoint-field" label="Checkpoint a cada gerações (0 desliga)" value="50" class="lab-field" />
+                        <ui:DropdownField name="follow-field" label="Acompanhar" class="lab-field" />
+                        <ui:IntegerField name="follow-top-field" label="Melhores N" value="5" class="lab-field" />
+                        <ui:IntegerField name="follow-rank-field" label="Posição inicial" value="1" class="lab-field" />
+                        <ui:FloatField name="replay-speed-field" label="Velocidade do replay" value="1" class="lab-field" />
+                        <ui:Button name="follow-refresh-button" text="Atualizar ranking agora" class="lab-button" />
+                        <ui:Label text="Replays independentes do treino. O ranking atualiza a cada ciclo ou pelo botão." style="white-space: normal; font-size: 11px;" />
+                    </ui:Foldout>
                     <ui:DropdownField name="profile-field" label="Perfil" class="lab-field" tooltip="Como cada genoma é pontuado. Somente busca ou duas etapas com híbrida e fome/sede; o perfil antigo mantém busca sem gasto." />
                     <ui:Foldout name="profile-foldout" text="Busca — configuração" value="false" class="lab-field">
                         <ui:FloatField name="profile-weight-field" label="Peso da busca (%)" class="lab-field" />
