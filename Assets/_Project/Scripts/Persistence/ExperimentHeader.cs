@@ -68,7 +68,7 @@ namespace Eden.Persistence
                 "created_utc=" + Utc(CreatedUtc),
                 "config_hash=" + CheckpointCodec.Hex(ConfigHash),
                 "evaluation_mode=isolated",
-                "fitness_unit=" + ExperimentJson.FitnessUnit,
+                "fitness_unit=" + (RewardProfiles.IsActive(Plan.Profile) ? "dimensionless" : ExperimentJson.FitnessUnit),
                 "fitness_profile=" + Plan.Profile.Id,
                 "neural_contract=" + Plan.Contract.Id,
                 "network=" + (IsNeat ? NeatNetwork.Kind : NetworkTopology.Mlp12x16x3.ToString()),
@@ -206,7 +206,7 @@ namespace Eden.Persistence
                            world.ArenaHeight.ToString(culture) + ";obstacles " +
                            (ObstacleLayouts.Identify(world) is ObstacleLayout layout ? ObstacleLayouts.Name(layout) : "custom");
                 if (stage.IsSearch)
-                    line += ";rules search (needs frozen, no respawn);targets " + stage.Search.Targets.Food.ToString(culture) +
+                    line += (stage.ActiveSearch ? ";rules search (needs active, no respawn, time or death);targets " : ";rules search (needs frozen, no respawn);targets ") + stage.Search.Targets.Food.ToString(culture) +
                             " food " + stage.Search.Targets.Water.ToString(culture) + " water;min_distance " +
                             stage.Search.Targets.MinDistance.ToString(culture) + ";arena_used " +
                             stage.Search.ArenaSide.ToString(culture);

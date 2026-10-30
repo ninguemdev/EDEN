@@ -61,11 +61,15 @@ namespace Eden.Persistence
             // Only a profile other than the legacy one has stages and components; legacy exports stay as they were.
             if (!header.Plan.Profile.IsLegacy)
                 stages = new CsvFile(Path.Combine(directory, "stages.csv"), StageCsv.Header(header.Plan.Profile));
+            if (RewardProfiles.IsActive(header.Plan.Profile))
+                stageSummaries = new CsvFile(Path.Combine(directory, "stage-summaries.csv"), StageCsv.SummaryHeader(header.Plan.Profile));
             if (!header.IsNeat)
                 return;
             neatGenerations = new CsvFile(Path.Combine(directory, "neat-generations.csv"), NeatGenerationsHeader);
             neatIndividuals = new CsvFile(Path.Combine(directory, "neat-individuals.csv"), NeatIndividualsHeader);
         }
+
+        private CsvFile stageSummaries;
 
         public string DirectoryPath { get; }
         public ExperimentHeader Header { get; }
@@ -94,6 +98,8 @@ namespace Eden.Persistence
                     neatIndividuals.Append(FormatNeatIndividual(report, c));
             }
 
+            if (stageSummaries != null)
+                foreach (var row in StageCsv.Summaries(Header.Plan.Profile, report.Evaluation)) stageSummaries.Append(row);
             GenerationCount++;
             tally.Add(report);
             WriteSummary();
@@ -190,6 +196,8 @@ namespace Eden.Persistence
             individuals?.Dispose();
             episodes?.Dispose();
             stages?.Dispose();
+            stageSummaries?.Dispose();
+            stageSummaries = null;
             stages = null;
             neatGenerations?.Dispose();
             neatIndividuals?.Dispose();

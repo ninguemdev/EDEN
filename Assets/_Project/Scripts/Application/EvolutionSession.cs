@@ -105,6 +105,18 @@ namespace Eden.Application
 
             CheckHistory(saved);
             session.training.AddRange(saved.Training);
+            if (RewardProfiles.IsActive(plan.Profile))
+            {
+                if (saved.StageMedians == null || saved.StageMedians.Count != saved.Generation)
+                    throw new ArgumentException("Active stage history is missing or has the wrong generation count.");
+                foreach (var row in saved.StageMedians)
+                {
+                    if (row.Count != plan.Stages.Count) throw new ArgumentException("Stage history has the wrong width.");
+                    foreach (var value in row)
+                        if (!(value >= 0 && value <= 1)) throw new ArgumentException("Stage history contains an invalid score.");
+                    session.stageMedians.Add(row);
+                }
+            }
             session.validation.AddRange(saved.Validation);
             session.TotalTicks = saved.TotalTicks;
 
@@ -191,7 +203,7 @@ namespace Eden.Application
             return new EvolutionSnapshot(Evolution.Settings, ValidationInterval, Evolution.Generation,
                 Evolution.Individuals, Evolution.Lineage.Entries(), LastTraining?.Individuals,
                 LastTraining?.Evaluation.Episodes, baselines, training, validation, TotalTicks, Phase, Job.Capture(),
-                Evolution.CaptureNeat());
+                Evolution.CaptureNeat(), RewardProfiles.IsActive(Plan.Profile) ? stageMedians : null);
         }
 
         /// <summary>

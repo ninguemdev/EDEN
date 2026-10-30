@@ -29,7 +29,7 @@ namespace Eden.Persistence
                 stage.Name,
                 result.EpisodeSeed.ToString(culture),
                 result.IsValid ? "1" : "0",
-                result.IsValid ? result.Fitness.ToString("0.######", culture) : string.Empty,
+                result.IsValid ? result.Fitness.ToString(RewardProfiles.IsActive(profile) ? "R" : "0.######", culture) : string.Empty,
                 Evolution.Fitness.IsValid(result.LegacyFitness)
                     ? result.LegacyFitness.ToString("0.######", culture)
                     : string.Empty
@@ -40,13 +40,56 @@ namespace Eden.Persistence
                 for (var i = 0; i < stage.Components.Count && result.Components != null; i++)
                 {
                     if (stage.Name + "." + stage.Components[i].Name == column)
-                        value = result.Components[i].ToString("0.######", culture);
+                    {
+                        if (RewardProfiles.IsActive(profile))
+                        {
+                            var measured = result.PreciseComponents != null ? result.PreciseComponents[i] : result.Components[i];
+                            value = double.IsNaN(measured) ? string.Empty : measured.ToString("R", culture);
+                        }
+                        else
+                            value = result.Components[i].ToString("0.######", culture);
+                    }
                 }
 
                 fields.Add(value);
             }
 
             return string.Join(",", fields);
+        }
+
+        public static string SummaryHeader(RewardProfile profile) =>
+            "evaluation_mode,generation,stage,stage_name,episodes,score_mean," + string.Join(",", Columns(profile));
+
+        public static IEnumerable<string> Summaries(RewardProfile profile, GenerationEvaluation evaluation)
+        {
+            for (var s = 0; s < profile.Stages.Count; s++)
+            {
+                var stage = profile.Stages[s]; var n = 0; double score = 0;
+                var sums = new double[stage.Components.Count]; var counts = new int[sums.Length];
+                foreach (var episode in evaluation.Episodes)
+                {
+                    if (episode.Stage != s) continue;
+                    n++; score += episode.Fitness;
+                    for (var c = 0; c < sums.Length; c++)
+                    {
+                        var value = episode.PreciseComponents != null ? episode.PreciseComponents[c] : episode.Components[c];
+                        if (double.IsNaN(value)) continue;
+                        sums[c] += value; counts[c]++;
+                    }
+                }
+                var fields = new List<string> { EvaluationCsv.ModeName(evaluation.Mode),
+                    evaluation.Generation.ToString(CultureInfo.InvariantCulture), s.ToString(CultureInfo.InvariantCulture),
+                    stage.Name, n.ToString(CultureInfo.InvariantCulture), n == 0 ? "" : (score / n).ToString("R", CultureInfo.InvariantCulture) };
+                foreach (var column in Columns(profile))
+                {
+                    var text = "";
+                    for (var c = 0; c < sums.Length; c++)
+                        if (column == stage.Name + "." + stage.Components[c].Name && counts[c] > 0)
+                            text = (sums[c] / counts[c]).ToString("R", CultureInfo.InvariantCulture);
+                    fields.Add(text);
+                }
+                yield return string.Join(",", fields);
+            }
         }
 
         // "stage.component" for every component of every stage, in stage and component order.

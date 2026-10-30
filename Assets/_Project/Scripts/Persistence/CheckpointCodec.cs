@@ -41,7 +41,7 @@ namespace Eden.Persistence
         /// of every episode, what the running episodes measured). Legacy runs keep schema 7 with parallel evaluation,
         /// 6 for sequential NEAT and 5 for MLP.
         /// </summary>
-        public const int SchemaVersion = 8;
+        public const int SchemaVersion = 9;
 
         /// <summary>Schema of a legacy-profile run with parallel evaluation progress.</summary>
         public const int SchemaWithParallel = 7;
@@ -65,7 +65,8 @@ namespace Eden.Persistence
         {
             if (checkpoint == null)
                 throw new ArgumentNullException(nameof(checkpoint));
-            var schema = checkpoint.Evolution?.Settings.Profile?.IsLegacy == false ? SchemaVersion
+            var schema = checkpoint.Evolution?.Settings.Profile != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile) ? 9
+                : checkpoint.Evolution?.Settings.Profile?.IsLegacy == false ? 8
                 : checkpoint.Evolution?.Job.WorkerCount > 1 ? SchemaWithParallel
                 : checkpoint.Evolution?.Neat != null ? 6 : SchemaWithoutNeat;
             var config = EncodeConfig(checkpoint);
@@ -82,7 +83,7 @@ namespace Eden.Persistence
                     .Add("version", JsonValue.Of(info.AppVersion))
                     .Add("runtime", JsonValue.Of(info.Runtime)))
                 .Add("savedUtc", JsonValue.Of(utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)))
-                .Add("algorithms", EncodeAlgorithms())
+                .Add("algorithms", EncodeAlgorithms(schema == 9 ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion))
                 .Add("configHash", JsonValue.Of(Hex(configHash)))
                 .Add("stateHash", JsonValue.Of(Hex(stateHash)))
                 .Add("config", config)
@@ -103,7 +104,7 @@ namespace Eden.Persistence
             if (schema > SchemaVersion)
                 throw new CheckpointException($"Checkpoint schema version {schema} is newer than version {SchemaVersion}, " +
                                               "the newest this build reads; open it with a newer EDEN.");
-            CheckAlgorithms(root["algorithms"]);
+            CheckAlgorithms(root["algorithms"], schema == 9 ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion);
 
             var config = root["config"];
             var state = root["state"];
@@ -124,22 +125,24 @@ namespace Eden.Persistence
             if (EncodeConfig(checkpoint).ToCompactString() != configText ||
                 EncodeState(checkpoint).ToCompactString() != stateText)
                 throw new CheckpointException("The checkpoint does not read back exactly (unknown or non-canonical values).");
+            if (checkpoint.Evolution != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile) && schema != 9)
+                throw new CheckpointException("Active search requires checkpoint schema 9.");
             Guard(() => CheckRestorable(checkpoint));
             return checkpoint;
         }
 
-        internal static JsonValue EncodeAlgorithms() =>
+        internal static JsonValue EncodeAlgorithms(int evaluationSeedScheme = EvaluationPlan.SeedSchemeVersion) =>
             JsonValue.NewObject()
                 .Add("random", JsonValue.Of(Pcg32.AlgorithmName))
                 .Add("gaussian", JsonValue.Of(GaussianSampler.AlgorithmName))
                 .Add("seedScheme", JsonValue.Of(SeedDerivation.SchemeVersion))
-                .Add("evaluationSeedScheme", JsonValue.Of(EvaluationPlan.SeedSchemeVersion))
+                .Add("evaluationSeedScheme", JsonValue.Of(evaluationSeedScheme))
                 .Add("configSchema", JsonValue.Of(SimulationConfig.CurrentSchemaVersion))
                 .Add("genomeSchema", JsonValue.Of(Genome.CurrentSchemaVersion));
 
-        private static void CheckAlgorithms(JsonValue saved)
+        private static void CheckAlgorithms(JsonValue saved, int evaluationSeedScheme)
         {
-            foreach (var expected in EncodeAlgorithms().Members)
+            foreach (var expected in EncodeAlgorithms(evaluationSeedScheme).Members)
             {
                 var actual = saved[expected.Key];
                 // A schema 1 genome is today's genome with neutral body genes, and a schema 3 config is today's config
@@ -225,6 +228,7 @@ namespace Eden.Persistence
                 settings.Add("furtherStages", stages);
             }
 
+            if (s.Profile != null && RewardProfiles.IsActive(s.Profile)) settings.Add("logicalSeedScheme", JsonValue.Of(3));
             return settings;
         }
 
@@ -842,6 +846,17 @@ namespace Eden.Persistence
                 .Add("job", EncodeProgress(evolution.Job));
             if (evolution.Neat != null)
                 encoded.Add("neat", EncodeNeatState(evolution.Neat));
+            if (RewardProfiles.IsActive(evolution.Settings.Profile))
+            {
+                var rows = JsonValue.NewArray();
+                foreach (var row in evolution.StageMedians)
+                {
+                    var values = JsonValue.NewArray();
+                    foreach (var value in row) values.Add(JsonValue.Of(value));
+                    rows.Add(values);
+                }
+                encoded.Add("stageMedians", rows);
+            }
             return encoded;
         }
 
@@ -881,7 +896,7 @@ namespace Eden.Persistence
                     .Add("target", JsonValue.Of(tracker.Collected[i]))
                     .Add("tick", JsonValue.Of(tracker.CollectionTicks[i]))
                     .Add("speed", JsonValue.Of(tracker.Speeds[i])));
-            return JsonValue.NewObject()
+            var value = JsonValue.NewObject()
                 .Add("absorbedEnergy", JsonValue.Of(tracker.AbsorbedEnergy))
                 .Add("wastedEnergy", JsonValue.Of(tracker.WastedEnergy))
                 .Add("drunk", JsonValue.Of(tracker.Drunk))
@@ -891,6 +906,8 @@ namespace Eden.Persistence
                 .Add("segmentStart", Pair(tracker.SegmentStart))
                 .Add("segmentDistance", JsonValue.OfAnyFloat(tracker.SegmentDistance))
                 .Add("bestDistance", JsonValue.OfAnyFloat(tracker.BestDistance));
+            if (tracker.Active != null) value.Add("activeSearch", EncodeActive(tracker.Active.Clone()));
+            return value;
         }
 
         private static EpisodeTracker DecodeTracker(JsonValue saved)
@@ -908,10 +925,84 @@ namespace Eden.Persistence
                 speeds[i] = values[i]["speed"].Float();
             }
 
-            return new EpisodeTracker(saved["absorbedEnergy"].Double(), saved["wastedEnergy"].Double(),
+            var tracker = new EpisodeTracker(saved["absorbedEnergy"].Double(), saved["wastedEnergy"].Double(),
                 saved["drunk"].Double(), saved["unchargedEnergy"].Double(), targets, ticks, speeds,
                 saved["segmentStartTick"].Long(0), ReadPair(saved["segmentStart"]), saved["segmentDistance"].AnyFloat(),
                 saved["bestDistance"].AnyFloat());
+            if (saved.TryGet("activeSearch") != null) tracker.Active = DecodeActive(saved["activeSearch"]);
+            return tracker;
+        }
+
+        private static JsonValue EncodeActive(ActiveSearchState state)
+        {
+            var value = JsonValue.NewObject().Add("mask", JsonValue.Of(Hex(state.MaskIdentity)))
+                .Add("pending", JsonValue.Of(state.Pending)).Add("goal", JsonValue.Of(state.Goal))
+                .Add("eligible", JsonValue.Of(state.Eligible)).Add("initial", JsonValue.Of(state.Initial))
+                .Add("maintenance", JsonValue.Of(state.Maintenance)).Add("movement", JsonValue.Of(state.Movement))
+                .Add("turning", JsonValue.Of(state.Turning)).Add("eyes", JsonValue.Of(state.Eyes))
+                .Add("initialEnergy", JsonValue.Of(state.InitialEnergy)).Add("initialHydration", JsonValue.Of(state.InitialHydration));
+            var Visited = JsonValue.NewArray();
+            foreach (var item in state.Visited) Visited.Add(JsonValue.Of(item));
+            value.Add("Visited", Visited);
+            var Detected = JsonValue.NewArray();
+            foreach (var item in state.Detected) Detected.Add(JsonValue.Of(item));
+            value.Add("Detected", Detected);
+            var WaterUseful = JsonValue.NewArray();
+            foreach (var item in state.WaterUseful) WaterUseful.Add(JsonValue.Of(item));
+            value.Add("WaterUseful", WaterUseful);
+            var ContactTicks = JsonValue.NewArray();
+            foreach (var item in state.ContactTicks) ContactTicks.Add(JsonValue.Of(item));
+            value.Add("ContactTicks", ContactTicks);
+            var SipTicks = JsonValue.NewArray();
+            foreach (var item in state.SipTicks) SipTicks.Add(JsonValue.Of(item));
+            value.Add("SipTicks", SipTicks);
+            var CollectedTicks = JsonValue.NewArray();
+            foreach (var item in state.CollectedTicks) CollectedTicks.Add(JsonValue.Of(item));
+            value.Add("CollectedTicks", CollectedTicks);
+            var EnergyAtCollection = JsonValue.NewArray();
+            foreach (var item in state.EnergyAtCollection) EnergyAtCollection.Add(double.IsNaN(item) ? JsonValue.Null() : JsonValue.Of(item));
+            value.Add("EnergyAtCollection", EnergyAtCollection);
+            var HydrationAtSip = JsonValue.NewArray();
+            foreach (var item in state.HydrationAtSip) HydrationAtSip.Add(double.IsNaN(item) ? JsonValue.Null() : JsonValue.Of(item));
+            value.Add("HydrationAtSip", HydrationAtSip);
+            return value;
+        }
+        private static ActiveSearchState DecodeActive(JsonValue value)
+        {
+            var state = new ActiveSearchState
+            {
+                MaskIdentity = ulong.Parse(value["mask"].String(), System.Globalization.NumberStyles.HexNumber),
+                Pending = value["pending"].Int(-1, 1000000), Goal = value["goal"].Int(1, 1000000),
+                Eligible = value["eligible"].Int(1, 1000000), Initial = value["initial"].Int(0, 1000000),
+                Maintenance = value["maintenance"].Double(), Movement = value["movement"].Double(),
+                Turning = value["turning"].Double(), Eyes = value["eyes"].Double(),
+                InitialEnergy = value["initialEnergy"].Double(), InitialHydration = value["initialHydration"].Double()
+            };
+            var Visited = value["Visited"].ArrayOf(1000000);
+            state.Visited = new int[Visited.Count];
+            for (var i = 0; i < Visited.Count; i++) state.Visited[i] = Visited[i].Int(0, 1000000);
+            var Detected = value["Detected"].ArrayOf(SearchTargets.MaxTargets);
+            state.Detected = new bool[Detected.Count];
+            for (var i = 0; i < Detected.Count; i++) state.Detected[i] = Detected[i].Boolean();
+            var WaterUseful = value["WaterUseful"].ArrayOf(SearchTargets.MaxTargets);
+            state.WaterUseful = new double[WaterUseful.Count];
+            for (var i = 0; i < WaterUseful.Count; i++) state.WaterUseful[i] = WaterUseful[i].Double();
+            var ContactTicks = value["ContactTicks"].ArrayOf(SearchTargets.MaxTargets);
+            state.ContactTicks = new long[ContactTicks.Count];
+            for (var i = 0; i < ContactTicks.Count; i++) state.ContactTicks[i] = ContactTicks[i].Long(-1);
+            var SipTicks = value["SipTicks"].ArrayOf(SearchTargets.MaxTargets);
+            state.SipTicks = new long[SipTicks.Count];
+            for (var i = 0; i < SipTicks.Count; i++) state.SipTicks[i] = SipTicks[i].Long(-1);
+            var CollectedTicks = value["CollectedTicks"].ArrayOf(SearchTargets.MaxTargets);
+            state.CollectedTicks = new long[CollectedTicks.Count];
+            for (var i = 0; i < CollectedTicks.Count; i++) state.CollectedTicks[i] = CollectedTicks[i].Long(-1);
+            var EnergyAtCollection = value["EnergyAtCollection"].ArrayOf(SearchTargets.MaxTargets);
+            state.EnergyAtCollection = new double[EnergyAtCollection.Count];
+            for (var i = 0; i < EnergyAtCollection.Count; i++) state.EnergyAtCollection[i] = EnergyAtCollection[i].Kind == JsonKind.Null ? double.NaN : EnergyAtCollection[i].Double();
+            var HydrationAtSip = value["HydrationAtSip"].ArrayOf(SearchTargets.MaxTargets);
+            state.HydrationAtSip = new double[HydrationAtSip.Count];
+            for (var i = 0; i < HydrationAtSip.Count; i++) state.HydrationAtSip[i] = HydrationAtSip[i].Kind == JsonKind.Null ? double.NaN : HydrationAtSip[i].Double();
+            return state;
         }
 
         private static JsonValue EncodeNeatState(NeatEvolutionState neat)
@@ -1087,9 +1178,20 @@ namespace Eden.Persistence
             var neat = settings.Algorithm == EvolutionAlgorithm.Neat
                 ? DecodeNeatState(saved["neat"], settings.PopulationSize)
                 : null;
+            IReadOnlyList<float>[] stageMedians = null;
+            if (RewardProfiles.IsActive(settings.Profile))
+            {
+                var rows = saved["stageMedians"].ArrayOf(MaxHistory); stageMedians = new IReadOnlyList<float>[rows.Count];
+                for (var r = 0; r < rows.Count; r++)
+                {
+                    var values = rows[r].ArrayOf(plan.Stages.Count); var row = new float[values.Count];
+                    for (var c = 0; c < row.Length; c++) row[c] = values[c].Float();
+                    stageMedians[r] = row;
+                }
+            }
             return new EvolutionSnapshot(settings, interval, saved["generation"].Int(0), Members(saved["population"], individuals),
                 lineage, lastIndividuals, lastEpisodes, baselines.IsNull ? null : DecodeEpisodes(baselines, plan),
-                summaries, points, saved["totalTicks"].Long(0), ParsePhase(saved["phase"]), progress, neat);
+                summaries, points, saved["totalTicks"].Long(0), ParsePhase(saved["phase"]), progress, neat, stageMedians);
         }
 
         private static JsonValue EncodeIndividual(Individual individual)
@@ -1248,6 +1350,13 @@ namespace Eden.Persistence
                         .Add("components", components);
                 }
 
+                if (episode.PreciseComponents != null)
+                {
+                    var precise = JsonValue.NewArray();
+                    foreach (var component in episode.PreciseComponents)
+                        precise.Add(double.IsNaN(component) ? JsonValue.Null() : JsonValue.Of(component));
+                    value.Add("preciseComponents", precise);
+                }
                 values.Add(value);
             }
 
@@ -1264,20 +1373,35 @@ namespace Eden.Persistence
                 var stage = value.TryGet("stage")?.Int(0, plan.Stages.Count - 1) ?? 0;
                 float? score = null;
                 float[] components = null;
+                double[] precise = null;
                 if (value.TryGet("score") is JsonValue savedScore)
                 {
                     score = savedScore.AnyFloat();
-                    var componentValues = value["components"].ArrayOf(64);
+                    var componentValues = value["components"].ArrayOf(256);
                     components = new float[componentValues.Count];
                     for (var c = 0; c < components.Length; c++)
                         components[c] = componentValues[c].AnyFloat();
                 }
 
+                if (value.TryGet("preciseComponents") is JsonValue exact)
+                {
+                    var items = exact.ArrayOf(256); precise = new double[items.Count];
+                    if (items.Count != components?.Length || !plan.Stages[stage].ActiveSearch)
+                        throw new CheckpointException("Unexpected precise search components.");
+                    for (var c = 0; c < precise.Length; c++)
+                    {
+                        precise[c] = items[c].Kind == JsonKind.Null ? double.NaN : items[c].Double();
+                        if (!((float)precise[c]).Equals(components[c]))
+                            throw new CheckpointException("Precise search components differ from rounded components.");
+                    }
+                }
+                if (plan.Stages[stage].ActiveSearch && precise == null)
+                    throw new CheckpointException("Missing precise search components.");
                 episodes[i] = new EpisodeResult(ParseMode(value["mode"]), value["generation"].Int(0),
                     value["candidate"].Int(0), value["seedIndex"].Int(0), value["seed"].ULong(),
                     plan.Stages[stage].EpisodeTicks, plan.Stages[stage].EpisodeSeconds, value["foodEnergy"].Float(),
                     value["survivedTicks"].Long(0), value["survived"].Boolean(), value["finalEnergy"].Float(), components,
-                    stage, score);
+                    stage, score, precise);
             }
 
             return episodes;
