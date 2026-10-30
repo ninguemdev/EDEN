@@ -33,6 +33,8 @@ namespace Eden.Tests.PlayMode
             yield return null;
             runner = UnityEngine.Object.FindFirstObjectByType<LabRunner>();
             Assert.That(runner, Is.Not.Null, "Bootstrap needs a LabRunner");
+            runner.Workspace.Open("simulation");
+            runner.Clock.Resume();
             Track();
         }
 
@@ -45,6 +47,77 @@ namespace Eden.Tests.PlayMode
                 if (Directory.Exists(directory))
                     Directory.Delete(directory, true);
             runDirectories.Clear();
+        }
+
+        [UnityTest]
+        public IEnumerator Controls_AutoCheckpointAt50AndIndependentRankedReplay()
+        {
+            UseTemporaryCheckpoint();
+            var root = runner.Hud.Root;
+            Assert.That(root.Q<IntegerField>("auto-checkpoint-field").value, Is.EqualTo(50));
+            runner.StartExperiment(new LabChoice(LabMode.IsolatedEvolution, 0, 8, LabBrainKind.Heuristic,
+                scenario: new ScenarioSettings { EpisodeSeconds = 0.05f }));
+            root.Q<DropdownField>("follow-field").index = 1;
+            root.Q<IntegerField>("follow-top-field").value = 3;
+            root.Q<IntegerField>("follow-rank-field").value = 1;
+            yield return Press("max-button");
+            yield return WaitUntil(() => runner.LastAutoCheckpointPath != null, 60f);
+            yield return Press("pause-button");
+            Assert.That(runner.LastAutoCheckpointPath, Does.EndWith("generation-000050.json"));
+            var checkpoint = CheckpointFile.Load(runner.LastAutoCheckpointPath, out _);
+            Assert.That(checkpoint.Evolution.Generation, Is.EqualTo(50));
+            Assert.That(checkpoint.Evolution.Training.Count, Is.EqualTo(50));
+            Assert.That(File.Exists(runner.CheckpointPath), Is.False, "automatic saves do not replace the manual file");
+            Assert.That(runner.Replay.Episode, Is.Not.Null);
+            Assert.That(runner.Simulation, Is.SameAs(runner.Replay.Episode.Simulation));
+            StringAssert.Contains("REPLAY", runner.Hud.RunText);
+            var ticks = runner.Evolution.TotalTicks;
+            runner.ConfigureFollow(true, 3, 2, 1);
+            Assert.That(runner.Replay.Rank, Is.EqualTo(2));
+            Assert.That(runner.Evolution.TotalTicks, Is.EqualTo(ticks));
+            root.Q<IntegerField>("auto-checkpoint-field").value = 0;
+            Assert.That(runner.AutoCheckpointGenerations, Is.EqualTo(0));
+            root.Q<DropdownField>("follow-field").index = 0;
+            Assert.That(runner.Simulation, Is.SameAs(runner.Evolution.Job.Current.Simulation));
+        }
+
+        [UnityTest]
+        public IEnumerator Controls_ActiveSearchModesPreserveNeedsAndCheckpoint()
+        {
+            UseTemporaryCheckpoint();
+            var root = runner.Hud.Root;
+            foreach (var kind in new[] { ProfileKind.SearchActive, ProfileKind.TwoStageActive })
+            {
+                root.Q<DropdownField>("mode-field").index = (int)LabMode.IsolatedEvolution;
+                root.Q<DropdownField>("preset-field").index = 0;
+                root.Q<DropdownField>("profile-field").index = (int)kind;
+                Assert.That(root.Q<DropdownField>("algorithm-field").index, Is.EqualTo(1));
+                Assert.That(root.Q<DropdownField>("senses-field").index, Is.GreaterThan(0));
+                root.Q<FloatField>("active-InitialEnergy").value = 85;
+                yield return Press("start-button");
+                yield return Press("pause-button");
+                Assert.That(runner.StartProblem, Is.Null);
+                var plan = runner.Evolution.Plan;
+                Assert.That(plan.Stages.Count, Is.EqualTo(kind == ProfileKind.SearchActive ? 1 : 2));
+                Assert.That(ProfileChoice.Read(runner.Evolution.Evolution.Settings).Active.InitialEnergy, Is.EqualTo(85));
+                if (kind == ProfileKind.SearchActive)
+                {
+                    var episode = runner.Evolution.Job.Current; var energy = episode.Creature.Energy;
+                    var hydration = episode.Creature.Hydration;
+                    yield return Press("step-button");
+                    Assert.That(episode.Simulation.FrozenNeeds, Is.False);
+                    Assert.That(episode.Simulation.RespawnFood, Is.False);
+                    Assert.That(episode.Creature.Energy, Is.LessThan(energy));
+                    Assert.That(episode.Creature.Hydration, Is.LessThan(hydration));
+                    StringAssert.Contains("fome e sede ativas", runner.Hud.RunText);
+                    StringAssert.Contains("Energia", runner.Hud.RunText);
+                    var fingerprint = runner.Simulation.ComputeFingerprint();
+                    yield return Press("save-button"); yield return Press("step-button"); yield return Press("load-button");
+                    Assert.That(runner.Simulation.ComputeFingerprint(), Is.EqualTo(fingerprint));
+                    Assert.That(root.Q<DropdownField>("profile-field").index, Is.EqualTo((int)kind));
+                    Assert.That(root.Q<FloatField>("active-InitialEnergy").value, Is.EqualTo(85));
+                }
+            }
         }
 
         [UnityTest]
@@ -83,6 +156,7 @@ namespace Eden.Tests.PlayMode
         public IEnumerator Controls_StartAnIsolatedEvolutionAndChartItsGenerations()
         {
             yield return StartFromControls(LabMode.IsolatedEvolution, preset: 0, seed: 7);
+            yield return Press("analysis");
 
             Assert.That(runner.Mode, Is.EqualTo(LabMode.IsolatedEvolution));
             Assert.That(runner.Evolution.Plan.ExperimentSeed, Is.EqualTo(7UL));
@@ -109,7 +183,7 @@ namespace Eden.Tests.PlayMode
             StringAssert.Contains("efetiva", runner.Hud.RunText);
             Assert.That(effectiveSpeed, Is.GreaterThan(FixedStepClock.MaxSpeed),
                 "maximum speed runs faster than the paced maximum");
-            Assert.That(File.Exists(Path.Combine(runner.EvolutionDirectory, "generations.csv")), Is.True);
+            Assert.That(Directory.Exists(Path.Combine(runner.EvolutionDirectory, "segments")), Is.True);
         }
 
         [UnityTest]
@@ -246,6 +320,7 @@ namespace Eden.Tests.PlayMode
 
             runner.SelectNeighbor(+1);
             runner.RefreshNetwork();
+            yield return Press("inspector-tab-2");
             yield return null;
             yield return null;
             var inspector = runner.Hud.InspectorText;
@@ -489,9 +564,9 @@ namespace Eden.Tests.PlayMode
 
             root.Q<TextField>("composition-field").value = "c*3";
             yield return Press("start-button");
-            Assert.That(runner.BrainKind, Is.EqualTo(LabBrainKind.Heuristic), "a composition that cannot be read is not used");
-            StringAssert.Contains("Composição não usada", runner.GenomeExportStatus);
-            StringAssert.Contains("no genome named c", runner.GenomeExportStatus);
+            Assert.That(runner.BrainKind, Is.EqualTo(LabBrainKind.Composition), "invalid imports preserve the active session");
+            Assert.That(runner.Simulation.World, Is.SameAs(world));
+            StringAssert.Contains("no genome named c", root.Q<Label>("preview-summary").text);
         }
 
         [UnityTest]
@@ -748,7 +823,9 @@ namespace Eden.Tests.PlayMode
             root.Q<DropdownField>("body-field").index = evolvingBody ? 1 : 0;
             root.Q<DropdownField>("algorithm-field").index = neat ? 1 : 0;
             root.Q<DropdownField>("training-field").index = parallelTraining ? 1 : 0;
+            var wasPaused = runner.Clock.IsPaused;
             yield return Press("start-button");
+            if (!wasPaused && runner.Clock.IsPaused) runner.Clock.Resume();
         }
 
         private IEnumerator Press(string buttonName)
@@ -763,6 +840,16 @@ namespace Eden.Tests.PlayMode
 
             yield return null;
             yield return null;
+            if (buttonName == "start-button" && runner.Workspace.IsModal)
+                yield return Press("confirm-discard");
+            if (buttonName == "save-button")
+                yield return WaitUntil(() => !runner.CheckpointIsBusy, 30f);
+            if (buttonName == "load-button")
+            {
+                // These regressions exercise exact continuation; the separate workspace suite drives list selection.
+                runner.LoadCheckpoint(runner.CheckpointPath);
+                runner.Workspace.Open("simulation");
+            }
             Track();
         }
 

@@ -18,7 +18,7 @@ namespace Eden.Application
             IReadOnlyList<Individual> lastTrainingIndividuals, IReadOnlyList<EpisodeResult> lastTrainingEpisodes,
             IReadOnlyList<EpisodeResult> baselineEpisodes, IReadOnlyList<GenerationSummary> training,
             IReadOnlyList<ValidationPoint> validation, long totalTicks, EvolutionPhase phase, EvaluationProgress job,
-            NeatEvolutionState neat = null)
+            NeatEvolutionState neat = null, IReadOnlyList<IReadOnlyList<float>> stageMedians = null)
         {
             if (settings == null)
                 throw new ArgumentNullException(nameof(settings));
@@ -36,6 +36,12 @@ namespace Eden.Application
             Phase = phase;
             Job = job ?? throw new ArgumentNullException(nameof(job));
             Neat = neat;
+            if (stageMedians != null)
+            {
+                var rows = new IReadOnlyList<float>[stageMedians.Count];
+                for (var i = 0; i < rows.Length; i++) rows[i] = Copy(stageMedians[i]);
+                StageMedians = rows;
+            }
         }
 
         /// <summary>The settings the evolution was created with (the snapshot keeps its own copy).</summary>
@@ -63,6 +69,7 @@ namespace Eden.Application
 
         /// <summary>Training summary of every finished generation, in order.</summary>
         public IReadOnlyList<GenerationSummary> Training { get; }
+        public IReadOnlyList<IReadOnlyList<float>> StageMedians { get; }
 
         public IReadOnlyList<ValidationPoint> Validation { get; }
         public long TotalTicks { get; }

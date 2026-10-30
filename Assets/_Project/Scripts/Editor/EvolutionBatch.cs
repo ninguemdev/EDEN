@@ -59,6 +59,26 @@ namespace Eden.Editor
             Run(new EvolutionSettings { ExperimentSeed = 1 }, DefaultGenerations, null, null, null);
         }
 
+        public static void PreflightSearchFromCommandLine()
+        {
+            RunAndExit(() =>
+            {
+                var settings = new EvolutionSettings { ExperimentSeed = 1 };
+                var battery = new BatterySettings { Generations = 1 };
+                var output = ReadArguments(settings, battery, out _, out _);
+                var lines = new List<string>();
+                try
+                {
+                    ActiveSearchDiagnostics.Preflight(new EvaluationPlan(settings), battery.Generations,
+                        result => { lines.Add(result.ToString()); Debug.Log("EDEN active-search preflight | " + result); });
+                }
+                finally
+                {
+                    if (output != null) { Directory.CreateDirectory(output); File.WriteAllLines(Path.Combine(output, "preflight.txt"), lines); }
+                }
+            });
+        }
+
         public static void RunFromCommandLine()
         {
             RunAndExit(() =>
@@ -120,6 +140,8 @@ namespace Eden.Editor
             if (generations < 1)
                 throw new ArgumentOutOfRangeException(nameof(generations), "At least one generation is required.");
 
+            ActiveSearchDiagnostics.Preflight(new EvaluationPlan(settings), generations,
+                result => Debug.Log("EDEN active-search preflight | " + result));
             GenerationalEvolution evolution;
             if (seedGenomesDirectory == null)
             {
@@ -127,7 +149,7 @@ namespace Eden.Editor
             }
             else
             {
-                SplitPool(seedGenomesDirectory, out var pool, out var poolFitness);
+                SplitPool(seedGenomesDirectory, settings.Profile, out var pool, out var poolFitness);
                 evolution = GenerationalEvolution.FromSeedPool(settings, pool, poolFitness);
             }
 
@@ -148,7 +170,7 @@ namespace Eden.Editor
             }
 
             if (exportTop.HasValue)
-                ExportTop(report, settings.ExperimentSeed, exportTop.Value.Count, exportTop.Value.Directory);
+                ExportTop(report, settings.ExperimentSeed, settings.Profile, exportTop.Value.Count, exportTop.Value.Directory);
 
             Debug.Log(string.Format(CultureInfo.InvariantCulture,
                 "EDEN evolution finished: generations={0}, seconds={1:0.0}, output={2}",
@@ -157,7 +179,7 @@ namespace Eden.Editor
 
         // A genome exported without its own fitness (or scored by another profile) ranks last among real scores rather
         // than always losing ties.
-        private static void SplitPool(string directory, out Genome[] genomes, out float[] fitness)
+        private static void SplitPool(string directory, RewardProfile profile, out Genome[] genomes, out float[] fitness)
         {
             var pool = GenomeFile.LoadPool(directory);
             genomes = new Genome[pool.Length];
@@ -165,11 +187,12 @@ namespace Eden.Editor
             for (var i = 0; i < pool.Length; i++)
             {
                 genomes[i] = pool[i].Genome;
-                fitness[i] = pool[i].FitnessFor(Fitness.Profile) ?? 0f;
+                fitness[i] = pool[i].FitnessFor(profile) ?? 0f;
             }
         }
 
-        private static void ExportTop(GenerationReport report, ulong experimentSeed, int count, string directory)
+        private static void ExportTop(GenerationReport report, ulong experimentSeed, RewardProfile profile, int count,
+            string directory)
         {
             var candidates = report.Evaluation.Candidates;
             var fitness = new float[candidates.Count];
@@ -180,7 +203,7 @@ namespace Eden.Editor
             for (var i = 0; i < exported; i++)
             {
                 var individual = report.Individuals[ranking[i]];
-                var record = new GenomeRecord(individual.Genome, fitness[ranking[i]],
+                var record = new GenomeRecord(individual.Genome, fitness[ranking[i]], profile,
                     new GenomeSource(experimentSeed, report.Evaluation.Generation, individual.Id));
                 GenomeFile.Save(Path.Combine(directory, $"genome-rank{i + 1}-id{individual.Id}.json"), record,
                     UnityEngine.Application.version, DateTime.UtcNow);
@@ -192,6 +215,9 @@ namespace Eden.Editor
         private static void RunBattery(EvolutionSettings settings, BatterySettings battery, string output,
             string scenario)
         {
+            for (var run = 0; run < battery.Runs; run++)
+                ActiveSearchDiagnostics.Preflight(new EvaluationPlan(settings.WithExperimentSeed(settings.ExperimentSeed + (ulong)run)),
+                    battery.Generations, result => Debug.Log("EDEN active-search preflight | " + result));
             var runner = new EvolutionBattery(settings, battery);
             var directory = output ?? DefaultDirectory($"battery-seed{settings.ExperimentSeed}x{battery.Runs}");
             var logs = new EvolutionCsvLog[battery.Runs];
@@ -380,6 +406,7 @@ namespace Eden.Editor
             string output = null;
             string seedGenomes = null;
             var scenario = new ScenarioSettings();
+            var profile = new ProfileChoice();
             var args = Environment.GetCommandLineArgs();
             for (var i = 0; i + 1 < args.Length; i++)
             {
@@ -463,10 +490,14 @@ namespace Eden.Editor
                     case "-eden-output":
                         output = value;
                         break;
+                    default:
+                        profile.TryRead(args[i], value);
+                        break;
                 }
             }
 
             scenario.Apply(settings);
+            profile.Apply(settings, scenario);
             seedGenomesDirectory = seedGenomes;
             scenarioDescription = scenario.Describe();
             return output;

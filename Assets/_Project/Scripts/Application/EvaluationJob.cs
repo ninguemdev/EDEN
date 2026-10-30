@@ -9,46 +9,56 @@ using Eden.Simulation;
 namespace Eden.Application
 {
     /// <summary>
-    /// One isolated episode that can be advanced a few ticks at a time: a world built from the episode seed with a
-    /// single creature, whose body the plan expresses from the candidate's body genes. It finishes after the configured
-    /// duration or when the creature dies; the remaining ticks cannot change the result, so they are not simulated,
-    /// but the episode still counts as its configured duration.
+    /// One isolated episode of a plan stage that can be advanced a few ticks at a time: a world built from the episode
+    /// seed with a single creature, whose body the plan expresses from the candidate's body genes. It finishes after the
+    /// stage's duration or when the creature dies; the remaining ticks cannot change the result, so they are not
+    /// simulated, but the episode still counts as its configured duration.
     /// </summary>
     public sealed class IsolatedEpisode
     {
         private readonly EvaluationPlan plan;
+        private readonly EvaluationStage stage;
         private readonly EvaluationMode mode;
         private readonly int generation;
 
         /// <param name="eyes">The candidate's eyes (genomes of the eye senses); null for the legacy senses.</param>
+        /// <param name="stage">Index of the plan stage the episode runs.</param>
         public IsolatedEpisode(EvaluationPlan plan, Func<IBrain> createBrain, ulong episodeSeed, int candidate,
-            int seedIndex, int generation, EvaluationMode mode, BodyGenes body = default, EyeSet eyes = null)
-            : this(plan, createBrain, episodeSeed, candidate, seedIndex, generation, mode, body, eyes, null, null)
+            int seedIndex, int generation, EvaluationMode mode, BodyGenes body = default, EyeSet eyes = null, int stage = 0)
+            : this(plan, createBrain, episodeSeed, candidate, seedIndex, generation, mode, body, eyes, stage, null, null,
+                null)
         {
         }
 
         internal IsolatedEpisode(EvaluationPlan plan, Func<IBrain> createBrain, ulong episodeSeed, int candidate,
-            int seedIndex, int generation, EvaluationMode mode, BodyGenes body, EyeSet eyes, SimulationSnapshot savedWorld,
-            IReadOnlyList<BrainSlotState> savedBrains)
+            int seedIndex, int generation, EvaluationMode mode, BodyGenes body, EyeSet eyes, int stage,
+            SimulationSnapshot savedWorld, IReadOnlyList<BrainSlotState> savedBrains, EpisodeTracker savedTracker)
         {
             this.plan = plan ?? throw new ArgumentNullException(nameof(plan));
             if (createBrain == null)
                 throw new ArgumentNullException(nameof(createBrain));
+            if (stage < 0 || stage >= plan.Stages.Count)
+                throw new ArgumentOutOfRangeException(nameof(stage));
 
-            var config = plan.EpisodeConfig(episodeSeed);
+            this.stage = plan.Stages[stage];
+            Layout = this.stage.Search?.Layout(episodeSeed);
+            var config = this.stage.EpisodeConfig(episodeSeed);
             var expressed = plan.ExpressedGenes(body);
-            if (savedWorld == null)
-            {
-                Simulation = new WorldSimulation(WorldFactory.CreateInitial(config, _ => expressed));
-                Simulation.World.Creatures[0].Eyes = eyes;
-            }
-            else
-            {
+            if (savedWorld != null)
                 Simulation = WorldSimulation.Restore(config, savedWorld);
-            }
+            else if (Layout == null)
+                Simulation = new WorldSimulation(WorldFactory.CreateInitial(config, _ => expressed));
+            else
+                Simulation = new WorldSimulation(SearchWorldState(config, expressed));
+            if (savedWorld == null)
+                Simulation.World.Creatures[0].Eyes = eyes;
+            Simulation.FrozenNeeds = this.stage.FrozenNeeds;
+            Simulation.RespawnFood = this.stage.RespawnFood;
+            if (!Simulation.RespawnFood && Simulation.SnapshotAgenda().Length != 0)
+                throw new ArgumentException("A search episode cannot have food respawns pending.");
 
             if (Simulation.World.Creatures.Count != 1 || Simulation.World.Creatures[0].Id != new CreatureId(1) ||
-                Tick >= plan.EpisodeTicks)
+                Tick >= this.stage.EpisodeTicks)
                 throw new ArgumentException("A running episode has its single creature alive and ticks left.",
                     nameof(savedWorld));
             if (!Simulation.World.Creatures[0].Genes.Equals(expressed))
@@ -57,7 +67,28 @@ namespace Eden.Application
             if (!Equals(Simulation.World.Creatures[0].Eyes, eyes))
                 throw new ArgumentException("The saved creature does not have the candidate's eyes.", nameof(savedWorld));
             Creature = Simulation.World.Creatures[0];
+            if (this.stage.Reward.Scoring != StageScoring.FoodEnergyPerSecond)
+            {
+                if (savedWorld != null && savedTracker == null)
+                    throw new ArgumentException("A saved episode of this stage needs what it measured so far.",
+                        nameof(savedTracker));
+                Tracker = savedTracker?.Clone() ?? new EpisodeTracker();
+                if (savedWorld == null && Layout != null)
+                    Tracker.Begin(Layout, Creature.Position);
+            }
+
+            if (this.stage.ActiveSearch)
+            {
+                var options = ActiveSearchOptions.Read(plan.Profile.Parameters);
+                if (savedWorld == null) Tracker.Active = new ActiveSearchState(Layout, options, Creature);
+                else if (Tracker.Active == null) throw new ArgumentException("Missing active search tracker.");
+                else Tracker.Active.Restore(Layout, options, Tick, Tracker, Creature);
+            }
+            else if (Tracker?.Active != null) throw new ArgumentException("Active tracker in an old profile.");
             Controller = new BrainController(config, _ => createBrain());
+            if (this.stage.ActiveSearch)
+                Simulation.TargetSeen = (id, resource, water) =>
+                { if (Controller.WillDecide(id)) Tracker.Active.Detect(resource, water, Layout); };
             if (savedBrains != null)
                 Controller.Restore(savedBrains);
             EpisodeSeed = episodeSeed;
@@ -77,10 +108,20 @@ namespace Eden.Application
         public int Candidate { get; }
         public int SeedIndex { get; }
 
+        /// <summary>Index of the plan stage the episode runs.</summary>
+        public int Stage => stage.Index;
+
+        /// <summary>The targets of a search episode; null in the other stages.</summary>
+        public SearchLayout Layout { get; }
+
+        /// <summary>What the stage's scoring measured so far; null for the legacy scoring.</summary>
+        public EpisodeTracker Tracker { get; }
+
         /// <summary>Ticks simulated so far (the episode world starts at tick 0).</summary>
         public long Tick => Simulation.World.Tick;
 
-        public bool IsFinished => Tick >= plan.EpisodeTicks || Simulation.IsExtinct;
+        public bool IsFinished => Tick >= stage.EpisodeTicks || Simulation.IsExtinct ||
+                                  stage.FinishOnCollection && Tracker.Collected.Count == Layout.TargetCount;
 
         /// <summary>Simulates up to <paramref name="maxTicks"/> ticks and returns how many ran.</summary>
         public long Advance(long maxTicks)
@@ -88,7 +129,9 @@ namespace Eden.Application
             var ran = 0L;
             while (ran < maxTicks && !IsFinished)
             {
+                Tracker?.Active?.BeforeTick(Creature);
                 Simulation.Step(Controller);
+                Tracker?.AfterTick(Simulation, Creature, Layout);
                 ran++;
             }
 
@@ -99,15 +142,141 @@ namespace Eden.Application
         {
             if (!IsFinished)
                 throw new InvalidOperationException("The episode is still running.");
-            return new EpisodeResult(mode, generation, Candidate, SeedIndex, EpisodeSeed, plan.EpisodeTicks,
-                plan.EpisodeSeconds, Creature.FoodEnergyEaten, Creature.AgeTicks, Creature.IsAlive, Creature.Energy);
+            if (Tracker == null)
+                return new EpisodeResult(mode, generation, Candidate, SeedIndex, EpisodeSeed, stage.EpisodeTicks,
+                    stage.EpisodeSeconds, Creature.FoodEnergyEaten, Creature.AgeTicks, Creature.IsAlive, Creature.Energy,
+                    stage: stage.Index);
+
+            if (stage.ActiveSearch)
+            {
+                var exact = new Dictionary<string, double>();
+                var activeScore = ActiveScore(exact);
+                var precise = new double[stage.Reward.Components.Count]; var rounded = new float[precise.Length];
+                for (var i = 0; i < precise.Length; i++)
+                {
+                    precise[i] = exact.TryGetValue(stage.Reward.Components[i].Name, out var measured) ? measured : double.NaN;
+                    rounded[i] = (float)precise[i];
+                }
+                return new EpisodeResult(mode, generation, Candidate, SeedIndex, EpisodeSeed, stage.EpisodeTicks,
+                    stage.EpisodeSeconds, Creature.FoodEnergyEaten, Creature.AgeTicks, Creature.IsAlive, Creature.Energy,
+                    rounded, stage.Index, activeScore, precise, (bool[])Tracker.Active.Detected.Clone());
+            }
+            var values = new Dictionary<string, float>();
+            var score = stage.IsSearch ? SearchScore(values) : ResourcesScore(values);
+            var components = new float[stage.Reward.Components.Count];
+            for (var i = 0; i < components.Length; i++)
+                components[i] = values.TryGetValue(stage.Reward.Components[i].Name, out var value) ? value : float.NaN;
+            return new EpisodeResult(mode, generation, Candidate, SeedIndex, EpisodeSeed, stage.EpisodeTicks,
+                stage.EpisodeSeconds, Creature.FoodEnergyEaten, Creature.AgeTicks, Creature.IsAlive, Creature.Energy,
+                components, stage.Index, score);
+        }
+
+        private float ActiveScore(Dictionary<string, double> values)
+        {
+            var a = Tracker.Active;
+            values["exploration"] = a.Exploration; values["coverage"] = (double)a.Unique / a.Eligible;
+            values["detection"] = a.Detection; values["collection"] = a.Collection;
+            values["base"] = a.Base; values["multiplier"] = a.Multiplier; values["score"] = a.Score;
+            values["visited"] = a.Unique; values["goal"] = a.Goal; values["eligible"] = a.Eligible;
+            var detectedFood = 0; var detectedWater = 0; var collectedFood = 0; var collectedWater = 0;
+            for (var i = 0; i < Layout.TargetCount; i++)
+            {
+                if (a.Detected[i]) { if (Layout.IsWater(i)) detectedWater++; else detectedFood++; }
+                if (a.CollectedTicks[i] >= 0) { if (Layout.IsWater(i)) collectedWater++; else collectedFood++; }
+                var dt = (double)Simulation.World.Config.TickDuration;
+                if (a.ContactTicks[i] >= 0) values["contact_seconds_" + i] = (a.ContactTicks[i] * dt);
+                if (a.SipTicks[i] >= 0) values["sip_seconds_" + i] = (a.SipTicks[i] * dt);
+                if (a.CollectedTicks[i] >= 0) values["collection_seconds_" + i] = (a.CollectedTicks[i] * dt);
+                if (!double.IsNaN(a.EnergyAtCollection[i])) values["energy_before_collection_" + i] = a.EnergyAtCollection[i];
+                if (!double.IsNaN(a.HydrationAtSip[i])) values["hydration_before_sip_" + i] = a.HydrationAtSip[i];
+                if (Layout.IsWater(i)) values["water_useful_" + i] = a.WaterUseful[i - Layout.Food.Count];
+            }
+            values["detected_food"] = detectedFood; values["detected_water"] = detectedWater;
+            values["collected_food"] = collectedFood; values["collected_water"] = collectedWater;
+            values["initial_energy"] = a.InitialEnergy; values["final_energy"] = Creature.Energy;
+            values["maintenance"] = a.Maintenance; values["movement"] = a.Movement;
+            values["turning"] = a.Turning; values["eyes"] = a.Eyes;
+            values["food_energy"] = Creature.FoodEnergyEaten; values["absorbed_energy"] = Tracker.AbsorbedEnergy;
+            values["wasted_energy"] = Tracker.WastedEnergy; values["drunk"] = Tracker.Drunk;
+            values["initial_hydration"] = a.InitialHydration; values["final_hydration"] = Creature.Hydration;
+            values["lived_seconds"] = (Creature.AgeTicks * (double)Simulation.World.Config.TickDuration);
+            values["configured_seconds"] = stage.EpisodeSeconds; values["death_cause"] = (int)Creature.DeathCause;
+            return a.Score;
+        }
+
+        // Balanced resources (StageScores.BalancedResources): basal need over the configured duration as the measure of
+        // replenishment, the reserves as shares of the creature's own capacity.
+        private float ResourcesScore(Dictionary<string, float> values)
+        {
+            var config = Simulation.World.Config;
+            var profile = plan.Profile;
+            var water = stage.Reward.Scoring == StageScoring.BalancedResources;
+            var survival = Math.Min(1.0, (double)Creature.AgeTicks / stage.EpisodeTicks);
+            var energy = StageScores.Replenished(Tracker.AbsorbedEnergy,
+                (double)Creature.Body.MetabolismPerSecond * stage.EpisodeSeconds);
+            var hydration = water
+                ? StageScores.Replenished(Tracker.Drunk, (double)config.HydrationLossPerSecond * stage.EpisodeSeconds)
+                : double.NaN;
+            var reserves = !Creature.IsAlive ? 0.0
+                : water ? ((double)Creature.Energy / Creature.Body.MaxEnergy + (double)Creature.Hydration / config.MaxHydration) / 2
+                : (double)Creature.Energy / Creature.Body.MaxEnergy;
+            values["survival"] = (float)survival;
+            values["energy_replenished"] = (float)energy;
+            values["hydration_replenished"] = water ? (float)hydration : 0f;
+            values["reserves"] = (float)reserves;
+            values["absorbed_energy"] = (float)Tracker.AbsorbedEnergy;
+            values["wasted_energy"] = (float)Tracker.WastedEnergy;
+            values["drunk"] = (float)Tracker.Drunk;
+            return StageScores.BalancedResources(profile.Parameter(RewardProfiles.SurvivalWeight, 0.5),
+                profile.Parameter(RewardProfiles.ReplenishWeight, 0.3), profile.Parameter(RewardProfiles.ReservesWeight, 0.2),
+                survival, energy, hydration, reserves);
+        }
+
+        // Search (StageScores.Search); also scored without the approach aid, which validation reports apart.
+        private float SearchScore(Dictionary<string, float> values)
+        {
+            var profile = plan.Profile;
+            var targets = Layout.TargetCount;
+            var beta = profile.Parameter(RewardProfiles.Beta, 0.3);
+            var approach = Tracker.Collected.Count < targets
+                ? StageScores.Approach(Tracker.SegmentDistance, Tracker.BestDistance)
+                : 0f;
+            var water = 0;
+            var speed = 0.0;
+            for (var i = 0; i < Tracker.Collected.Count; i++)
+            {
+                if (Layout.IsWater(Tracker.Collected[i]))
+                    water++;
+                speed += Tracker.Speeds[i];
+            }
+
+            values["collected"] = Tracker.Collected.Count;
+            values["collected_food"] = Tracker.Collected.Count - water;
+            values["collected_water"] = water;
+            values["speed"] = Tracker.Collected.Count > 0 ? (float)(speed / Tracker.Collected.Count) : 0f;
+            values["approach"] = approach;
+            values["score_without_aid"] = StageScores.Search(targets, 0, beta, Tracker.Speeds, approach);
+            values["uncharged_energy"] = (float)Tracker.UnchargedEnergy;
+            return StageScores.Search(targets, profile.Parameter(RewardProfiles.Alpha, 0.5), beta, Tracker.Speeds, approach);
+        }
+
+        // A search world: the founder and the food targets where the layout put them (food ids 1, 2… in target order).
+        private WorldState SearchWorldState(SimulationConfig config, BodyGenes expressed)
+        {
+            var world = new WorldState(config);
+            var capacity = expressed.IsNeutral ? world.ReferenceBody.MaxEnergy : CreatureBody.Express(config, expressed).MaxEnergy;
+            world.AddCreature(Layout.Founder, Layout.FounderHeading, Math.Min(config.InitialEnergy, capacity), expressed);
+            foreach (var food in Layout.Food)
+                world.AddFood(food, config.FoodEnergy);
+            return world;
         }
     }
 
     /// <summary>
-    /// Every candidate × seed episode of one evaluation, committed in order (candidate-major, seed-minor) a bounded number
-    /// of ticks at a time. Independent episodes can run on CPU workers. How the ticks are split never changes the
-    /// result: it is the same <see cref="GenerationEvaluation"/> as running the job to the end in one call.
+    /// Every candidate × seed episode of one evaluation, committed in order (candidate-major, seed-minor; the seeds list
+    /// the plan's stages one after another, so candidate → stage → seed) a bounded number of ticks at a time.
+    /// Independent episodes can run on CPU workers. How the ticks are split never changes the result: it is the same
+    /// <see cref="GenerationEvaluation"/> as running the job to the end in one call.
     /// </summary>
     public sealed class EvaluationJob
     {
@@ -125,6 +294,7 @@ namespace Eden.Application
         private readonly BodyGenes[] bodies;
         private readonly EyeSet[] eyes;
         private readonly ulong[] seeds;
+        private readonly int[] stageOfSeed;
         private readonly List<EpisodeResult> episodes;
         private readonly CandidateEvaluation[] aggregates;
         private readonly EpisodeResult[] perSeed;
@@ -133,6 +303,9 @@ namespace Eden.Application
 
         /// <param name="bodies">Body genes of each candidate, in candidate order; null gives every candidate neutral genes.</param>
         /// <param name="eyes">Eyes of each candidate, in candidate order (null entries: legacy senses); null for none.</param>
+        /// <param name="seeds">
+        /// Seeds of the episodes; with several stages, the plan's seeds for <paramref name="mode"/>, stage after stage.
+        /// </param>
         public EvaluationJob(EvaluationPlan plan, IReadOnlyList<Func<IBrain>> candidates, IReadOnlyList<ulong> seeds,
             int generation, EvaluationMode mode, IReadOnlyList<BodyGenes> bodies = null, IReadOnlyList<EyeSet> eyes = null)
         {
@@ -165,12 +338,13 @@ namespace Eden.Application
             this.seeds = new ulong[seeds.Count];
             for (var s = 0; s < seeds.Count; s++)
                 this.seeds[s] = seeds[s];
+            stageOfSeed = plan.StageOfSeeds(mode, seeds.Count);
             Generation = generation;
             Mode = mode;
             episodes = new List<EpisodeResult>(candidates.Count * seeds.Count);
             aggregates = new CandidateEvaluation[candidates.Count];
             perSeed = new EpisodeResult[seeds.Count];
-            ticksPerSecond = plan.EpisodeConfig(this.seeds[0]).TicksPerSecond;
+            ticksPerSecond = plan.Stages[0].TemplateConfig.TicksPerSecond;
             active.Add(new EpisodeSlot(CreateEpisode(0, 0)));
             advanceSlot = i => advanced[i] = active[i].IsFinished ? 0 : active[i].Episode.Advance(allowances[i]);
         }
@@ -275,9 +449,10 @@ namespace Eden.Application
             for (var i = 1; i < active.Count; i++)
                 ahead[i - 1] = active[i].IsFinished
                     ? new EvaluationAhead(active[i].Result())
-                    : new EvaluationAhead(active[i].Episode.Simulation.Capture(), active[i].Episode.Controller.Capture());
+                    : new EvaluationAhead(active[i].Episode.Simulation.Capture(), active[i].Episode.Controller.Capture(),
+                        active[i].Episode.Tracker?.Clone());
             return new EvaluationProgress(completed, Current.Simulation.Capture(), Current.Controller.Capture(),
-                workerCount, ahead);
+                workerCount, ahead, Current.Tracker?.Clone());
         }
 
         /// <summary>
@@ -297,14 +472,17 @@ namespace Eden.Application
             if (completed.Count >= TotalEpisodes)
                 throw new ArgumentException($"{completed.Count} finished episodes leave none of {TotalEpisodes} running.",
                     nameof(progress));
-            var maxEnergy = CreatureBody.MaxPossibleEnergy(plan.EpisodeConfig(seeds[0]));
+            var maxEnergy = new float[plan.Stages.Count];
+            for (var k = 0; k < maxEnergy.Length; k++)
+                maxEnergy[k] = CreatureBody.MaxPossibleEnergy(plan.Stages[k].TemplateConfig);
             for (var i = 0; i < completed.Count; i++)
                 CheckResult(completed[i], i / seeds.Length, i % seeds.Length, maxEnergy);
 
             var candidate = completed.Count / seeds.Length;
             var seedIndex = completed.Count % seeds.Length;
             var running = new IsolatedEpisode(plan, candidates[candidate], seeds[seedIndex], candidate, seedIndex,
-                Generation, Mode, bodies[candidate], eyes[candidate], progress.CurrentWorld, progress.CurrentBrains);
+                Generation, Mode, bodies[candidate], eyes[candidate], stageOfSeed[seedIndex], progress.CurrentWorld,
+                progress.CurrentBrains, progress.CurrentTracker);
 
             if (completed.Count + 1 + progress.Ahead.Count > TotalEpisodes)
                 throw new ArgumentException("Saved parallel episodes exceed this evaluation.", nameof(progress));
@@ -322,7 +500,7 @@ namespace Eden.Application
                 }
                 else
                     restored.Add(new EpisodeSlot(new IsolatedEpisode(plan, candidates[c], seeds[s], c, s,
-                        Generation, Mode, bodies[c], eyes[c], saved.World, saved.Brains)));
+                        Generation, Mode, bodies[c], eyes[c], stageOfSeed[s], saved.World, saved.Brains, saved.Tracker)));
             }
 
             for (var i = 0; i < completed.Count; i++)
@@ -332,7 +510,7 @@ namespace Eden.Application
                     continue;
                 var results = (EpisodeResult[])perSeed.Clone();
                 episodes.AddRange(results);
-                aggregates[i / seeds.Length] = new CandidateEvaluation(i / seeds.Length, results, ticksPerSecond);
+                aggregates[i / seeds.Length] = new CandidateEvaluation(i / seeds.Length, results, ticksPerSecond, plan.Profile);
             }
 
             CompletedEpisodes = completed.Count;
@@ -360,7 +538,7 @@ namespace Eden.Application
 
             var results = (EpisodeResult[])perSeed.Clone();
             episodes.AddRange(results);
-            aggregates[candidate] = new CandidateEvaluation(candidate, results, ticksPerSecond);
+            aggregates[candidate] = new CandidateEvaluation(candidate, results, ticksPerSecond, plan.Profile);
             if (candidate + 1 < candidates.Count)
                 return;
 
@@ -377,30 +555,36 @@ namespace Eden.Application
             public EpisodeResult Result() => completed ?? Episode.Result();
         }
 
-        private void CheckResult(EpisodeResult result, int candidate, int seedIndex, float maxEnergy)
+        private void CheckResult(EpisodeResult result, int candidate, int seedIndex, float[] maxEnergy)
         {
+            var stage = plan.Stages[stageOfSeed[seedIndex]];
             if (result.Mode != Mode || result.Generation != Generation || result.Candidate != candidate ||
-                result.SeedIndex != seedIndex || result.EpisodeSeed != seeds[seedIndex] ||
-                result.EpisodeTicks != plan.EpisodeTicks)
+                result.SeedIndex != seedIndex || result.EpisodeSeed != seeds[seedIndex] || result.Stage != stage.Index ||
+                result.EpisodeTicks != stage.EpisodeTicks)
                 throw new ArgumentException($"Saved episode {candidate}×{seedIndex} does not belong to this evaluation.",
                     nameof(result));
             if (!(result.FoodEnergy >= 0f) || float.IsInfinity(result.FoodEnergy) || result.SurvivedTicks < 1 ||
-                result.SurvivedTicks > plan.EpisodeTicks || !(result.FinalEnergy >= 0f && result.FinalEnergy <= maxEnergy) ||
-                result.Survived && (result.FinalEnergy <= 0f || result.SurvivedTicks != plan.EpisodeTicks))
+                result.SurvivedTicks > stage.EpisodeTicks ||
+                !(result.FinalEnergy >= 0f && result.FinalEnergy <= maxEnergy[stage.Index]) ||
+                result.Survived && (result.FinalEnergy <= 0f || result.SurvivedTicks != stage.EpisodeTicks && !stage.FinishOnCollection) ||
+                result.HasScore != (stage.Reward.Scoring != StageScoring.FoodEnergyPerSecond) ||
+                result.HasScore && !(result.Fitness >= 0f && result.Fitness <= 1f))
                 throw new ArgumentException($"Saved episode {candidate}×{seedIndex} has impossible values.", nameof(result));
         }
 
         private IsolatedEpisode CreateEpisode(int candidate, int seedIndex) =>
             new IsolatedEpisode(plan, candidates[candidate], seeds[seedIndex], candidate, seedIndex, Generation, Mode,
-                bodies[candidate], eyes[candidate]);
+                bodies[candidate], eyes[candidate], stageOfSeed[seedIndex]);
     }
 
     /// <summary>Progress of an <see cref="EvaluationJob"/> saved between ticks.</summary>
     public sealed class EvaluationProgress
     {
         public EvaluationProgress(IReadOnlyList<EpisodeResult> completed, SimulationSnapshot currentWorld,
-            IReadOnlyList<BrainSlotState> currentBrains, int workerCount = 1, IReadOnlyList<EvaluationAhead> ahead = null)
+            IReadOnlyList<BrainSlotState> currentBrains, int workerCount = 1, IReadOnlyList<EvaluationAhead> ahead = null,
+            EpisodeTracker currentTracker = null)
         {
+            CurrentTracker = currentTracker?.Clone();
             if (workerCount < 1 || workerCount > EvaluationJob.MaxWorkers || (ahead?.Count ?? 0) >= workerCount)
                 throw new ArgumentOutOfRangeException(nameof(workerCount));
             WorkerCount = workerCount;
@@ -423,7 +607,7 @@ namespace Eden.Application
             CurrentBrains = brains;
         }
 
-        /// <summary>Finished episodes in run order (candidate-major, seed-minor), before aggregation.</summary>
+        /// <summary>Finished episodes in run order (candidate → stage → seed), before aggregation.</summary>
         public IReadOnlyList<EpisodeResult> Completed { get; }
 
         /// <summary>World of the episode being simulated.</summary>
@@ -431,6 +615,9 @@ namespace Eden.Application
 
         /// <summary>Brain state of that episode's creature (empty before its first decision).</summary>
         public IReadOnlyList<BrainSlotState> CurrentBrains { get; }
+
+        /// <summary>What the scoring of the running episode measured so far; null for the legacy scoring.</summary>
+        public EpisodeTracker CurrentTracker { get; }
 
         public int WorkerCount { get; }
         /// <summary>Consecutive episodes after Current, including results waiting for earlier episodes to finish.</summary>
@@ -441,8 +628,10 @@ namespace Eden.Application
     {
         public EvaluationAhead(EpisodeResult completed) => Completed = completed;
 
-        public EvaluationAhead(SimulationSnapshot world, IReadOnlyList<BrainSlotState> brains)
+        public EvaluationAhead(SimulationSnapshot world, IReadOnlyList<BrainSlotState> brains,
+            EpisodeTracker tracker = null)
         {
+            Tracker = tracker?.Clone();
             World = world ?? throw new ArgumentNullException(nameof(world));
             if (brains == null) throw new ArgumentNullException(nameof(brains));
             var copy = new BrainSlotState[brains.Count];
@@ -453,5 +642,8 @@ namespace Eden.Application
         public EpisodeResult? Completed { get; }
         public SimulationSnapshot World { get; }
         public IReadOnlyList<BrainSlotState> Brains { get; }
+
+        /// <summary>What the scoring of that episode measured so far; null for the legacy scoring.</summary>
+        public EpisodeTracker Tracker { get; }
     }
 }

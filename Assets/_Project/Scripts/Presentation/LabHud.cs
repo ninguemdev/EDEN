@@ -15,8 +15,9 @@ namespace Eden.Presentation
             bool neat = false, bool eyes = false, bool evolvingEyes = false, bool solidBodies = false,
             ObstacleLayout obstacles = ObstacleLayout.None, ScenarioSettings scenario = null, string genomeDirectory = null,
             string compositionText = null, bool compositionFrozen = true,
-            bool parallelTraining = false)
+            bool parallelTraining = false, ProfileChoice profile = null)
         {
+            Profile = profile?.Clone();
             Scenario = scenario;
             GenomeDirectory = genomeDirectory;
             CompositionText = compositionText;
@@ -77,6 +78,9 @@ namespace Eden.Presentation
 
         /// <summary>Episodes of the evolution are evaluated on CPU workers (isolated evolution only).</summary>
         public bool ParallelTraining { get; }
+
+        /// <summary>How the evolution scores genomes; null for the legacy profile (the control).</summary>
+        public ProfileChoice Profile { get; }
     }
 
     /// <summary>
@@ -92,6 +96,12 @@ namespace Eden.Presentation
         public static readonly string[] BodyChoices = { "Fixo (controle)", "Evolutivo (4 genes)" };
         public static readonly string[] AlgorithmChoices = { "MLP fixa (controle)", "NEAT (topologia evolui)" };
         public static readonly string[] TrainingChoices = { "Sequencial", "Paralelo (CPU)" };
+
+        /// <summary>In <see cref="ProfileKind"/> order.</summary>
+        public static readonly string[] ProfileChoices =
+            { "Legado (controle)", "Duas etapas (busca + recursos)", "Recursos equilibrados", "Somente busca (híbrida, fome e sede)", "Duas etapas (híbrida, fome e sede)" };
+
+        public static readonly string[] SearchObstacleChoices = { "Nenhum", "Pilares", "Corredor" };
         public static readonly string[] SensesChoices =
             { "Legados (círculo + radar)", "Olhos fixos (requer NEAT)", "Olhos evolutivos (requer NEAT)" };
 
@@ -158,6 +168,16 @@ namespace Eden.Presentation
         private TextField compositionField;
         private DropdownField compositionModeField;
         private DropdownField trainingField;
+        private DropdownField profileField;
+        private Foldout profileFoldout;
+        private FloatField profileWeightField;
+        private FloatField profileSecondsField;
+        private IntegerField profileFoodField;
+        private IntegerField profileWaterField;
+        private FloatField profileDistanceField;
+        private FloatField profileAlphaField;
+        private FloatField profileBetaField;
+        private DropdownField profileObstaclesField;
         private Label networkTitle;
         private Label networkLegend;
         private IntegerField seedField;
@@ -180,15 +200,23 @@ namespace Eden.Presentation
         public event Action SlowerClicked;
         public event Action FasterClicked;
         public event Action MaxClicked;
+        public event Action RefreshReplayClicked;
+        public event Action<int> AutoCheckpointChanged;
+        public event Action<bool, int, int, float> FollowChanged;
+        private IntegerField autoCheckpointField, followTopField, followRankField;
+        private DropdownField followField;
+        private FloatField replaySpeedField;
         public event Action SaveClicked;
         public event Action LoadClicked;
         public event Action ExportGenomeClicked;
         public event Action CopyGenomeDirectoryClicked;
         public event Action UseExportDirectoryClicked;
 
+        public LabWorkspace Workspace { get; set; }
+        private string completeInspector;
         public string RunText => Bind() ? runStats.text : string.Empty;
         public string CheckpointText => Bind() ? checkpointStatus.text : string.Empty;
-        public string InspectorText => Bind() && inspectorVisible ? inspector.text : string.Empty;
+        public string InspectorText => Bind() && inspectorVisible ? completeInspector : string.Empty;
 
         /// <summary>
         /// Directory typed into the seed-pool field, trimmed, or empty when blank; read once when a new evolution
@@ -214,6 +242,15 @@ namespace Eden.Presentation
         /// <summary>Root of the UI, for tests that drive the controls like a user.</summary>
         public VisualElement Root => Bind() ? GetComponent<UIDocument>().rootVisualElement : null;
 
+        public void ShowServices(int interval, bool follow, int top, int rank, float speed)
+        {
+            if (!Bind()) return;
+            autoCheckpointField.SetValueWithoutNotify(interval);
+            followField.SetValueWithoutNotify(followField.choices[follow ? 1 : 0]);
+            followTopField.SetValueWithoutNotify(top); followRankField.SetValueWithoutNotify(rank);
+            replaySpeedField.SetValueWithoutNotify(speed);
+        }
+
         public void ShowRun(string text)
         {
             if (Bind())
@@ -236,7 +273,9 @@ namespace Eden.Presentation
                 return;
             inspectorVisible = text != null;
             inspectorPanel.style.display = inspectorVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            completeInspector = text;
             inspector.text = text ?? string.Empty;
+            Workspace?.ShowInspector(text);
         }
 
         /// <summary>Shows or hides "Exportar genoma"/"Copiar pasta" (the selected creature has, or has not, an exportable genome).</summary>
@@ -311,6 +350,7 @@ namespace Eden.Presentation
             }
 
             Chart.Show(session);
+            Workspace?.ApplyLayout();
         }
 
         /// <summary>
@@ -346,6 +386,7 @@ namespace Eden.Presentation
                 compositionField.SetValueWithoutNotify(choice.CompositionText);
             compositionModeField.SetValueWithoutNotify(CompositionModeChoices[choice.CompositionFrozen ? 0 : 1]);
             trainingField.SetValueWithoutNotify(TrainingChoices[choice.ParallelTraining ? 1 : 0]);
+            ShowProfile(choice.Profile ?? new ProfileChoice());
             seedField.SetValueWithoutNotify(choice.Seed);
             UpdateBrainField();
             resumeButton.style.display = evolutionAvailable && choice.Mode == LabMode.SharedWorld
@@ -374,7 +415,53 @@ namespace Eden.Presentation
                 sensesField.index >= 1, sensesField.index == 2, arena >= 1,
                 arena == 2 ? ObstacleLayout.Pillars : arena == 3 ? ObstacleLayout.Corridor : ObstacleLayout.None,
                 ReadScenario(), seedGenomesField.value?.Trim(), compositionField.value, compositionModeField.index != 1,
-                trainingField.index == 1);
+                trainingField.index == 1, ReadProfile());
+        }
+
+        private readonly Dictionary<string, FloatField> activeFields = new Dictionary<string, FloatField>();
+        private Foldout activeFoldout;
+        private void RefreshProfileFields()
+        {
+            var active = profileField.index >= (int)ProfileKind.SearchActive;
+            profileFoldout.style.display = profileField.index == (int)ProfileKind.TwoStage || active ? DisplayStyle.Flex : DisplayStyle.None;
+            activeFoldout.style.display = active ? DisplayStyle.Flex : DisplayStyle.None;
+            profileWeightField.style.display = profileField.index == (int)ProfileKind.SearchActive ? DisplayStyle.None : DisplayStyle.Flex;
+            profileAlphaField.style.display = active ? DisplayStyle.None : DisplayStyle.Flex;
+            profileBetaField.style.display = active ? DisplayStyle.None : DisplayStyle.Flex;
+        }
+        private ActiveSearchOptions activeSearchOptions = new ActiveSearchOptions();
+
+        private ProfileChoice ReadProfile()
+        {
+            var profile = new ProfileChoice { Kind = (ProfileKind)Math.Max(0, profileField.index), Active = activeSearchOptions.Clone() };
+            var options = profile.TwoStage;
+            options.SearchWeight = profileWeightField.value / 100.0;
+            options.SearchSeconds = profileSecondsField.value;
+            options.FoodTargets = profileFoodField.value;
+            options.WaterTargets = profileWaterField.value;
+            options.MinDistance = profileDistanceField.value;
+            options.Alpha = profileAlphaField.value;
+            options.Beta = profileBetaField.value;
+            options.SearchObstacles = (ObstacleLayout)Math.Max(0, profileObstaclesField.index);
+            return profile;
+        }
+
+        private void ShowProfile(ProfileChoice profile)
+        {
+            activeSearchOptions = profile.Active.Clone();
+            foreach (var field in typeof(ActiveSearchOptions).GetFields())
+                activeFields[field.Name].SetValueWithoutNotify((float)(double)field.GetValue(activeSearchOptions));
+            var options = profile.TwoStage;
+            profileField.SetValueWithoutNotify(ProfileChoices[(int)profile.Kind]);
+            profileWeightField.SetValueWithoutNotify((float)(options.SearchWeight * 100.0));
+            profileSecondsField.SetValueWithoutNotify(options.SearchSeconds);
+            profileFoodField.SetValueWithoutNotify(options.FoodTargets);
+            profileWaterField.SetValueWithoutNotify(options.WaterTargets);
+            profileDistanceField.SetValueWithoutNotify((float)options.MinDistance);
+            profileAlphaField.SetValueWithoutNotify((float)options.Alpha);
+            profileBetaField.SetValueWithoutNotify((float)options.Beta);
+            profileObstaclesField.SetValueWithoutNotify(SearchObstacleChoices[(int)options.SearchObstacles]);
+            RefreshProfileFields();
         }
 
         // The scenario fields; a food count of 0 keeps the mode's own (the preset's or the episodes'), and a size that is
@@ -461,6 +548,15 @@ namespace Eden.Presentation
             var picked = controls.panel.Pick(panelPosition);
             if (picked == null)
                 return false;
+            if (Workspace != null)
+            {
+                if (Workspace.Screen != "simulation" || Workspace.IsModal || Workspace.IsLoading) return true;
+                var viewport = GetComponent<UIDocument>().rootVisualElement.Q("arena-viewport");
+                if (GetComponent<UIDocument>().rootVisualElement.Q("simulation-main").resolvedStyle.display != DisplayStyle.None &&
+                    viewport.worldBound.Contains(panelPosition) &&
+                    (picked.name == "bootstrap-root" || picked.name == "arena-viewport" || picked.name == "simulation-main" ||
+                     picked.name == "simulation-screen" || picked == GetComponent<UIDocument>().rootVisualElement)) return false;
+            }
             // The document root and its ancestors fill the screen; only elements drawn above the world count.
             for (var element = GetComponent<UIDocument>().rootVisualElement; element != null; element = element.parent)
             {
@@ -490,6 +586,7 @@ namespace Eden.Presentation
             algorithmField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             sensesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             trainingField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+            profileField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             var composing = modeField.index == (int)LabMode.SharedWorld &&
                             Array.IndexOf(BrainChoices, brainField.value) == (int)LabBrainKind.Composition;
             seedGenomesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution || composing);
@@ -542,6 +639,82 @@ namespace Eden.Presentation
                 {
                     var value = change.newValue;
                     if (float.IsNaN(value) || value > max || value < 0f || (value == 0f && !zeroAllowed))
+                        field.SetValueWithoutNotify(change.previousValue);
+                });
+                return field;
+            }
+        }
+
+        // The search-stage fields start at the profile defaults; out-of-range values go back to the previous one.
+        private void BindProfile(VisualElement root)
+        {
+            var defaults = new TwoStageOptions();
+            profileField = root.Q<DropdownField>("profile-field");
+            profileField.choices = new List<string>(ProfileChoices);
+            profileField.index = 0;
+            profileFoldout = root.Q<Foldout>("profile-foldout");
+            profileField.RegisterValueChangedCallback(_ =>
+            {
+                if (profileField.index >= (int)ProfileKind.SearchActive)
+                { algorithmField.index = 1; if (sensesField.index == 0) sensesField.index = 2; }
+                RefreshProfileFields();
+            });
+            profileFoldout.style.display = DisplayStyle.None;
+            profileWeightField = Between("profile-weight-field", (float)(defaults.SearchWeight * 100), 1f, 99f);
+            profileSecondsField = Between("profile-seconds-field", defaults.SearchSeconds, 1f, EvaluationPlan.MaxEpisodeSeconds);
+            profileDistanceField = Between("profile-distance-field", (float)defaults.MinDistance, 0f, 500f);
+            profileAlphaField = Between("profile-alpha-field", (float)defaults.Alpha, 0f, 0.99f);
+            profileBetaField = Between("profile-beta-field", (float)defaults.Beta, 0f, 1f);
+            profileFoodField = Count("profile-food-field", defaults.FoodTargets);
+            profileWaterField = Count("profile-water-field", defaults.WaterTargets);
+            profileObstaclesField = root.Q<DropdownField>("profile-obstacles-field");
+            profileObstaclesField.choices = new List<string>(SearchObstacleChoices);
+            profileObstaclesField.index = (int)defaults.SearchObstacles;
+            activeFoldout = new Foldout { text = "Fome, sede e exploração", value = false, name = "active-search-options" };
+            activeFoldout.Add(new Label("E = células/meta · D = alvos vistos · C = alvos coletados\nR = (0,65E + 0,35C) × (1 + 0,5D + 2C) / 3,5"));
+            profileFoldout.Add(activeFoldout);
+            var labels = new Dictionary<string, string>
+            {
+                { "CellSide", "Lado da célula" }, { "Hysteresis", "Margem de entrada" }, { "ExplorationGoal", "Meta de células" },
+                { "WaterThreshold", "Água útil por coleta" }, { "MaxEnergy", "Energia máxima" }, { "InitialEnergy", "Energia inicial" },
+                { "FoodEnergy", "Energia por alimento" }, { "Metabolism", "Metabolismo/s" }, { "Movement", "Movimento/s" },
+                { "Sensor", "Sensor de referência/s" }, { "Turn", "Fração de custo do giro" }, { "MaxHydration", "Hidratação máxima" },
+                { "HydrationLoss", "Perda de água/s" }, { "DrinkRate", "Taxa de beber/s" }, { "MaxAge", "Idade máxima (s)" }
+            };
+            foreach (var field in typeof(ActiveSearchOptions).GetFields())
+            {
+                var input = new FloatField(labels[field.Name]) { name = "active-" + field.Name };
+                input.AddToClassList("lab-field"); input.SetValueWithoutNotify((float)(double)field.GetValue(activeSearchOptions));
+                input.RegisterValueChangedCallback(change =>
+                {
+                    if (float.IsNaN(change.newValue) || float.IsInfinity(change.newValue) || change.newValue <= 0)
+                        input.SetValueWithoutNotify(change.previousValue);
+                    else field.SetValue(activeSearchOptions, (double)change.newValue);
+                });
+                activeFields.Add(field.Name, input); activeFoldout.Add(input);
+            }
+            RefreshProfileFields();
+
+
+            FloatField Between(string name, float initial, float min, float max)
+            {
+                var field = root.Q<FloatField>(name);
+                field.SetValueWithoutNotify(initial);
+                field.RegisterValueChangedCallback(change =>
+                {
+                    if (float.IsNaN(change.newValue) || change.newValue < min || change.newValue > max)
+                        field.SetValueWithoutNotify(change.previousValue);
+                });
+                return field;
+            }
+
+            IntegerField Count(string name, int initial)
+            {
+                var field = root.Q<IntegerField>(name);
+                field.SetValueWithoutNotify(initial);
+                field.RegisterValueChangedCallback(change =>
+                {
+                    if (change.newValue < 0 || change.newValue > SearchTargets.MaxTargets)
                         field.SetValueWithoutNotify(change.previousValue);
                 });
                 return field;
@@ -619,14 +792,42 @@ namespace Eden.Presentation
             trainingField = root.Q<DropdownField>("training-field");
             trainingField.choices = new List<string>(TrainingChoices);
             trainingField.index = 0;
+            BindProfile(root);
+            root.Q<Button>("follow-refresh-button").clicked += () => RefreshReplayClicked?.Invoke();
+            autoCheckpointField = root.Q<IntegerField>("auto-checkpoint-field");
+            followTopField = root.Q<IntegerField>("follow-top-field");
+            followRankField = root.Q<IntegerField>("follow-rank-field");
+            replaySpeedField = root.Q<FloatField>("replay-speed-field");
+            followField = root.Q<DropdownField>("follow-field");
+            followField.choices = new List<string> { "Avaliação atual", "Melhores avaliados (replay)" }; followField.index = 0;
+            autoCheckpointField.RegisterValueChangedCallback(change =>
+            {
+                var value = Math.Max(0, change.newValue); autoCheckpointField.SetValueWithoutNotify(value);
+                AutoCheckpointChanged?.Invoke(value);
+            });
+            void Follow()
+            {
+                var top = Math.Max(1, Math.Min(ReproductionRules.MaxPopulationSize, followTopField.value));
+                var rank = Math.Max(1, Math.Min(top, followRankField.value));
+                var speed = replaySpeedField.value;
+                if (float.IsNaN(speed) || float.IsInfinity(speed)) speed = 1;
+                speed = Mathf.Clamp(speed, 0.125f, 64f);
+                FollowChanged?.Invoke(followField.index == 1, top, rank, speed);
+            }
+            followField.RegisterValueChangedCallback(_ => Follow());
+            followTopField.RegisterValueChangedCallback(_ => Follow()); followRankField.RegisterValueChangedCallback(_ => Follow());
+            replaySpeedField.RegisterValueChangedCallback(_ => Follow());
+
             // Eyes need NEAT: choosing eyes picks NEAT, and choosing the MLP control goes back to the legacy senses.
             sensesField.RegisterValueChangedCallback(change =>
             {
+                if (profileField.index >= (int)ProfileKind.SearchActive && sensesField.index == 0) sensesField.index = 2;
                 if (sensesField.index >= 1)
                     algorithmField.index = 1;
             });
             algorithmField.RegisterValueChangedCallback(change =>
             {
+                if (profileField.index >= (int)ProfileKind.SearchActive && algorithmField.index == 0) algorithmField.index = 1;
                 if (algorithmField.index == 0)
                     sensesField.index = 0;
             });

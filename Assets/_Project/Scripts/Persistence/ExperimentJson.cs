@@ -108,7 +108,7 @@ namespace Eden.Persistence
                 .Add("schemaVersion", JsonValue.Of(SchemaVersion))
                 .Add("app", JsonValue.NewObject().Add("version", JsonValue.Of(header.AppVersion)))
                 .Add("createdUtc", JsonValue.Of(ExperimentHeader.Utc(header.CreatedUtc)))
-                .Add("algorithms", CheckpointCodec.EncodeAlgorithms())
+                .Add("algorithms", CheckpointCodec.EncodeAlgorithms(RewardProfiles.IsActive(header.Plan.Profile) ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion))
                 .Add("evaluationMode", JsonValue.Of("isolated"))
                 .Add("evaluationModes", JsonValue.NewArray()
                     .Add(JsonValue.Of(EvaluationCsv.ModeName(EvaluationMode.Training)))
@@ -119,8 +119,8 @@ namespace Eden.Persistence
                 .Add("arena", Arena(header.Plan.EpisodeConfig(0)))
                 .Add("episodeTicks", JsonValue.Of(header.Plan.EpisodeTicks))
                 .Add("validationSeeds", validationSeeds)
-                .Add("fitnessUnit", JsonValue.Of(FitnessUnit))
-                .Add("fitnessProfile", JsonValue.Of(Fitness.Profile))
+                .Add("fitnessUnit", JsonValue.Of(RewardProfiles.IsActive(header.Plan.Profile) ? "dimensionless" : FitnessUnit))
+                .Add("fitnessProfile", JsonValue.Of(header.Plan.Profile.Id))
                 .Add("neuralContract", JsonValue.Of(header.Plan.Contract.Id))
                 .Add("network", JsonValue.Of(neat ? NeatNetwork.Kind : Genome.MlpNetwork))
                 .Add("topology", neat
@@ -132,7 +132,52 @@ namespace Eden.Persistence
                 .Add("evolutionAlgorithm", JsonValue.Of(EvolutionAlgorithmOf(header.Plan.Algorithm)))
                 .Add("columns", files)
                 .Add("resumedFrom", header.ResumedFrom == null ? JsonValue.Null() : header.ResumedFrom.ToJson());
+            if (!header.Plan.Profile.IsLegacy)
+            {
+                root.Add("fitnessProfileHash", JsonValue.Of(header.Plan.Profile.ParameterHash));
+                root.Add("stages", Stages(header.Plan));
+                if (RewardProfiles.IsActive(header.Plan.Profile))
+                    root.Add("referenceContract", JsonValue.Of(NeuralContract.LegacyId))
+                        .Add("referencesComparable", JsonValue.Of(false));
+            }
+
             return JsonText.Write(root);
+        }
+
+        private static JsonValue Stages(EvaluationPlan plan)
+        {
+            var stages = JsonValue.NewArray();
+            foreach (var stage in plan.Stages)
+            {
+                var components = JsonValue.NewArray();
+                foreach (var component in stage.Reward.Components)
+                    components.Add(JsonValue.NewObject().Add("name", JsonValue.Of(component.Name))
+                        .Add("unit", JsonValue.Of(component.Unit)));
+                var value = JsonValue.NewObject()
+                    .Add("index", JsonValue.Of(stage.Index))
+                    .Add("name", JsonValue.Of(stage.Name))
+                    .Add("scoring", JsonValue.Of(stage.Reward.Scoring.ToString()))
+                    .Add("weight", JsonValue.Of((float)stage.Reward.Weight))
+                    .Add("episodeSeconds", JsonValue.Of(stage.EpisodeSeconds))
+                    .Add("episodeTicks", JsonValue.Of(stage.EpisodeTicks))
+                    .Add("trainingSeeds", JsonValue.Of(stage.TrainingSeedsPerGeneration))
+                    .Add("validationSeeds", JsonValue.Of(stage.ValidationSeedCount))
+                    .Add("arena", Arena(stage.TemplateConfig))
+                    .Add("components", components);
+                if (stage.IsSearch)
+                    value.Add("search", JsonValue.NewObject()
+                        .Add("foodTargets", JsonValue.Of(stage.Search.Targets.Food))
+                        .Add("waterTargets", JsonValue.Of(stage.Search.Targets.Water))
+                        .Add("minDistance", JsonValue.Of(stage.Search.Targets.MinDistance))
+                        .Add("arenaUsed", JsonValue.Of(stage.Search.ArenaSide)));
+                if (stage.ActiveSearch)
+                    value.Add("seedScheme", JsonValue.Of(plan.SeedScheme)).Add("role", JsonValue.Of(stage.Name))
+                        .Add("frozenNeeds", JsonValue.Of(stage.FrozenNeeds)).Add("foodRespawn", JsonValue.Of(stage.RespawnFood))
+                        .Add("finishOnCollection", JsonValue.Of(stage.FinishOnCollection));
+                stages.Add(value);
+            }
+
+            return stages;
         }
 
         internal static string Summary(ExperimentHeader header, ExportTally tally)
@@ -141,7 +186,7 @@ namespace Eden.Persistence
                 .Add("format", JsonValue.Of(SummaryFormat))
                 .Add("schemaVersion", JsonValue.Of(SchemaVersion))
                 .Add("configHash", JsonValue.Of(CheckpointCodec.Hex(header.ConfigHash)))
-                .Add("fitnessUnit", JsonValue.Of(FitnessUnit))
+                .Add("fitnessUnit", JsonValue.Of(RewardProfiles.IsActive(header.Plan.Profile) ? "dimensionless" : FitnessUnit))
                 .Add("resumed", JsonValue.Of(header.ResumedFrom != null))
                 .Add("training", JsonValue.NewObject()
                     .Add("generations", JsonValue.Of(tally.TrainingGenerations))

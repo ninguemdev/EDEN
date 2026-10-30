@@ -87,7 +87,7 @@ namespace Eden.Application
                     throw new ArgumentException("The last training evaluation is missing.", nameof(saved));
                 var last = saved.Generation - 1;
                 var lastEvaluation = GenerationEvaluation.FromEpisodes(last, EvaluationMode.Training, plan.TrainingSeeds(last),
-                    saved.LastTrainingEpisodes, ticksPerSecond);
+                    saved.LastTrainingEpisodes, ticksPerSecond, plan.Profile);
                 session.LastTraining = evolution.LastTrainingSpecies == null
                     ? new GenerationReport(lastEvaluation, previous)
                     : new GenerationReport(lastEvaluation, previous, evolution.LastTrainingSpecies);
@@ -96,7 +96,7 @@ namespace Eden.Application
             if (saved.BaselineEpisodes != null)
             {
                 var baselines = GenerationEvaluation.FromEpisodes(0, EvaluationMode.Validation, plan.ValidationSeeds(),
-                    saved.BaselineEpisodes, ticksPerSecond);
+                    saved.BaselineEpisodes, ticksPerSecond, plan.Profile);
                 if (baselines.Candidates.Count != 2)
                     throw new ArgumentException("Baselines are the random and the heuristic brain.", nameof(saved));
                 session.RandomBaseline = baselines.Candidates[0];
@@ -105,6 +105,18 @@ namespace Eden.Application
 
             CheckHistory(saved);
             session.training.AddRange(saved.Training);
+            if (RewardProfiles.IsActive(plan.Profile))
+            {
+                if (saved.StageMedians == null || saved.StageMedians.Count != saved.Generation)
+                    throw new ArgumentException("Active stage history is missing or has the wrong generation count.");
+                foreach (var row in saved.StageMedians)
+                {
+                    if (row.Count != plan.Stages.Count) throw new ArgumentException("Stage history has the wrong width.");
+                    foreach (var value in row)
+                        if (!(value >= 0 && value <= 1)) throw new ArgumentException("Stage history contains an invalid score.");
+                    session.stageMedians.Add(row);
+                }
+            }
             session.validation.AddRange(saved.Validation);
             session.TotalTicks = saved.TotalTicks;
 
@@ -148,6 +160,14 @@ namespace Eden.Application
         /// <summary>Training summary of every completed generation, in order.</summary>
         public IReadOnlyList<GenerationSummary> Training => training;
 
+        /// <summary>
+        /// Median score of each stage over the candidates, per training generation since this session started or was
+        /// restored (the last of <see cref="Training"/>); empty for the legacy profile.
+        /// </summary>
+        public IReadOnlyList<IReadOnlyList<float>> StageMedians => stageMedians;
+
+        private readonly List<IReadOnlyList<float>> stageMedians = new List<IReadOnlyList<float>>();
+
         /// <summary>Every validated generation, in order.</summary>
         public IReadOnlyList<ValidationPoint> Validation => validation;
 
@@ -162,6 +182,9 @@ namespace Eden.Application
 
         /// <summary>Ticks simulated over all episodes of the session.</summary>
         public long TotalTicks { get; private set; }
+
+        /// <summary>Execution gate checked between ticks/jobs (export backpressure or a save). Not part of simulation.</summary>
+        public Func<bool> CanAdvance { get; set; }
 
         /// <summary>Episodes finished by this object (not saved: a restored session counts from its restore).</summary>
         public long EpisodesRun { get; private set; }
@@ -183,7 +206,7 @@ namespace Eden.Application
             return new EvolutionSnapshot(Evolution.Settings, ValidationInterval, Evolution.Generation,
                 Evolution.Individuals, Evolution.Lineage.Entries(), LastTraining?.Individuals,
                 LastTraining?.Evaluation.Episodes, baselines, training, validation, TotalTicks, Phase, Job.Capture(),
-                Evolution.CaptureNeat());
+                Evolution.CaptureNeat(), RewardProfiles.IsActive(Plan.Profile) ? stageMedians : null);
         }
 
         /// <summary>
@@ -195,7 +218,7 @@ namespace Eden.Application
             if (maxTicks < 0)
                 throw new ArgumentOutOfRangeException(nameof(maxTicks));
             var ran = 0L;
-            while (ran < maxTicks)
+            while (ran < maxTicks && (CanAdvance == null || CanAdvance()))
             {
                 var completed = Job.CompletedEpisodes;
                 ran += Job.Advance(maxTicks - ran);
@@ -216,6 +239,8 @@ namespace Eden.Application
                 case EvolutionPhase.Training:
                     LastTraining = Evolution.Advance(Job.Result);
                     training.Add(LastTraining.Summary);
+                    if (!Plan.Profile.IsLegacy)
+                        stageMedians.Add(MediansOf(LastTraining.Evaluation));
                     ReportCompleted?.Invoke(LastTraining);
                     if (LastTraining.Summary.Generation % ValidationInterval != 0)
                         BeginTraining();
@@ -295,6 +320,28 @@ namespace Eden.Application
             }
 
             throw new InvalidOperationException($"Individual {id} was not evaluated.");
+        }
+
+        private static IReadOnlyList<float> MediansOf(GenerationEvaluation evaluation)
+        {
+            var stages = evaluation.Candidates[0].StageFitness.Count;
+            var medians = new float[stages];
+            for (var k = 0; k < stages; k++)
+            {
+                var scores = new List<float>();
+                foreach (var candidate in evaluation.Candidates)
+                {
+                    if (Fitness.IsValid(candidate.StageFitness[k]))
+                        scores.Add(candidate.StageFitness[k]);
+                }
+
+                scores.Sort();
+                medians[k] = scores.Count == 0 ? float.NaN
+                    : scores.Count % 2 == 1 ? scores[scores.Count / 2]
+                    : (scores[scores.Count / 2 - 1] + scores[scores.Count / 2]) / 2f;
+            }
+
+            return medians;
         }
     }
 }
