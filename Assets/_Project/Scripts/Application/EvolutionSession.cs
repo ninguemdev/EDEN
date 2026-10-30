@@ -183,6 +183,9 @@ namespace Eden.Application
         /// <summary>Ticks simulated over all episodes of the session.</summary>
         public long TotalTicks { get; private set; }
 
+        /// <summary>Execution gate checked between ticks/jobs (export backpressure or a save). Not part of simulation.</summary>
+        public Func<bool> CanAdvance { get; set; }
+
         /// <summary>Episodes finished by this object (not saved: a restored session counts from its restore).</summary>
         public long EpisodesRun { get; private set; }
 
@@ -215,7 +218,7 @@ namespace Eden.Application
             if (maxTicks < 0)
                 throw new ArgumentOutOfRangeException(nameof(maxTicks));
             var ran = 0L;
-            while (ran < maxTicks)
+            while (ran < maxTicks && (CanAdvance == null || CanAdvance()))
             {
                 var completed = Job.CompletedEpisodes;
                 ran += Job.Advance(maxTicks - ran);

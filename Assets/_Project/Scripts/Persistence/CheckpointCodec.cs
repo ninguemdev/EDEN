@@ -41,7 +41,9 @@ namespace Eden.Persistence
         /// of every episode, what the running episodes measured). Legacy runs keep schema 7 with parallel evaluation,
         /// 6 for sequential NEAT and 5 for MLP.
         /// </summary>
-        public const int SchemaVersion = 9;
+        // Schema 10 adds per-target detection flags to completed episode audits. Files without those flags
+        // retain their previous schema (9/8/7/6/5); reward identity, RNG and scoring do not change.
+        public const int SchemaVersion = 10;
 
         /// <summary>Schema of a legacy-profile run with parallel evaluation progress.</summary>
         public const int SchemaWithParallel = 7;
@@ -65,7 +67,7 @@ namespace Eden.Persistence
         {
             if (checkpoint == null)
                 throw new ArgumentNullException(nameof(checkpoint));
-            var schema = checkpoint.Evolution?.Settings.Profile != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile) ? 9
+            var schema = checkpoint.Evolution?.Settings.Profile != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile) ? TargetAuditSchema(checkpoint.Evolution)
                 : checkpoint.Evolution?.Settings.Profile?.IsLegacy == false ? 8
                 : checkpoint.Evolution?.Job.WorkerCount > 1 ? SchemaWithParallel
                 : checkpoint.Evolution?.Neat != null ? 6 : SchemaWithoutNeat;
@@ -83,12 +85,25 @@ namespace Eden.Persistence
                     .Add("version", JsonValue.Of(info.AppVersion))
                     .Add("runtime", JsonValue.Of(info.Runtime)))
                 .Add("savedUtc", JsonValue.Of(utc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)))
-                .Add("algorithms", EncodeAlgorithms(schema == 9 ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion))
+                .Add("algorithms", EncodeAlgorithms(schema >= 9 ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion))
                 .Add("configHash", JsonValue.Of(Hex(configHash)))
                 .Add("stateHash", JsonValue.Of(Hex(stateHash)))
                 .Add("config", config)
                 .Add("state", state);
             return JsonText.Write(root);
+        }
+
+        private static int TargetAuditSchema(EvolutionSnapshot saved)
+        {
+            bool Has(IReadOnlyList<EpisodeResult> episodes)
+            {
+                if (episodes != null) foreach (var episode in episodes) if (episode.DetectedTargets != null) return true;
+                return false;
+            }
+            if (Has(saved.LastTrainingEpisodes) || Has(saved.BaselineEpisodes) || Has(saved.Job.Completed)) return 10;
+            foreach (var ahead in saved.Job.Ahead)
+                if (ahead.Completed.HasValue && ahead.Completed.Value.DetectedTargets != null) return 10;
+            return 9;
         }
 
         /// <summary>Reads and checks a checkpoint; anything wrong raises a <see cref="CheckpointException"/>.</summary>
@@ -104,7 +119,7 @@ namespace Eden.Persistence
             if (schema > SchemaVersion)
                 throw new CheckpointException($"Checkpoint schema version {schema} is newer than version {SchemaVersion}, " +
                                               "the newest this build reads; open it with a newer EDEN.");
-            CheckAlgorithms(root["algorithms"], schema == 9 ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion);
+            CheckAlgorithms(root["algorithms"], schema >= 9 ? EvaluationPlan.LogicalSeedSchemeVersion : EvaluationPlan.SeedSchemeVersion);
 
             var config = root["config"];
             var state = root["state"];
@@ -125,7 +140,7 @@ namespace Eden.Persistence
             if (EncodeConfig(checkpoint).ToCompactString() != configText ||
                 EncodeState(checkpoint).ToCompactString() != stateText)
                 throw new CheckpointException("The checkpoint does not read back exactly (unknown or non-canonical values).");
-            if (checkpoint.Evolution != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile) && schema != 9)
+            if (checkpoint.Evolution != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile) && schema < 9)
                 throw new CheckpointException("Active search requires checkpoint schema 9.");
             Guard(() => CheckRestorable(checkpoint));
             return checkpoint;
@@ -334,7 +349,7 @@ namespace Eden.Persistence
             return set;
         }
 
-        private static EvolutionSettings DecodeEvolutionSettings(JsonValue saved, out int validationInterval)
+        internal static EvolutionSettings DecodeEvolutionSettings(JsonValue saved, out int validationInterval)
         {
             validationInterval = saved["validationInterval"].Int(1);
             var settings = new EvolutionSettings
@@ -1357,6 +1372,12 @@ namespace Eden.Persistence
                         precise.Add(double.IsNaN(component) ? JsonValue.Null() : JsonValue.Of(component));
                     value.Add("preciseComponents", precise);
                 }
+                if (episode.DetectedTargets != null)
+                {
+                    var detections = JsonValue.NewArray();
+                    foreach (var detected in episode.DetectedTargets) detections.Add(JsonValue.Of(detected));
+                    value.Add("detectedTargets", detections);
+                }
                 values.Add(value);
             }
 
@@ -1374,6 +1395,7 @@ namespace Eden.Persistence
                 float? score = null;
                 float[] components = null;
                 double[] precise = null;
+                bool[] detections = null;
                 if (value.TryGet("score") is JsonValue savedScore)
                 {
                     score = savedScore.AnyFloat();
@@ -1397,11 +1419,19 @@ namespace Eden.Persistence
                 }
                 if (plan.Stages[stage].ActiveSearch && precise == null)
                     throw new CheckpointException("Missing precise search components.");
+                if (value.TryGet("detectedTargets") is JsonValue targetFlags)
+                {
+                    var flags = targetFlags.ArrayOf(SearchTargets.MaxTargets);
+                    if (!plan.Stages[stage].ActiveSearch || flags.Count != plan.Stages[stage].Search.Targets.Count)
+                        throw new CheckpointException("Target detection audit differs from stage.");
+                    detections = new bool[flags.Count];
+                    for (var t = 0; t < detections.Length; t++) detections[t] = flags[t].Boolean();
+                }
                 episodes[i] = new EpisodeResult(ParseMode(value["mode"]), value["generation"].Int(0),
                     value["candidate"].Int(0), value["seedIndex"].Int(0), value["seed"].ULong(),
                     plan.Stages[stage].EpisodeTicks, plan.Stages[stage].EpisodeSeconds, value["foodEnergy"].Float(),
                     value["survivedTicks"].Long(0), value["survived"].Boolean(), value["finalEnergy"].Float(), components,
-                    stage, score, precise);
+                    stage, score, precise, detections);
             }
 
             return episodes;

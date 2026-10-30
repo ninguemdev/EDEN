@@ -159,7 +159,7 @@ namespace Eden.Application
                 }
                 return new EpisodeResult(mode, generation, Candidate, SeedIndex, EpisodeSeed, stage.EpisodeTicks,
                     stage.EpisodeSeconds, Creature.FoodEnergyEaten, Creature.AgeTicks, Creature.IsAlive, Creature.Energy,
-                    rounded, stage.Index, activeScore, precise);
+                    rounded, stage.Index, activeScore, precise, (bool[])Tracker.Active.Detected.Clone());
             }
             var values = new Dictionary<string, float>();
             var score = stage.IsSearch ? SearchScore(values) : ResourcesScore(values);
