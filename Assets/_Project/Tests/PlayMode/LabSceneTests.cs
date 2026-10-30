@@ -10,6 +10,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
+using UnityEngine.UIElements;
 
 namespace Eden.Tests.PlayMode
 {
@@ -24,6 +25,8 @@ namespace Eden.Tests.PlayMode
             yield return SceneManager.LoadSceneAsync("Bootstrap", LoadSceneMode.Single);
             yield return null;
             runner = UnityEngine.Object.FindFirstObjectByType<LabRunner>();
+            runner.Workspace.Open("simulation");
+            runner.Clock.Resume();
             Assert.That(runner, Is.Not.Null, "Bootstrap needs a LabRunner");
         }
 
@@ -109,6 +112,8 @@ namespace Eden.Tests.PlayMode
             runner.TogglePause();
             var creature = runner.Simulation.World.Creatures[2].Id;
             runner.Select(creature);
+            using (var submit = NavigationSubmitEvent.GetPooled())
+            { var tab = runner.Hud.Root.Q<Button>("inspector-tab-2"); submit.target = tab; tab.SendEvent(submit); }
             var tick = runner.Simulation.World.Tick;
             runner.RequestStep();
             runner.RequestStep();

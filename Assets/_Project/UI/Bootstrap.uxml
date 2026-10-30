@@ -1,102 +1,270 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements">
     <Style src="Lab.uss" />
-    <ui:VisualElement name="bootstrap-root" picking-mode="Ignore" style="flex-grow: 1; flex-direction: row; justify-content: space-between; align-items: flex-start; padding: 16px;">
-        <ui:VisualElement name="run-panel" picking-mode="Ignore" class="lab-panel" style="width: 400px; max-height: 100%; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; background-color: rgba(8, 16, 20, 0.82); overflow: hidden;">
-            <ui:ScrollView name="run-panel-scroll" mode="Vertical" style="flex-grow: 1; height: 100%; padding: 12px 14px;">
-                <ui:Label name="title" text="EDEN" style="font-size: 34px; -unity-font-style: bold; color: rgb(226, 240, 233); letter-spacing: 10px;" />
-                <ui:Label name="subtitle" text="Evolutionary Digital Ecosystem Network" style="font-size: 13px; color: rgb(140, 178, 164); margin-bottom: 6px;" />
-                <ui:VisualElement name="experiment-panel" class="lab-controls">
-                    <ui:DropdownField name="mode-field" label="Modo" class="lab-field" />
-                    <ui:DropdownField name="preset-field" label="Preset" class="lab-field" />
-                    <ui:DropdownField name="brain-field" label="Cérebro" class="lab-field" />
-                    <ui:VisualElement name="composition-panel" style="display: none;">
-                        <ui:TextField name="composition-field" label="Composição (arquivo*N; #k*N)" class="lab-field" />
-                        <ui:DropdownField name="composition-mode-field" label="Genomas" class="lab-field" />
-                    </ui:VisualElement>
-                    <ui:DropdownField name="body-field" label="Corpo" class="lab-field" />
-                    <ui:DropdownField name="algorithm-field" label="Algoritmo" class="lab-field" />
-                    <ui:DropdownField name="senses-field" label="Sentidos" class="lab-field" />
-                    <ui:DropdownField name="arena-field" label="Arena" class="lab-field" />
-                    <ui:Foldout name="scenario-foldout" text="Cenário: tamanho e recursos" value="false" class="lab-field">
-                        <ui:DropdownField name="scenario-size-field" label="Tamanho" class="lab-field" />
-                        <ui:DropdownField name="scenario-resources-field" label="Recursos" class="lab-field" />
-                        <ui:IntegerField name="scenario-food-field" label="Comida no 50×50 (0 = do modo)" value="0" class="lab-field" />
-                        <ui:FloatField name="scenario-food-energy-field" label="Energia por comida" class="lab-field" />
-                        <ui:FloatField name="scenario-food-respawn-field" label="Comida volta em (s)" class="lab-field" />
-                        <ui:DropdownField name="scenario-water-field" label="Água (implica sólidos)" class="lab-field" />
-                        <ui:DropdownField name="scenario-water-supply-field" label="Oferta de água" class="lab-field" />
-                        <ui:FloatField name="scenario-water-capacity-field" label="Reserva por lago (50×50)" class="lab-field" />
-                        <ui:FloatField name="scenario-water-recharge-field" label="Recarga por lago/s (50×50)" class="lab-field" />
-                        <ui:FloatField name="scenario-episode-field" label="Episódio (s)" class="lab-field" />
-                        <ui:FloatField name="scenario-max-age-field" label="Idade máxima (s)" class="lab-field" />
-                        <ui:FloatField name="scenario-initial-energy-field" label="Energia inicial" class="lab-field" />
-                    </ui:Foldout>
-                    <ui:DropdownField name="training-field" label="Treino" class="lab-field" tooltip="Paralelo usa a CPU para avaliar mundos independentes. Use Máx. para acelerar o treino; a arena mostra um dos episódios." />
-                    <ui:Foldout name="observation-foldout" text="Gravação e acompanhamento" value="false" class="lab-field">
-                        <ui:IntegerField name="auto-checkpoint-field" label="Checkpoint a cada gerações (0 desliga)" value="50" class="lab-field" />
-                        <ui:DropdownField name="follow-field" label="Acompanhar" class="lab-field" />
-                        <ui:IntegerField name="follow-top-field" label="Melhores N" value="5" class="lab-field" />
-                        <ui:IntegerField name="follow-rank-field" label="Posição inicial" value="1" class="lab-field" />
-                        <ui:FloatField name="replay-speed-field" label="Velocidade do replay" value="1" class="lab-field" />
-                        <ui:Button name="follow-refresh-button" text="Atualizar ranking agora" class="lab-button" />
-                        <ui:Label text="Replays independentes do treino. O ranking atualiza a cada ciclo ou pelo botão." style="white-space: normal; font-size: 11px;" />
-                    </ui:Foldout>
-                    <ui:DropdownField name="profile-field" label="Perfil" class="lab-field" tooltip="Como cada genoma é pontuado. Somente busca ou duas etapas com híbrida e fome/sede; o perfil antigo mantém busca sem gasto." />
-                    <ui:Foldout name="profile-foldout" text="Busca — configuração" value="false" class="lab-field">
-                        <ui:FloatField name="profile-weight-field" label="Peso da busca (%)" class="lab-field" />
-                        <ui:FloatField name="profile-seconds-field" label="Duração da busca (s)" class="lab-field" />
-                        <ui:IntegerField name="profile-food-field" label="Alvos de comida" class="lab-field" />
-                        <ui:IntegerField name="profile-water-field" label="Alvos de água" class="lab-field" />
-                        <ui:FloatField name="profile-distance-field" label="Distância mínima" class="lab-field" />
-                        <ui:FloatField name="profile-alpha-field" label="Crédito de aproximação (α)" class="lab-field" />
-                        <ui:FloatField name="profile-beta-field" label="Parte da rapidez (β)" class="lab-field" />
-                        <ui:DropdownField name="profile-obstacles-field" label="Obstáculos da busca" class="lab-field" />
-                    </ui:Foldout>
-                    <ui:IntegerField name="seed-field" label="Seed" value="1" class="lab-field" />
-                    <ui:VisualElement class="lab-row">
-                        <ui:TextField name="seed-genomes-field" label="Pool de genomas" class="lab-field" style="flex-grow: 1;" />
-                        <ui:Button name="use-export-directory-button" text="Usar exportação" class="lab-button" />
-                    </ui:VisualElement>
-                    <ui:VisualElement class="lab-row">
-                        <ui:Button name="start-button" text="Iniciar" class="lab-button lab-button--primary" />
-                        <ui:Button name="resume-evolution-button" text="Voltar à evolução" class="lab-button" style="display: none;" />
-                    </ui:VisualElement>
-                    <ui:VisualElement class="lab-row">
-                        <ui:Button name="pause-button" text="Pausar" class="lab-button" />
-                        <ui:Button name="step-button" text="+1 tick" class="lab-button" />
-                        <ui:Button name="slower-button" text="½×" class="lab-button" />
-                        <ui:Button name="faster-button" text="2×" class="lab-button" />
-                        <ui:Button name="max-button" text="Máx." class="lab-button" />
-                    </ui:VisualElement>
-                    <ui:VisualElement class="lab-row">
-                        <ui:Button name="save-button" text="Salvar" class="lab-button" />
-                        <ui:Button name="load-button" text="Carregar" class="lab-button" />
-                    </ui:VisualElement>
-                    <ui:Label name="checkpoint-status" text="" style="display: none; font-size: 12px; color: rgb(160, 190, 180); white-space: normal; margin-top: 2px;" />
-                </ui:VisualElement>
-                <ui:Label name="run-stats" text="" style="font-size: 14px; color: rgb(214, 226, 220); white-space: normal; margin-top: 8px;" />
-                <ui:VisualElement name="chart-panel" picking-mode="Ignore" style="display: none; margin-top: 8px;">
-                    <ui:Label name="chart-title" text="Fitness por geração (comida ingerida / s simulado)" style="font-size: 13px; -unity-font-style: bold; color: rgb(226, 240, 233);" />
-                    <ui:Label name="chart-legend" text="" style="font-size: 11px; color: rgb(160, 190, 180); white-space: normal; margin-bottom: 2px;" />
-                    <ui:VisualElement name="generation-chart-host" picking-mode="Ignore" style="height: 280px;" />
-                </ui:VisualElement>
-            </ui:ScrollView>
+    <ui:VisualElement picking-mode="Ignore" name="bootstrap-root" class="workspace">
+        <ui:VisualElement name="workspace-toolbar" class="toolbar">
+            <ui:Label name="title" text="EDEN" class="brand" />
+            <ui:Button name="nav-home" text="Início" class="lab-button" />
+            <ui:Button name="nav-configure" text="Configurar" class="lab-button" />
+            <ui:Button name="nav-simulation" text="Simulação" class="lab-button" />
+            <ui:Button name="nav-library" text="Biblioteca" class="lab-button" />
+            <ui:Label name="session-state" text="Pausado" class="session-state" />
+            <ui:VisualElement name="playback-controls" class="lab-row">
+                <ui:Button name="pause-button" text="Pausar" class="lab-button" />
+                <ui:Button name="step-button" text="+1 tick" class="lab-button" />
+                <ui:Button name="slower-button" text="½×" class="lab-button" />
+                <ui:Button name="faster-button" text="2×" class="lab-button" />
+                <ui:Button name="max-button" text="Máx." class="lab-button" />
+                <ui:Button name="save-button" text="Salvar" class="lab-button" />
+                <ui:Button name="load-button" text="Carregar" class="lab-button" />
+            </ui:VisualElement>
         </ui:VisualElement>
-        <ui:VisualElement name="inspector-panel" picking-mode="Ignore" style="display: none; width: 420px; max-height: 100%; border-top-left-radius: 6px; border-top-right-radius: 6px; border-bottom-left-radius: 6px; border-bottom-right-radius: 6px; background-color: rgba(8, 16, 20, 0.82); overflow: hidden;">
-            <ui:ScrollView name="inspector-panel-scroll" mode="Vertical" style="flex-grow: 1; height: 100%; padding: 14px;">
-                <ui:Label name="inspector" text="" style="font-size: 15px; color: rgb(214, 226, 220); white-space: normal;" />
-                <ui:VisualElement name="export-genome-row" class="lab-row" style="display: none; margin-top: 8px;">
-                    <ui:Button name="export-genome-button" text="Exportar genoma" class="lab-button" />
-                    <ui:Button name="copy-genome-directory-button" text="Copiar pasta" class="lab-button" />
+        <ui:Label name="workspace-message" text="" class="message" />
+        <ui:VisualElement name="home-screen" class="screen home-screen">
+            <ui:Label text="Seu laboratório de evolução" class="hero-title" />
+            <ui:Label text="Prepare um experimento, retome uma execução ou investigue os resultados." class="muted" />
+            <ui:Button name="new-experiment" text="Novo experimento" class="home-action lab-button" />
+            <ui:Button name="resume-session" text="Continuar sessão" class="home-action lab-button" />
+            <ui:Button name="open-checkpoints" text="Retomar checkpoint" class="home-action lab-button" />
+            <ui:Label name="recent-session" text="Nenhuma sessão iniciada nesta abertura." class="muted" />
+        </ui:VisualElement>
+        <ui:VisualElement name="configure-screen" class="screen">
+            <ui:Label text="Configurar experimento" class="page-title" />
+            <ui:VisualElement name="config-tabs" class="tab-row">
+                <ui:Button name="config-tab-0" text="Objetivo" class="lab-button" />
+                <ui:Button name="config-tab-1" text="Ambiente" class="lab-button" />
+                <ui:Button name="config-tab-2" text="População" class="lab-button" />
+                <ui:Button name="config-tab-3" text="Treino e objetivos" class="lab-button" />
+                <ui:Button name="config-tab-4" text="Revisão" class="lab-button" />
+            </ui:VisualElement>
+            <ui:VisualElement class="config-body">
+                <ui:VisualElement name="experiment-panel" class="config-form lab-controls">
+                    <ui:ScrollView mode="Vertical" name="config-page-0" class="config-page">
+                        <ui:DropdownField name="mode-field" label="Modo" class="lab-field" />
+                        <ui:DropdownField name="preset-field" label="Preset" class="lab-field" />
+                        <ui:TextField label="Nome da execução" value="Experimento" name="experiment-name" />
+                        <ui:Label text="Evolução: genomas avaliados em episódios isolados. Arena: criaturas simultâneas no mesmo mundo." class="muted" />
+                    </ui:ScrollView>
+                    <ui:ScrollView mode="Vertical" name="config-page-1" class="config-page">
+                        <ui:DropdownField name="arena-field" label="Arena" class="lab-field" />
+                        <ui:Foldout name="scenario-foldout" text="Cenário: tamanho e recursos" value="true" class="lab-field">
+                            <ui:DropdownField name="scenario-size-field" label="Tamanho" class="lab-field" />
+                            <ui:DropdownField name="scenario-resources-field" label="Recursos" class="lab-field" />
+                            <ui:IntegerField name="scenario-food-field" label="Comida no 50×50 (0 = do modo)" value="0" class="lab-field" />
+                            <ui:FloatField name="scenario-food-energy-field" label="Energia por comida" class="lab-field" />
+                            <ui:FloatField name="scenario-food-respawn-field" label="Comida volta em (s)" class="lab-field" />
+                            <ui:DropdownField name="scenario-water-field" label="Água (implica sólidos)" class="lab-field" />
+                            <ui:DropdownField name="scenario-water-supply-field" label="Oferta de água" class="lab-field" />
+                            <ui:FloatField name="scenario-water-capacity-field" label="Reserva por lago (50×50)" class="lab-field" />
+                            <ui:FloatField name="scenario-water-recharge-field" label="Recarga por lago/s (50×50)" class="lab-field" />
+                            <ui:FloatField name="scenario-episode-field" label="Episódio (s)" class="lab-field" />
+                            <ui:FloatField name="scenario-max-age-field" label="Idade máxima (s)" class="lab-field" />
+                            <ui:FloatField name="scenario-initial-energy-field" label="Energia inicial" class="lab-field" />
+                        </ui:Foldout>
+                        <ui:IntegerField name="seed-field" label="Seed" value="1" class="lab-field" />
+                        <ui:Button name="random-seed" text="Sortear nova seed" class="lab-button" />
+                    </ui:ScrollView>
+                    <ui:ScrollView mode="Vertical" name="config-page-2" class="config-page">
+                        <ui:DropdownField name="brain-field" label="Cérebro" class="lab-field" />
+                        <ui:VisualElement name="composition-panel">
+                            <ui:TextField name="composition-field" label="Composição (arquivo*N; #k*N)" class="lab-field" />
+                            <ui:DropdownField name="composition-mode-field" label="Genomas" class="lab-field" />
+                        </ui:VisualElement>
+                        <ui:DropdownField name="body-field" label="Corpo" class="lab-field" />
+                        <ui:DropdownField name="algorithm-field" label="Algoritmo" class="lab-field" />
+                        <ui:DropdownField name="senses-field" label="Sentidos" class="lab-field" />
+                        <ui:TextField name="seed-genomes-field" label="Pool de genomas" class="lab-field" />
+                        <ui:Button name="use-export-directory-button" text="Usar exportação" class="lab-button" />
+                    </ui:ScrollView>
+                    <ui:ScrollView mode="Vertical" name="config-page-3" class="config-page">
+                        <ui:DropdownField name="training-field" label="Treino" class="lab-field" tooltip="Paralelo usa a CPU para avaliar mundos independentes. Use Máx. para acelerar o treino; a arena mostra um dos episódios." />
+                        <ui:DropdownField name="profile-field" label="Perfil" class="lab-field" tooltip="Como cada genoma é pontuado. Somente busca ou duas etapas com híbrida e fome/sede; o perfil antigo mantém busca sem gasto." />
+                        <ui:Foldout name="profile-foldout" text="Busca — configuração" value="false" class="lab-field">
+                            <ui:FloatField name="profile-weight-field" label="Peso da busca (%)" class="lab-field" />
+                            <ui:FloatField name="profile-seconds-field" label="Duração da busca (s)" class="lab-field" />
+                            <ui:IntegerField name="profile-food-field" label="Alvos de comida" class="lab-field" />
+                            <ui:IntegerField name="profile-water-field" label="Alvos de água" class="lab-field" />
+                            <ui:FloatField name="profile-distance-field" label="Distância mínima" class="lab-field" />
+                            <ui:FloatField name="profile-alpha-field" label="Crédito de aproximação (α)" class="lab-field" />
+                            <ui:FloatField name="profile-beta-field" label="Parte da rapidez (β)" class="lab-field" />
+                            <ui:DropdownField name="profile-obstacles-field" label="Obstáculos da busca" class="lab-field" />
+                        </ui:Foldout>
+                    </ui:ScrollView>
+                    <ui:ScrollView mode="Vertical" name="config-page-4" class="config-page">
+                        <ui:Label name="review-summary" text="" class="review-summary" />
+                        <ui:Label name="review-validation" text="" class="message" />
+                        <ui:Label text="A prévia usa uma seed isolada e representa o estado inicial. Não executa treino nem comprova sobrevivência." class="muted" />
+                    </ui:ScrollView>
                 </ui:VisualElement>
-                <ui:Label name="export-status" text="" style="display: none; font-size: 12px; color: rgb(160, 190, 180); white-space: normal; margin-top: 4px;" />
-                <ui:VisualElement name="network-panel" picking-mode="Ignore" style="display: none; margin-top: 10px;">
-                    <ui:Label name="network-title" text="Rede neural (feed-forward: sem memória nem aprendizado)" style="font-size: 14px; -unity-font-style: bold; color: rgb(226, 240, 233); white-space: normal;" />
-                    <ui:Label name="network-legend" text="Neurônios: ativação (verde +, vermelho −). Linhas: peso × sinal." style="font-size: 12px; color: rgb(140, 178, 164); white-space: normal; margin-bottom: 4px;" />
-                    <ui:VisualElement name="network-graph-host" picking-mode="Ignore" style="height: 340px;" />
+                <ui:VisualElement name="preview-panel" class="preview-panel">
+                    <ui:Label text="Prévia do estado inicial" class="section-title" />
+                    <ui:VisualElement name="preview-host" class="preview-host" />
+                    <ui:Label name="preview-summary" text="" class="muted" />
+                    <ui:Button name="refresh-preview" text="Atualizar prévia" class="lab-button" />
                 </ui:VisualElement>
-            </ui:ScrollView>
+            </ui:VisualElement>
+            <ui:VisualElement class="config-footer">
+                <ui:Button name="config-back" text="Voltar" class="lab-button" />
+                <ui:Button name="save-preset" text="Salvar preset" class="lab-button" />
+                <ui:Button name="start-button" text="Iniciar" class="lab-button lab-button--primary" />
+                <ui:Label name="draft-status" text="" class="muted" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement picking-mode="Ignore" name="simulation-screen" class="simulation-screen">
+            <ui:VisualElement name="indicators" class="indicators">
+                <ui:VisualElement class="indicator">
+                    <ui:Label text="Modo" class="muted" />
+                    <ui:Label name="indicator-mode" text="—" class="indicator-value" />
+                </ui:VisualElement>
+                <ui:VisualElement class="indicator">
+                    <ui:Label text="Geração" class="muted" />
+                    <ui:Label name="indicator-generation" text="—" class="indicator-value" />
+                </ui:VisualElement>
+                <ui:VisualElement class="indicator">
+                    <ui:Label text="População" class="muted" />
+                    <ui:Label name="indicator-population" text="—" class="indicator-value" />
+                </ui:VisualElement>
+                <ui:VisualElement class="indicator">
+                    <ui:Label text="Tick" class="muted" />
+                    <ui:Label name="indicator-tick" text="—" class="indicator-value" />
+                </ui:VisualElement>
+                <ui:VisualElement class="indicator">
+                    <ui:Label text="Velocidade" class="muted" />
+                    <ui:Label name="indicator-speed" text="—" class="indicator-value" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement name="simulation-tools" class="tab-row">
+                <ui:Button name="overview" text="Visão geral" class="lab-button" />
+                <ui:Button name="population" text="População" class="lab-button" />
+                <ui:Button name="show-inspector" text="Inspeção" class="lab-button" />
+                <ui:Button name="analysis" text="Análise" class="lab-button" />
+                <ui:Button name="events" text="Eventos" class="lab-button" />
+                <ui:Button name="frame-arena" text="Enquadrar tudo" class="lab-button" />
+                <ui:Button name="move-camera" text="Mover câmera" class="lab-button" />
+                <ui:Button name="layout-observe" text="Observar" class="lab-button" />
+                <ui:Button name="layout-evolve" text="Evoluir" class="lab-button" />
+                <ui:Button name="layout-analyze" text="Analisar" class="lab-button" />
+                <ui:Button name="restore-layout" text="Restaurar layout" class="lab-button" />
+            </ui:VisualElement>
+            <ui:VisualElement picking-mode="Ignore" name="simulation-main" class="simulation-main">
+                <ui:VisualElement picking-mode="Ignore" name="arena-viewport" class="arena-viewport">
+                    <ui:Label picking-mode="Ignore" name="arena-caption" text="Arena · roda: zoom · botão central: mover" class="arena-caption" />
+                </ui:VisualElement>
+                <ui:VisualElement name="side-divider" class="side-divider" />
+                <ui:VisualElement name="workspace-side" class="workspace-side">
+                    <ui:VisualElement class="tab-row">
+                        <ui:Label name="side-title" text="Visão geral" class="section-title" />
+                        <ui:Button name="close-side" text="Recolher" class="lab-button" />
+                    </ui:VisualElement>
+                    <ui:ScrollView mode="Vertical" name="overview-content">
+                        <ui:Button name="resume-evolution-button" text="Voltar à evolução" class="lab-button" />
+                        <ui:Label name="run-stats" text="" />
+                        <ui:Foldout name="observation-foldout" text="Gravação e acompanhamento" value="false" class="lab-field">
+                            <ui:IntegerField name="auto-checkpoint-field" label="Checkpoint a cada gerações (0 desliga)" value="50" class="lab-field" />
+                            <ui:DropdownField name="follow-field" label="Acompanhar" class="lab-field" />
+                            <ui:IntegerField name="follow-top-field" label="Melhores N" value="5" class="lab-field" />
+                            <ui:IntegerField name="follow-rank-field" label="Posição inicial" value="1" class="lab-field" />
+                            <ui:FloatField name="replay-speed-field" label="Velocidade do replay" value="1" class="lab-field" />
+                            <ui:Button name="follow-refresh-button" text="Atualizar ranking agora" class="lab-button" />
+                            <ui:Label text="Replays independentes do treino. O ranking atualiza a cada ciclo ou pelo botão." style="white-space: normal; font-size: 11px;" />
+                        </ui:Foldout>
+                    </ui:ScrollView>
+                    <ui:VisualElement name="inspector-panel" picking-mode="Ignore" class="inspector-content">
+                        <ui:VisualElement name="inspector-tabs" class="tab-row">
+                            <ui:Button name="inspector-tab-0" text="Estado" class="lab-button" />
+                            <ui:Button name="inspector-tab-1" text="Corpo e sentidos" class="lab-button" />
+                            <ui:Button name="inspector-tab-2" text="Cérebro" class="lab-button" />
+                            <ui:Button name="inspector-tab-3" text="Linhagem" class="lab-button" />
+                        </ui:VisualElement>
+                        <ui:ScrollView name="inspector-panel-scroll" mode="Vertical" style="flex-grow: 1; height: 100%; padding: 14px;">
+                            <ui:Label name="inspector" text="" style="font-size: 15px; color: rgb(214, 226, 220); white-space: normal;" />
+                            <ui:VisualElement name="network-panel" picking-mode="Ignore" style="display: none; margin-top: 10px;">
+                                <ui:Label name="network-title" text="Rede neural (feed-forward: sem memória nem aprendizado)" style="font-size: 14px; -unity-font-style: bold; color: rgb(226, 240, 233); white-space: normal;" />
+                                <ui:Label name="network-legend" text="Neurônios: ativação (verde +, vermelho −). Linhas: peso × sinal." style="font-size: 12px; color: rgb(140, 178, 164); white-space: normal; margin-bottom: 4px;" />
+                                <ui:VisualElement name="network-graph-host" picking-mode="Ignore" style="height: 340px;" />
+                            </ui:VisualElement>
+                        </ui:ScrollView>
+                    </ui:VisualElement>
+                    <ui:VisualElement name="export-genome-row" class="lab-row">
+                        <ui:Button name="export-genome-button" text="Exportar genoma" class="lab-button" />
+                        <ui:Button name="copy-genome-directory-button" text="Copiar pasta" class="lab-button" />
+                    </ui:VisualElement>
+                    <ui:Label name="export-status" text="" />
+                    <ui:VisualElement name="population-content">
+                        <ui:TextField label="Buscar ID" name="population-search" />
+                        <ui:Button name="refresh-population" text="Atualizar ranking" class="lab-button" />
+                        <ui:ListView name="population-list" class="library-list" />
+                        <ui:Label name="population-detail" text="" class="muted" />
+                    </ui:VisualElement>
+                    <ui:ScrollView mode="Vertical" name="events-content">
+                        <ui:Label name="events-text" text="" class="review-summary" />
+                    </ui:ScrollView>
+                </ui:VisualElement>
+            </ui:VisualElement>
+            <ui:VisualElement name="chart-panel" picking-mode="Position" class="analysis-panel">
+                <ui:Label name="chart-title" text="Fitness por geração (comida ingerida / s simulado)" style="font-size: 13px; -unity-font-style: bold; color: rgb(226, 240, 233);" />
+                <ui:VisualElement name="analysis-toolbar" class="tab-row">
+                    <ui:Button name="chart-zoom-in" text="+" class="lab-button" />
+                    <ui:Button name="chart-zoom-out" text="−" class="lab-button" />
+                    <ui:Button name="chart-all" text="Tudo" class="lab-button" />
+                    <ui:Button name="chart-latest" text="Acompanhar últimas" class="lab-button" />
+                    <ui:Button name="chart-expand" text="Expandir / recolher" class="lab-button" />
+                    <ui:Button name="chart-table" text="Tabela" class="lab-button" />
+                    <ui:Button name="chart-export" text="Exportar CSV" class="lab-button" />
+                    <ui:DropdownField label="Métrica" name="analysis-metric" />
+                </ui:VisualElement>
+                <ui:VisualElement name="chart-filters" class="tab-row">
+                    <ui:Toggle label="Treino: mediana e quartis" value="true" name="series-training" />
+                    <ui:Toggle label="Validação: mediana" value="true" name="series-validation" />
+                    <ui:Toggle label="Melhor treino" value="false" name="series-best" />
+                    <ui:Toggle label="Campeão validado" value="false" name="series-champion" />
+                    <ui:Toggle label="Referências" value="false" name="series-references" />
+                    <ui:Toggle label="Etapas" value="false" name="series-stages" />
+                </ui:VisualElement>
+                <ui:Label name="chart-legend" text="" style="font-size: 11px; color: rgb(160, 190, 180); white-space: normal; margin-bottom: 2px;" />
+                <ui:VisualElement name="generation-chart-host" picking-mode="Position" style="flex-grow: 1; min-height: 120px;" />
+                <ui:VisualElement name="chart-divider" class="chart-divider" />
+                <ui:Label name="chart-selection" text="Clique numa geração para consultar. A arena continua no presente." class="muted" />
+                <ui:ListView name="chart-data-table" class="chart-data-table" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+        <ui:VisualElement name="library-screen" class="screen">
+            <ui:Label text="Biblioteca" class="page-title" />
+            <ui:VisualElement class="tab-row">
+                <ui:Button name="library-checkpoints" text="Checkpoints" class="lab-button" />
+                <ui:Button name="library-genomes" text="Genomas" class="lab-button" />
+                <ui:Button name="library-presets" text="Presets" class="lab-button" />
+                <ui:Button name="library-results" text="Resultados" class="lab-button" />
+            </ui:VisualElement>
+            <ui:Label name="library-location" text="" class="muted" />
+            <ui:VisualElement class="tab-row">
+                <ui:TextField label="Buscar nome / execução" name="library-search" class="search-field" />
+                <ui:Button name="refresh-library" text="Atualizar" class="lab-button" />
+            </ui:VisualElement>
+            <ui:VisualElement class="library-body">
+                <ui:ListView name="library-list" class="library-list" />
+                <ui:ScrollView mode="Vertical" class="library-details">
+                    <ui:Label name="library-detail" text="Selecione um item para ver detalhes." class="review-summary" />
+                </ui:ScrollView>
+            </ui:VisualElement>
+            <ui:VisualElement class="tab-row">
+                <ui:TextField label="Arquivo externo" name="import-path" class="search-field" />
+                <ui:Button name="import-checkpoint" text="Importar checkpoint" class="lab-button" />
+                <ui:Button name="load-selected" text="Carregar selecionado" class="lab-button lab-button--primary" />
+                <ui:Button name="use-library-item" text="Usar configuração / pasta" class="lab-button" />
+            </ui:VisualElement>
+            <ui:Label name="library-status" text="" class="message" />
+        </ui:VisualElement>
+        <ui:VisualElement name="workspace-footer" class="workspace-footer">
+            <ui:Label name="checkpoint-status" text="" />
+            <ui:Label name="help" text="Espaço: pausar · F5: nova gravação · F9: biblioteca · Esc: voltar" class="muted" />
+        </ui:VisualElement>
+        <ui:VisualElement name="confirm-modal" class="modal">
+            <ui:VisualElement class="modal-box">
+                <ui:Label name="confirm-message" text="Há progresso nesta sessão. Como deseja continuar?" class="section-title" />
+                <ui:Button name="confirm-save" text="Salvar e continuar" class="lab-button" />
+                <ui:Button name="confirm-discard" text="Continuar sem salvar" class="lab-button" />
+                <ui:Button name="confirm-cancel" text="Cancelar" class="lab-button" />
+            </ui:VisualElement>
         </ui:VisualElement>
     </ui:VisualElement>
-    <ui:Label name="help" picking-mode="Ignore" text="Espaço pausar · . um tick · - / = velocidade · M máx. · clique ou [ ] selecionar · Esc limpar · R reiniciar · B trocar cérebro · F5 salvar · F9 carregar" style="position: absolute; left: 16px; bottom: 12px; font-size: 14px; color: rgb(140, 178, 164);" />
 </ui:UXML>

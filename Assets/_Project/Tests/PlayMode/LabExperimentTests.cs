@@ -33,6 +33,8 @@ namespace Eden.Tests.PlayMode
             yield return null;
             runner = UnityEngine.Object.FindFirstObjectByType<LabRunner>();
             Assert.That(runner, Is.Not.Null, "Bootstrap needs a LabRunner");
+            runner.Workspace.Open("simulation");
+            runner.Clock.Resume();
             Track();
         }
 
@@ -154,6 +156,7 @@ namespace Eden.Tests.PlayMode
         public IEnumerator Controls_StartAnIsolatedEvolutionAndChartItsGenerations()
         {
             yield return StartFromControls(LabMode.IsolatedEvolution, preset: 0, seed: 7);
+            yield return Press("analysis");
 
             Assert.That(runner.Mode, Is.EqualTo(LabMode.IsolatedEvolution));
             Assert.That(runner.Evolution.Plan.ExperimentSeed, Is.EqualTo(7UL));
@@ -317,6 +320,7 @@ namespace Eden.Tests.PlayMode
 
             runner.SelectNeighbor(+1);
             runner.RefreshNetwork();
+            yield return Press("inspector-tab-2");
             yield return null;
             yield return null;
             var inspector = runner.Hud.InspectorText;
@@ -560,9 +564,9 @@ namespace Eden.Tests.PlayMode
 
             root.Q<TextField>("composition-field").value = "c*3";
             yield return Press("start-button");
-            Assert.That(runner.BrainKind, Is.EqualTo(LabBrainKind.Heuristic), "a composition that cannot be read is not used");
-            StringAssert.Contains("Composição não usada", runner.GenomeExportStatus);
-            StringAssert.Contains("no genome named c", runner.GenomeExportStatus);
+            Assert.That(runner.BrainKind, Is.EqualTo(LabBrainKind.Composition), "invalid imports preserve the active session");
+            Assert.That(runner.Simulation.World, Is.SameAs(world));
+            StringAssert.Contains("no genome named c", root.Q<Label>("preview-summary").text);
         }
 
         [UnityTest]
@@ -819,7 +823,9 @@ namespace Eden.Tests.PlayMode
             root.Q<DropdownField>("body-field").index = evolvingBody ? 1 : 0;
             root.Q<DropdownField>("algorithm-field").index = neat ? 1 : 0;
             root.Q<DropdownField>("training-field").index = parallelTraining ? 1 : 0;
+            var wasPaused = runner.Clock.IsPaused;
             yield return Press("start-button");
+            if (!wasPaused && runner.Clock.IsPaused) runner.Clock.Resume();
         }
 
         private IEnumerator Press(string buttonName)
@@ -834,8 +840,16 @@ namespace Eden.Tests.PlayMode
 
             yield return null;
             yield return null;
+            if (buttonName == "start-button" && runner.Workspace.IsModal)
+                yield return Press("confirm-discard");
             if (buttonName == "save-button")
                 yield return WaitUntil(() => !runner.CheckpointIsBusy, 30f);
+            if (buttonName == "load-button")
+            {
+                // These regressions exercise exact continuation; the separate workspace suite drives list selection.
+                runner.LoadCheckpoint(runner.CheckpointPath);
+                runner.Workspace.Open("simulation");
+            }
             Track();
         }
 

@@ -212,9 +212,11 @@ namespace Eden.Presentation
         public event Action CopyGenomeDirectoryClicked;
         public event Action UseExportDirectoryClicked;
 
+        public LabWorkspace Workspace { get; set; }
+        private string completeInspector;
         public string RunText => Bind() ? runStats.text : string.Empty;
         public string CheckpointText => Bind() ? checkpointStatus.text : string.Empty;
-        public string InspectorText => Bind() && inspectorVisible ? inspector.text : string.Empty;
+        public string InspectorText => Bind() && inspectorVisible ? completeInspector : string.Empty;
 
         /// <summary>
         /// Directory typed into the seed-pool field, trimmed, or empty when blank; read once when a new evolution
@@ -271,7 +273,9 @@ namespace Eden.Presentation
                 return;
             inspectorVisible = text != null;
             inspectorPanel.style.display = inspectorVisible ? DisplayStyle.Flex : DisplayStyle.None;
+            completeInspector = text;
             inspector.text = text ?? string.Empty;
+            Workspace?.ShowInspector(text);
         }
 
         /// <summary>Shows or hides "Exportar genoma"/"Copiar pasta" (the selected creature has, or has not, an exportable genome).</summary>
@@ -346,6 +350,7 @@ namespace Eden.Presentation
             }
 
             Chart.Show(session);
+            Workspace?.ApplyLayout();
         }
 
         /// <summary>
@@ -543,6 +548,15 @@ namespace Eden.Presentation
             var picked = controls.panel.Pick(panelPosition);
             if (picked == null)
                 return false;
+            if (Workspace != null)
+            {
+                if (Workspace.Screen != "simulation" || Workspace.IsModal || Workspace.IsLoading) return true;
+                var viewport = GetComponent<UIDocument>().rootVisualElement.Q("arena-viewport");
+                if (GetComponent<UIDocument>().rootVisualElement.Q("simulation-main").resolvedStyle.display != DisplayStyle.None &&
+                    viewport.worldBound.Contains(panelPosition) &&
+                    (picked.name == "bootstrap-root" || picked.name == "arena-viewport" || picked.name == "simulation-main" ||
+                     picked.name == "simulation-screen" || picked == GetComponent<UIDocument>().rootVisualElement)) return false;
+            }
             // The document root and its ancestors fill the screen; only elements drawn above the world count.
             for (var element = GetComponent<UIDocument>().rootVisualElement; element != null; element = element.parent)
             {

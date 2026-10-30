@@ -224,6 +224,10 @@ namespace Eden.Presentation
         /// <summary>Directory of the performance report once a measured run has finished; null otherwise.</summary>
         public string BenchmarkDirectory => benchmark?.Directory;
         public LabHud Hud => hud;
+        public LabWorkspace Workspace { get; private set; }
+        public string CheckpointDirectory => Path.GetDirectoryName(CheckpointPath);
+        public string LastManualCheckpointPath { get; private set; }
+        private string requestedManualPath;
 
         /// <summary>File of Salvar/Carregar (persistentDataPath/Checkpoints/lab.json by default); its backup sits next to it.</summary>
         public string CheckpointPath { get; set; }
@@ -409,6 +413,9 @@ namespace Eden.Presentation
         public void RequestCheckpoint()
         {
             if (CheckpointIsBusy) return;
+            requestedManualPath = CheckpointCatalog.NewPath(CheckpointDirectory, Workspace?.Name);
+            CheckpointPath = requestedManualPath;
+            LastManualCheckpointPath = null;
             saveRequested = true;
             ShowCheckpointStatus("Salvando checkpoint em segundo plano…");
         }
@@ -449,7 +456,10 @@ namespace Eden.Presentation
         /// refused file leaves it exactly as it was. The resumed run continues tick for tick as the saved one would have;
         /// its logs go to new directories.
         /// </summary>
-        public bool LoadCheckpoint()
+        public bool LoadCheckpoint() => LoadCheckpointFrom(CheckpointPath, true);
+        public bool LoadCheckpoint(string path) => LoadCheckpointFrom(path, false);
+        internal bool ApplyCheckpoint(string path, Checkpoint checkpoint, CheckpointInfo info) => LoadCheckpointFrom(path, false, checkpoint, info);
+        private bool LoadCheckpointFrom(string path, bool allowBackup, Checkpoint prepared = null, CheckpointInfo preparedInfo = null)
         {
             if (CheckpointIsBusy) { ShowCheckpointStatus("Aguarde o checkpoint terminar antes de carregar."); return false; }
             Checkpoint saved;
@@ -468,7 +478,9 @@ namespace Eden.Presentation
             var name = MlpBrain.BrainName;
             try
             {
-                saved = CheckpointFile.LoadOrBackup(CheckpointPath, out savedInfo, out problem);
+                problem = null;
+                if (prepared != null) { saved = prepared; savedInfo = preparedInfo; }
+                else saved = allowBackup ? CheckpointFile.LoadOrBackup(path, out savedInfo, out problem) : CheckpointFile.Load(path, out savedInfo);
                 loadedMode = ParseMode(saved.Mode);
                 loadedPreset = PresetIndex(saved.Preset);
                 loadedBrain = ParseKind(saved.Brain);
@@ -556,7 +568,7 @@ namespace Eden.Presentation
             metrics = new MetricsRecorder(world.World.Config, world.World.Config.TicksPerSecond);
             if (writeMetrics && session != null)
             {
-                var file = problem == null ? CheckpointPath : CheckpointFile.BackupPath(CheckpointPath);
+                var file = problem == null ? path : CheckpointFile.BackupPath(path);
                 OpenEvolutionLog(new ResumeOrigin(file, savedInfo, saved.Evolution));
             }
             if (writeMetrics && mode == LabMode.SharedWorld)
@@ -573,7 +585,7 @@ namespace Eden.Presentation
                 Clock.Pause();
             worldView.Bind(world.World);
             hud?.ShowChoice(CurrentChoice(), Evolution != null);
-            ShowCheckpointStatus(LabText.CheckpointLoaded(CheckpointPath, world.World.Tick, EvolutionShown, problem));
+            ShowCheckpointStatus(LabText.CheckpointLoaded(path, world.World.Tick, EvolutionShown, problem));
             return true;
         }
 
@@ -821,13 +833,13 @@ namespace Eden.Presentation
                 writeMetrics = false;
             if (hud != null)
             {
-                hud.StartClicked += () => StartExperiment(hud.ReadChoice());
+                hud.StartClicked += () => { if (Workspace != null) Workspace.BeginExperiment(); else StartExperiment(hud.ReadChoice()); };
                 hud.ResumeEvolutionClicked += ResumeEvolution;
                 hud.SaveClicked += RequestCheckpoint;
                 hud.AutoCheckpointChanged += value => AutoCheckpointGenerations = value;
                 hud.RefreshReplayClicked += () => ConfigureFollow(followRanked, followTopCount, followRank, replaySpeed);
                 hud.FollowChanged += (enabled, top, rank, speed) => ConfigureFollow(enabled, top, rank, speed);
-                hud.LoadClicked += () => LoadCheckpoint();
+                hud.LoadClicked += () => { if (Workspace != null) Workspace.OpenLibrary(); else LoadCheckpoint(); };
                 hud.ExportGenomeClicked += () => ExportGenome();
                 hud.CopyGenomeDirectoryClicked += CopyGenomeDirectory;
                 hud.UseExportDirectoryClicked += () => hud.SetSeedGenomesDirectory(GenomeExportDirectory);
@@ -839,6 +851,7 @@ namespace Eden.Presentation
             }
 
             StartRun();
+            if (hud != null && benchmark == null) { Workspace = new LabWorkspace(this, hud); hud.Workspace = Workspace; }
             if (maxSpeed)
                 ToggleMaxSpeed();
             if (benchmark != null)
@@ -849,6 +862,7 @@ namespace Eden.Presentation
 
         private void OnDestroy()
         {
+            Workspace?.Dispose();
             CloseLogs();
             benchmark?.Dispose();
         }
@@ -857,6 +871,7 @@ namespace Eden.Presentation
         {
             HandleInput();
             PumpPersistence();
+            Workspace?.Tick();
             var realDelta = Time.unscaledDeltaTime;
             benchmark?.BeginSimulation();
             var canRun = !ExportBlocked && !SnapshotPending;
@@ -1163,6 +1178,9 @@ namespace Eden.Presentation
             var keyboard = Keyboard.current;
             if (keyboard != null && (hud == null || !hud.IsTyping))
             {
+                if (keyboard.escapeKey.wasPressedThisFrame && Workspace != null) { Workspace.Escape(); return; }
+                if (Workspace?.BlocksSimulationShortcuts == true)
+                { if (keyboard.f9Key.wasPressedThisFrame) Workspace.OpenLibrary(); return; }
                 if (keyboard.spaceKey.wasPressedThisFrame) TogglePause();
                 if (keyboard.periodKey.wasPressedThisFrame) RequestStep();
                 if (keyboard.equalsKey.wasPressedThisFrame || keyboard.numpadPlusKey.wasPressedThisFrame) ScaleSpeed(2f);
@@ -1170,21 +1188,22 @@ namespace Eden.Presentation
                 if (keyboard.mKey.wasPressedThisFrame) ToggleMaxSpeed();
                 if (keyboard.rightBracketKey.wasPressedThisFrame) SelectNeighbor(+1);
                 if (keyboard.leftBracketKey.wasPressedThisFrame) SelectNeighbor(-1);
-                if (keyboard.escapeKey.wasPressedThisFrame) ClearSelection();
-                if (keyboard.rKey.wasPressedThisFrame) StartRun();
+                if (keyboard.escapeKey.wasPressedThisFrame && Workspace == null) ClearSelection();
+                if (keyboard.rKey.wasPressedThisFrame) { if (Workspace != null) Workspace.ConfirmReplacement(StartRun); else StartRun(); }
                 if (keyboard.f5Key.wasPressedThisFrame) RequestCheckpoint();
-                if (keyboard.f9Key.wasPressedThisFrame) LoadCheckpoint();
+                if (keyboard.f9Key.wasPressedThisFrame) { if (Workspace != null) Workspace.OpenLibrary(); else LoadCheckpoint(); }
                 if (keyboard.bKey.wasPressedThisFrame && mode == LabMode.SharedWorld)
-                    UseBrain(brain == LabBrainKind.Heuristic ? LabBrainKind.Random
-                        : brain == LabBrainKind.Random ? LabBrainKind.Neural
-                        : LabBrainKind.Heuristic);
+                {
+                    var next = brain == LabBrainKind.Heuristic ? LabBrainKind.Random : brain == LabBrainKind.Random ? LabBrainKind.Neural : LabBrainKind.Heuristic;
+                    if (Workspace != null) Workspace.ConfirmReplacement(() => UseBrain(next)); else UseBrain(next);
+                }
             }
 
             var mouse = Mouse.current;
             if (mouse == null || !mouse.leftButton.wasPressedThisFrame)
                 return;
             var position = mouse.position.ReadValue();
-            if (hud == null || !hud.IsPointerOverControls(position))
+            if (Workspace?.ConsumesArenaClick != true && (hud == null || !hud.IsPointerOverControls(position)))
                 SelectNearest(worldView.ScreenToArena(position));
         }
 
@@ -1226,6 +1245,7 @@ namespace Eden.Presentation
             if (ExportStatus != null) hud.ShowRun(hud.RunText + "\n" + ExportStatus);
             if (evolving && followRanked) hud.ShowRun(hud.RunText + "\n" + rankedReplay.Describe());
             hud.ShowInspector(Selected.HasValue ? DescribeSelected(Selected.Value) : null);
+            Workspace?.RefreshIndicators();
             hud.SetExportAvailable(ResolveExportableGenome() != null);
         }
 
@@ -1519,6 +1539,7 @@ namespace Eden.Presentation
         private void ShowCheckpointStatus(string text)
         {
             CheckpointStatus = text;
+            Workspace?.Record(text);
             hud?.ShowCheckpointStatus(text);
             RefreshHud();
         }
@@ -1674,6 +1695,7 @@ namespace Eden.Presentation
                 else
                 {
                     if (autoSaveRequested) LastAutoCheckpointPath = pendingCheckpointPath;
+                    else LastManualCheckpointPath = pendingCheckpointPath;
                     ShowCheckpointStatus("Checkpoint salvo: " + pendingCheckpointPath);
                 }
                 checkpointTask = null; pendingCheckpoint = null; saveRequested = false; autoSaveRequested = false;
@@ -1701,7 +1723,7 @@ namespace Eden.Presentation
                 pendingCheckpointPath = autoSaveRequested
                     ? Path.Combine(AutoCheckpointDirectory ?? Path.Combine(Path.GetDirectoryName(CheckpointPath), "Automatic", autoRunId),
                         "generation-" + autoSaveAt.ToString("D6", CultureInfo.InvariantCulture) + ".json")
-                    : CheckpointPath;
+                    : requestedManualPath ?? CheckpointPath;
             }
             var version = UnityEngine.Application.version; var runtime = Runtime(); var utc = DateTime.UtcNow;
             if (evolutionLog != null)

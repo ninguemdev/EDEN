@@ -61,6 +61,8 @@ namespace Eden.Presentation
         private readonly List<FoodId> staleFood = new List<FoodId>();
         private readonly Dictionary<CreatureId, Pose> previous = new Dictionary<CreatureId, Pose>();
         private WorldState previousWorld;
+        private SimulationConfig cameraConfig;
+        private bool viewportInitialized;
         private long previousTick = -1;
         private SpriteRenderer arena;
         private int frame;
@@ -201,9 +203,9 @@ namespace Eden.Presentation
             if (targetCamera != null)
             {
                 targetCamera.orthographic = true;
-                targetCamera.orthographicSize =
-                    Mathf.Max(config.ArenaHeight / 2f, config.ArenaWidth / 2f / targetCamera.aspect) * CameraMargin;
-                targetCamera.transform.position = new Vector3(config.ArenaWidth / 2f, config.ArenaHeight / 2f, -10f);
+                var changed = cameraConfig == null || cameraConfig.ArenaWidth != config.ArenaWidth || cameraConfig.ArenaHeight != config.ArenaHeight;
+                cameraConfig = config;
+                if (changed) FrameArena();
             }
 
             Render(world, null);
@@ -450,6 +452,34 @@ namespace Eden.Presentation
             }
         }
 
+        public void SetViewport(Rect arenaBounds, Rect panelBounds)
+        {
+            if (targetCamera == null || panelBounds.width < 1 || panelBounds.height < 1 || arenaBounds.width < 1 || arenaBounds.height < 1) return;
+            var rect = new Rect((arenaBounds.xMin - panelBounds.xMin) / panelBounds.width,
+                1 - (arenaBounds.yMax - panelBounds.yMin) / panelBounds.height,
+                arenaBounds.width / panelBounds.width, arenaBounds.height / panelBounds.height);
+            targetCamera.rect = rect;
+            if (!viewportInitialized) { viewportInitialized = true; FrameArena(); }
+        }
+        public void FrameArena()
+        {
+            if (targetCamera == null || cameraConfig == null) return;
+            targetCamera.orthographicSize = Mathf.Max(cameraConfig.ArenaHeight / 2f,
+                cameraConfig.ArenaWidth / 2f / targetCamera.aspect) * CameraMargin;
+            targetCamera.transform.position = new Vector3(cameraConfig.ArenaWidth / 2f, cameraConfig.ArenaHeight / 2f, -10f);
+        }
+        public void ZoomArena(float factor)
+        {
+            if (targetCamera == null || cameraConfig == null) return;
+            targetCamera.orthographicSize = Mathf.Clamp(targetCamera.orthographicSize * factor, 1,
+                Mathf.Max(cameraConfig.ArenaWidth, cameraConfig.ArenaHeight) * 2);
+        }
+        public void PanArena(Vector2 pixelDelta)
+        {
+            if (targetCamera == null || targetCamera.pixelHeight < 1) return;
+            var units = 2 * targetCamera.orthographicSize / targetCamera.pixelHeight;
+            targetCamera.transform.position -= new Vector3(pixelDelta.x * units, pixelDelta.y * units, 0);
+        }
         public Vector2 ScreenToArena(Vector2 screenPosition)
         {
             var world = targetCamera.ScreenToWorldPoint(new Vector3(screenPosition.x, screenPosition.y, 0f));
