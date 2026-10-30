@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using Eden.Domain;
 
 namespace Eden.Evolution
 {
@@ -24,7 +25,9 @@ namespace Eden.Evolution
         /// A search stage: needs frozen, fixed targets, scored by targets reached, speed and the best approach to the next
         /// one, in [0, 1] (<see cref="StageScores.Search"/>). The stage runs under search rules.
         /// </summary>
-        Search = 3
+        Search = 3,
+
+        ExploreCollectActive = 4
     }
 
     /// <summary>A measured quantity a stage reports per episode, with its unit and the range its values must fall in.</summary>
@@ -65,6 +68,8 @@ namespace Eden.Evolution
                     return BalancedDry;
                 case StageScoring.Search:
                     return SearchComponents;
+                case StageScoring.ExploreCollectActive:
+                    return ActiveComponents;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(scoring), scoring, "Unknown stage scoring.");
             }
@@ -108,6 +113,30 @@ namespace Eden.Evolution
             new RewardComponent("score_without_aid", "fraction", 0, 1),
             new RewardComponent("uncharged_energy", "energy", 0, double.PositiveInfinity)
         };
+
+        private static readonly RewardComponent[] ActiveComponents = BuildActiveComponents();
+
+        private static RewardComponent[] BuildActiveComponents()
+        {
+            var result = new List<RewardComponent>();
+            foreach (var name in new[] { "exploration", "coverage", "detection", "collection", "base", "score" })
+                result.Add(new RewardComponent(name, "fraction", 0, 1));
+            result.Add(new RewardComponent("multiplier", "factor", 1, 3.5));
+            foreach (var name in new[] { "visited", "goal", "eligible", "detected_food", "detected_water",
+                "collected_food", "collected_water" })
+                result.Add(new RewardComponent(name, "count", 0, double.PositiveInfinity));
+            foreach (var name in new[] { "initial_energy", "final_energy", "maintenance", "movement", "turning", "eyes",
+                "food_energy", "absorbed_energy", "wasted_energy", "initial_hydration", "final_hydration", "drunk",
+                "lived_seconds", "configured_seconds", "death_cause" })
+                result.Add(new RewardComponent(name, name.Contains("seconds") ? "simulated_seconds" : name == "death_cause" ? "enum"
+                    : name.Contains("hydration") || name == "drunk" ? "hydration" : "energy", 0, double.PositiveInfinity));
+            // Fixed target limit keeps per-source audit columns stable across episodes. Missing values remain absent.
+            for (var i = 0; i < SearchTargets.MaxTargets; i++)
+                foreach (var name in new[] { "water_useful", "contact_seconds", "sip_seconds", "collection_seconds", "energy_before_collection", "hydration_before_sip" })
+                    result.Add(new RewardComponent(name + "_" + i, name.Contains("seconds") ? "simulated_seconds" :
+                        name == "energy_before_collection" ? "energy" : "hydration", 0, double.PositiveInfinity));
+            return result.ToArray();
+        }
 
         private const double SearchTargetLimit = 16;
     }

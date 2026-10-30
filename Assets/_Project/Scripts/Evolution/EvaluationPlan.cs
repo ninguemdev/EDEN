@@ -205,6 +205,10 @@ namespace Eden.Evolution
         public SearchWorld Search { get; }
 
         public bool IsSearch => Search != null;
+        public bool ActiveSearch => Reward.Scoring == StageScoring.ExploreCollectActive;
+        public bool FrozenNeeds => IsSearch && !ActiveSearch;
+        public bool RespawnFood => !IsSearch;
+        public bool FinishOnCollection => IsSearch && !ActiveSearch;
 
         public float EpisodeSeconds { get; }
 
@@ -302,10 +306,19 @@ namespace Eden.Evolution
             for (var i = 0; i < templates.Length; i++)
             {
                 var world = i == 0 ? settings.World : further[i - 1].World;
-                if (settings.Profile.Stages[i].Scoring == StageScoring.Search)
+                if (settings.Profile.Stages[i].Scoring == StageScoring.ExploreCollectActive)
+                {
+                    if (settings.Senses != Senses.Eyes || settings.Algorithm != EvolutionAlgorithm.Neat ||
+                        settings.Profile.Parameter(RewardProfiles.WaterTargets, 0) < 1)
+                        errors.Add("active search requires NEAT, eyes-water-v1 and water targets");
+                    ActiveSearchOptions.Read(settings.Profile.Parameters).Check(world);
+                }
+                if (settings.Profile.Stages[i].Scoring == StageScoring.Search ||
+                    settings.Profile.Stages[i].Scoring == StageScoring.ExploreCollectActive)
                     searches[i] = SearchWorld.Choose(world, RewardProfiles.TargetsOf(settings.Profile),
                         i == 0 ? settings.EpisodeSeconds : further[i - 1].EpisodeSeconds,
-                        settings.Profile.Parameter(RewardProfiles.FeasibleFraction, 0.5), $"stage {i + 1}", errors);
+                        settings.Profile.Parameter(RewardProfiles.FeasibleFraction, 0.5), $"stage {i + 1}", errors,
+                        RewardProfiles.IsActive(settings.Profile) ? settings.Profile.ParameterHash : "");
                 templates[i] = searches[i]?.Template ?? Template(world);
             }
 
@@ -342,7 +355,9 @@ namespace Eden.Evolution
                 stages[i] = new EvaluationStage(i, Profile.Stages[i], templates[i], searches[i],
                     stage?.EpisodeSeconds ?? settings.EpisodeSeconds,
                     stage?.TrainingSeedsPerGeneration ?? settings.TrainingSeedsPerGeneration,
+                    IsActiveProfile(settings.Profile) ? SplitMix64.Output(trainingRoot, LogicalTag(Profile.Stages[i].Name)) :
                     staged ? SplitMix64.Output(trainingRoot, StageTag + (ulong)i) : trainingRoot,
+                    IsActiveProfile(settings.Profile) ? SplitMix64.Output(validationRoot, LogicalTag(Profile.Stages[i].Name)) :
                     staged ? SplitMix64.Output(validationRoot, StageTag + (ulong)i) : validationRoot,
                     stage?.ValidationSeedCount ?? settings.ValidationSeedCount);
                 TrainingSeedsPerGeneration += stages[i].TrainingSeedsPerGeneration;
@@ -379,7 +394,10 @@ namespace Eden.Evolution
         public IReadOnlyList<EvaluationStage> Stages => stages;
 
         /// <summary>How seeds are derived: <see cref="SeedSchemeVersion"/> for one stage, else <see cref="StagedSeedSchemeVersion"/>.</summary>
-        public int SeedScheme => stages.Length == 1 ? SeedSchemeVersion : StagedSeedSchemeVersion;
+        public int SeedScheme => IsActiveProfile(Profile) ? LogicalSeedSchemeVersion : stages.Length == 1 ? SeedSchemeVersion : StagedSeedSchemeVersion;
+        public const int LogicalSeedSchemeVersion = 3;
+        private static bool IsActiveProfile(RewardProfile profile) => RewardProfiles.IsActive(profile);
+        private static ulong LogicalTag(string role) => role == RewardProfiles.SearchStage ? 0x7372636833UL : 0x72657333UL;
 
         /// <summary>Episode length of the first stage.</summary>
         public float EpisodeSeconds => stages[0].EpisodeSeconds;

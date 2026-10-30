@@ -15,7 +15,9 @@ namespace Eden.Application
         TwoStage = 1,
 
         /// <summary>Balanced resources alone, with or without water (the world decides).</summary>
-        Resources = 2
+        Resources = 2,
+        SearchActive = 3,
+        TwoStageActive = 4
     }
 
     /// <summary>
@@ -27,24 +29,36 @@ namespace Eden.Application
     {
         public ProfileKind Kind = ProfileKind.Legacy;
         public TwoStageOptions TwoStage = new TwoStageOptions();
+        public ActiveSearchOptions Active = new ActiveSearchOptions();
 
         public ProfileChoice Clone()
         {
             var copy = (ProfileChoice)MemberwiseClone();
             copy.TwoStage = TwoStage.Clone();
+            copy.Active = Active.Clone();
             return copy;
         }
 
         /// <summary>Reads one option; false when <paramref name="name"/> is not one of these options.</summary>
         public bool TryRead(string name, string value)
         {
+            if (name.StartsWith("-eden-search-", StringComparison.Ordinal))
+            {
+                var key = name.Substring("-eden-search-".Length);
+                foreach (var field in typeof(ActiveSearchOptions).GetFields())
+                    if (string.Equals(field.Name, key.Replace("-", ""), StringComparison.OrdinalIgnoreCase))
+                    { field.SetValue(Active, Number(name, value)); return true; }
+                throw Invalid(name, value, "an active search option");
+            }
             switch (name)
             {
                 case "-eden-profile":
                     Kind = value == "legacy" ? ProfileKind.Legacy
                         : value == "two-stage" ? ProfileKind.TwoStage
                         : value == "resources" ? ProfileKind.Resources
-                        : throw Invalid(name, value, "legacy, two-stage or resources");
+                        : value == "search-active" ? ProfileKind.SearchActive
+                        : value == "two-stage-active" ? ProfileKind.TwoStageActive
+                        : throw Invalid(name, value, "legacy, two-stage, resources, search-active or two-stage-active");
                     return true;
                 case "-eden-stage1-weight":
                     TwoStage.SearchWeight = Number(name, value);
@@ -104,13 +118,16 @@ namespace Eden.Application
                         TwoStage.SurvivalWeight, TwoStage.ReplenishWeight, TwoStage.ReservesWeight);
                     settings.FurtherStages = null;
                     break;
+                case ProfileKind.SearchActive:
+                case ProfileKind.TwoStageActive:
                 case ProfileKind.TwoStage:
                     var options = TwoStage.Clone();
                     options.ResourceFood = scenario?.Food.HasValue == true ? (int?)null : options.ResourceFood;
                     options.ResourceObstacles = scenario != null && scenario.Obstacles != ObstacleLayout.None
                         ? null
                         : options.ResourceObstacles;
-                    RewardProfiles.UseTwoStageSearch(settings, options);
+                    if (Kind == ProfileKind.TwoStage) RewardProfiles.UseTwoStageSearch(settings, options);
+                    else RewardProfiles.UseActiveSearch(settings, options, Active, Kind == ProfileKind.SearchActive);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(Kind), Kind, "Unknown profile.");
@@ -126,13 +143,22 @@ namespace Eden.Application
                 return choice;
             var options = RewardProfiles.OptionsOf(profile.Parameters);
             choice.TwoStage = options;
-            if (profile.Id != RewardProfiles.TwoStageSearchId)
+            if (RewardProfiles.IsActive(profile))
+            {
+                choice.Kind = profile.Id == RewardProfiles.ActiveSearchId ? ProfileKind.SearchActive : ProfileKind.TwoStageActive;
+                choice.Active = ActiveSearchOptions.Read(profile.Parameters);
+            }
+            else if (profile.Id == RewardProfiles.BalancedResourcesId || profile.Id == RewardProfiles.BalancedResourcesDryId)
             {
                 choice.Kind = ProfileKind.Resources;
                 return choice;
             }
 
-            choice.Kind = ProfileKind.TwoStage;
+            if (!RewardProfiles.IsActive(profile))
+            {
+                if (profile.Id != RewardProfiles.TwoStageSearchId) throw new ArgumentException("Unsupported profile choice: " + profile.Id);
+                choice.Kind = ProfileKind.TwoStage;
+            }
             var search = settings.FurtherStages != null && settings.FurtherStages.Count > 0 ? settings.FurtherStages[0] : null;
             if (search != null)
             {
@@ -143,6 +169,14 @@ namespace Eden.Application
                 options.SearchValidationSeeds = search.ValidationSeedCount;
             }
 
+            if (choice.Kind == ProfileKind.SearchActive)
+            {
+                options.SearchSeconds = settings.EpisodeSeconds;
+                options.SearchArena = settings.World.ArenaWidth;
+                options.SearchObstacles = ObstacleLayouts.Identify(settings.World) ?? ObstacleLayout.None;
+                options.SearchTrainingSeeds = settings.TrainingSeedsPerGeneration;
+                options.SearchValidationSeeds = settings.ValidationSeedCount;
+            }
             // The resources world already is what the run was started with.
             options.ResourceFood = null;
             options.ResourceObstacles = null;
@@ -151,6 +185,7 @@ namespace Eden.Application
 
         /// <summary>Name of a profile on the command line.</summary>
         public static string Name(ProfileKind kind) =>
+            kind == ProfileKind.SearchActive ? "search-active" : kind == ProfileKind.TwoStageActive ? "two-stage-active" :
             kind == ProfileKind.TwoStage ? "two-stage" : kind == ProfileKind.Resources ? "resources" : "legacy";
 
         private static double Number(string name, string value)

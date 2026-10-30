@@ -14,9 +14,10 @@ namespace Eden.Application
     /// </summary>
     public sealed class EpisodeTracker
     {
-        private readonly List<int> collected = new List<int>();
-        private readonly List<long> ticks = new List<long>();
-        private readonly List<float> speeds = new List<float>();
+        public ActiveSearchState Active { get; set; }
+        private readonly List<int> collected = new List<int>(SearchTargets.MaxTargets);
+        private readonly List<long> ticks = new List<long>(SearchTargets.MaxTargets);
+        private readonly List<float> speeds = new List<float>(SearchTargets.MaxTargets);
 
         public EpisodeTracker()
         {
@@ -75,7 +76,7 @@ namespace Eden.Application
 
         public EpisodeTracker Clone() =>
             new EpisodeTracker(AbsorbedEnergy, WastedEnergy, Drunk, UnchargedEnergy, collected, ticks, speeds,
-                SegmentStartTick, SegmentStart, SegmentDistance, BestDistance);
+                SegmentStartTick, SegmentStart, SegmentDistance, BestDistance) { Active = Active?.Clone() };
 
         internal void Begin(SearchLayout layout, Float2 founder)
         {
@@ -92,6 +93,11 @@ namespace Eden.Application
             WastedEnergy += energy.Overflow;
             UnchargedEnergy += energy.Uncharged;
             Drunk += simulation.LastHydration.Drunk;
+            if (Active != null)
+            {
+                Active.AfterTick(simulation, creature, layout, this);
+                return;
+            }
             if (layout == null || !creature.IsAlive)
                 return;
 
@@ -124,6 +130,12 @@ namespace Eden.Application
             {
                 BestDistance = Math.Min(BestDistance, Nearest(layout, creature.Position));
             }
+        }
+
+        internal void CollectActive(int target, long tick)
+        {
+            if (IsCollected(target)) return;
+            collected.Add(target); ticks.Add(tick); speeds.Add(0);
         }
 
         // Path length to the nearest target not reached yet; 0 once all are.

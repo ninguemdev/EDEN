@@ -22,6 +22,14 @@ namespace Eden.Evolution
             return Valid(survivalWeight * survival + replenishWeight * replenished + reservesWeight * reserves);
         }
 
+        public static float ExploreCollect(double exploration, double detection, double collection)
+        {
+            foreach (var value in new[] { exploration, detection, collection })
+                if (double.IsNaN(value) || double.IsInfinity(value) || value < 0 || value > 1)
+                    throw new ArgumentOutOfRangeException(nameof(exploration), "E, D and C must be finite in [0, 1].");
+            return (float)((0.65 * exploration + 0.35 * collection) * (1 + 0.5 * detection + 2 * collection) / 3.5);
+        }
+
         /// <summary>Share of <paramref name="need"/> that <paramref name="taken"/> covers, capped at 1 (1 when nothing is needed).</summary>
         public static double Replenished(double taken, double need) => need > 0 ? Clamp01(taken / need) : 1;
 
@@ -119,6 +127,10 @@ namespace Eden.Evolution
         public const string BalancedResourcesId = "balanced-resources-v1";
         public const string BalancedResourcesDryId = "balanced-resources-dry-v1";
         public const string TwoStageSearchId = "two-stage-search-v1";
+        public const string ActiveSearchId = "search-explore-collect-active-v1";
+        public const string ActiveTwoStageId = "two-stage-explore-collect-active-v1";
+        public static bool IsActive(RewardProfile profile) =>
+            profile.Id == ActiveSearchId || profile.Id == ActiveTwoStageId;
 
         public const string ResourcesStage = "resources";
         public const string SearchStage = "search";
@@ -231,6 +243,9 @@ namespace Eden.Evolution
                         Value(ReplenishWeight, 0.3), Value(ReservesWeight, 0.2));
                 case TwoStageSearchId:
                     return TwoStageSearch(OptionsOf(parameters));
+                case ActiveSearchId:
+                case ActiveTwoStageId:
+                    return ActiveSearch(OptionsOf(parameters), ActiveSearchOptions.Read(parameters), id == ActiveSearchId);
                 default:
                     return null;
             }
@@ -316,6 +331,39 @@ namespace Eden.Evolution
                         : settings.ValidationSeedCount
                 }
             };
+        }
+
+        public static RewardProfile ActiveSearch(TwoStageOptions search, ActiveSearchOptions active, bool onlySearch)
+        {
+            active.Validate();
+            if (active.MaxAge < search.SearchSeconds) throw new ArgumentException("Search maximum age precedes its time limit.");
+            var old = TwoStageSearch(search); // validates shared layout and resource options
+            var parameters = new List<RewardParameter>(old.Parameters);
+            parameters.AddRange(active.Parameters());
+            var names = new List<string>();
+            foreach (var component in RewardComponent.Of(StageScoring.ExploreCollectActive)) names.Add(component.Name);
+            var stage = new RewardStage(SearchStage, onlySearch ? 1 : search.SearchWeight,
+                StageScoring.ExploreCollectActive, names.ToArray());
+            return new RewardProfile(onlySearch ? ActiveSearchId : ActiveTwoStageId,
+                onlySearch ? new[] { stage } : new[] { old.Stages[0], stage }, parameters);
+        }
+
+        public static void UseActiveSearch(EvolutionSettings settings, TwoStageOptions search,
+            ActiveSearchOptions active, bool onlySearch)
+        {
+            var profile = ActiveSearch(search, active, onlySearch);
+            UseTwoStageSearch(settings, search);
+            var stage = settings.FurtherStages[0];
+            active.Apply(stage.World);
+            if (onlySearch)
+            {
+                settings.World = stage.World;
+                settings.EpisodeSeconds = stage.EpisodeSeconds;
+                settings.TrainingSeedsPerGeneration = stage.TrainingSeedsPerGeneration;
+                settings.ValidationSeedCount = stage.ValidationSeedCount;
+                settings.FurtherStages = null;
+            }
+            settings.Profile = profile;
         }
 
         private static RewardStage ResourcesStageOf(bool water, double weight) =>

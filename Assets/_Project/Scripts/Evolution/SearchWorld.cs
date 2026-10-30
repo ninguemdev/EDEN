@@ -74,9 +74,9 @@ namespace Eden.Evolution
 
         /// <summary>The search world of a stage, or null with the reasons added to <paramref name="errors"/>.</summary>
         public static SearchWorld Choose(SimulationSettings world, SearchTargets targets, float seconds,
-            double feasibleFraction, string stage, List<string> errors)
+            double feasibleFraction, string stage, List<string> errors, string rulesIdentity = "")
         {
-            var key = string.Join("|", stage, Describe(world), targets.Food, targets.Water,
+            var key = string.Join("|", rulesIdentity, stage, Describe(world), targets.Food, targets.Water,
                 targets.MinDistance.ToString("R"), targets.WaterSide.ToString("R"), targets.MaxArenaSide.ToString("R"),
                 seconds.ToString("R"), feasibleFraction.ToString("R"));
             lock (Chosen)

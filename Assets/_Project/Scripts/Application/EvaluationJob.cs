@@ -52,7 +52,10 @@ namespace Eden.Application
                 Simulation = new WorldSimulation(SearchWorldState(config, expressed));
             if (savedWorld == null)
                 Simulation.World.Creatures[0].Eyes = eyes;
-            Simulation.FrozenNeeds = Layout != null;
+            Simulation.FrozenNeeds = this.stage.FrozenNeeds;
+            Simulation.RespawnFood = this.stage.RespawnFood;
+            if (!Simulation.RespawnFood && Simulation.SnapshotAgenda().Length != 0)
+                throw new ArgumentException("A search episode cannot have food respawns pending.");
 
             if (Simulation.World.Creatures.Count != 1 || Simulation.World.Creatures[0].Id != new CreatureId(1) ||
                 Tick >= this.stage.EpisodeTicks)
@@ -74,7 +77,18 @@ namespace Eden.Application
                     Tracker.Begin(Layout, Creature.Position);
             }
 
+            if (this.stage.ActiveSearch)
+            {
+                var options = ActiveSearchOptions.Read(plan.Profile.Parameters);
+                if (savedWorld == null) Tracker.Active = new ActiveSearchState(Layout, options, Creature);
+                else if (Tracker.Active == null) throw new ArgumentException("Missing active search tracker.");
+                else Tracker.Active.Restore(Layout, options, Tick, Tracker, Creature);
+            }
+            else if (Tracker?.Active != null) throw new ArgumentException("Active tracker in an old profile.");
             Controller = new BrainController(config, _ => createBrain());
+            if (this.stage.ActiveSearch)
+                Simulation.TargetSeen = (id, resource, water) =>
+                { if (Controller.WillDecide(id)) Tracker.Active.Detect(resource, water, Layout); };
             if (savedBrains != null)
                 Controller.Restore(savedBrains);
             EpisodeSeed = episodeSeed;
@@ -107,7 +121,7 @@ namespace Eden.Application
         public long Tick => Simulation.World.Tick;
 
         public bool IsFinished => Tick >= stage.EpisodeTicks || Simulation.IsExtinct ||
-                                  Layout != null && Tracker.Collected.Count == Layout.TargetCount;
+                                  stage.FinishOnCollection && Tracker.Collected.Count == Layout.TargetCount;
 
         /// <summary>Simulates up to <paramref name="maxTicks"/> ticks and returns how many ran.</summary>
         public long Advance(long maxTicks)
@@ -115,6 +129,7 @@ namespace Eden.Application
             var ran = 0L;
             while (ran < maxTicks && !IsFinished)
             {
+                Tracker?.Active?.BeforeTick(Creature);
                 Simulation.Step(Controller);
                 Tracker?.AfterTick(Simulation, Creature, Layout);
                 ran++;
@@ -132,14 +147,61 @@ namespace Eden.Application
                     stage.EpisodeSeconds, Creature.FoodEnergyEaten, Creature.AgeTicks, Creature.IsAlive, Creature.Energy,
                     stage: stage.Index);
 
+            if (stage.ActiveSearch)
+            {
+                var exact = new Dictionary<string, double>();
+                var activeScore = ActiveScore(exact);
+                var precise = new double[stage.Reward.Components.Count]; var rounded = new float[precise.Length];
+                for (var i = 0; i < precise.Length; i++)
+                {
+                    precise[i] = exact.TryGetValue(stage.Reward.Components[i].Name, out var measured) ? measured : double.NaN;
+                    rounded[i] = (float)precise[i];
+                }
+                return new EpisodeResult(mode, generation, Candidate, SeedIndex, EpisodeSeed, stage.EpisodeTicks,
+                    stage.EpisodeSeconds, Creature.FoodEnergyEaten, Creature.AgeTicks, Creature.IsAlive, Creature.Energy,
+                    rounded, stage.Index, activeScore, precise);
+            }
             var values = new Dictionary<string, float>();
             var score = stage.IsSearch ? SearchScore(values) : ResourcesScore(values);
             var components = new float[stage.Reward.Components.Count];
             for (var i = 0; i < components.Length; i++)
-                components[i] = values[stage.Reward.Components[i].Name];
+                components[i] = values.TryGetValue(stage.Reward.Components[i].Name, out var value) ? value : float.NaN;
             return new EpisodeResult(mode, generation, Candidate, SeedIndex, EpisodeSeed, stage.EpisodeTicks,
                 stage.EpisodeSeconds, Creature.FoodEnergyEaten, Creature.AgeTicks, Creature.IsAlive, Creature.Energy,
                 components, stage.Index, score);
+        }
+
+        private float ActiveScore(Dictionary<string, double> values)
+        {
+            var a = Tracker.Active;
+            values["exploration"] = a.Exploration; values["coverage"] = (double)a.Unique / a.Eligible;
+            values["detection"] = a.Detection; values["collection"] = a.Collection;
+            values["base"] = a.Base; values["multiplier"] = a.Multiplier; values["score"] = a.Score;
+            values["visited"] = a.Unique; values["goal"] = a.Goal; values["eligible"] = a.Eligible;
+            var detectedFood = 0; var detectedWater = 0; var collectedFood = 0; var collectedWater = 0;
+            for (var i = 0; i < Layout.TargetCount; i++)
+            {
+                if (a.Detected[i]) { if (Layout.IsWater(i)) detectedWater++; else detectedFood++; }
+                if (a.CollectedTicks[i] >= 0) { if (Layout.IsWater(i)) collectedWater++; else collectedFood++; }
+                var dt = (double)Simulation.World.Config.TickDuration;
+                if (a.ContactTicks[i] >= 0) values["contact_seconds_" + i] = (a.ContactTicks[i] * dt);
+                if (a.SipTicks[i] >= 0) values["sip_seconds_" + i] = (a.SipTicks[i] * dt);
+                if (a.CollectedTicks[i] >= 0) values["collection_seconds_" + i] = (a.CollectedTicks[i] * dt);
+                if (!double.IsNaN(a.EnergyAtCollection[i])) values["energy_before_collection_" + i] = a.EnergyAtCollection[i];
+                if (!double.IsNaN(a.HydrationAtSip[i])) values["hydration_before_sip_" + i] = a.HydrationAtSip[i];
+                if (Layout.IsWater(i)) values["water_useful_" + i] = a.WaterUseful[i - Layout.Food.Count];
+            }
+            values["detected_food"] = detectedFood; values["detected_water"] = detectedWater;
+            values["collected_food"] = collectedFood; values["collected_water"] = collectedWater;
+            values["initial_energy"] = a.InitialEnergy; values["final_energy"] = Creature.Energy;
+            values["maintenance"] = a.Maintenance; values["movement"] = a.Movement;
+            values["turning"] = a.Turning; values["eyes"] = a.Eyes;
+            values["food_energy"] = Creature.FoodEnergyEaten; values["absorbed_energy"] = Tracker.AbsorbedEnergy;
+            values["wasted_energy"] = Tracker.WastedEnergy; values["drunk"] = Tracker.Drunk;
+            values["initial_hydration"] = a.InitialHydration; values["final_hydration"] = Creature.Hydration;
+            values["lived_seconds"] = (Creature.AgeTicks * (double)Simulation.World.Config.TickDuration);
+            values["configured_seconds"] = stage.EpisodeSeconds; values["death_cause"] = (int)Creature.DeathCause;
+            return a.Score;
         }
 
         // Balanced resources (StageScores.BalancedResources): basal need over the configured duration as the measure of
@@ -504,7 +566,7 @@ namespace Eden.Application
             if (!(result.FoodEnergy >= 0f) || float.IsInfinity(result.FoodEnergy) || result.SurvivedTicks < 1 ||
                 result.SurvivedTicks > stage.EpisodeTicks ||
                 !(result.FinalEnergy >= 0f && result.FinalEnergy <= maxEnergy[stage.Index]) ||
-                result.Survived && (result.FinalEnergy <= 0f || result.SurvivedTicks != stage.EpisodeTicks && !stage.IsSearch) ||
+                result.Survived && (result.FinalEnergy <= 0f || result.SurvivedTicks != stage.EpisodeTicks && !stage.FinishOnCollection) ||
                 result.HasScore != (stage.Reward.Scoring != StageScoring.FoodEnergyPerSecond) ||
                 result.HasScore && !(result.Fitness >= 0f && result.Fitness <= 1f))
                 throw new ArgumentException($"Saved episode {candidate}×{seedIndex} has impossible values.", nameof(result));

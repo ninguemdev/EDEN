@@ -40,9 +40,10 @@ namespace Eden.Evolution
         /// <param name="score">The stage's score; null for the legacy scoring, whose score is the legacy fitness.</param>
         public EpisodeResult(EvaluationMode mode, int generation, int candidate, int seedIndex, ulong episodeSeed,
             long episodeTicks, float episodeSeconds, float foodEnergy, long survivedTicks, bool survived, float finalEnergy,
-            IReadOnlyList<float> components = null, int stage = 0, float? score = null)
+            IReadOnlyList<float> components = null, int stage = 0, float? score = null, IReadOnlyList<double> preciseComponents = null)
         {
             Components = components;
+            PreciseComponents = preciseComponents;
             Stage = stage;
             Mode = mode;
             Generation = generation;
@@ -97,6 +98,7 @@ namespace Eden.Evolution
 
         /// <summary>Further reward components of the episode's stage; null when the stage reports none beyond the fields.</summary>
         public IReadOnlyList<float> Components { get; }
+        public IReadOnlyList<double> PreciseComponents { get; }
 
         public bool IsValid => Evolution.Fitness.IsValid(Fitness);
     }
