@@ -72,6 +72,9 @@ namespace Eden.Presentation
             var episode = job.Current;
             var text = new StringBuilder();
             text.AppendLine("Evolução por gerações · AVALIAÇÃO ISOLADA");
+            text.AppendLine(session.EvaluationWorkers > 1
+                ? $"Treino paralelo (CPU): até {session.EvaluationWorkers} episódios independentes · a arena mostra um deles"
+                : "Treino sequencial: um episódio por vez");
             var neat = plan.Algorithm == EvolutionAlgorithm.Neat;
             text.AppendLine($"Cada genoma sozinho no mesmo mundo de cada seed ({plan.EpisodeSeconds:0} s); sem competição. " +
                             (neat
@@ -83,7 +86,7 @@ namespace Eden.Presentation
                             $"{CandidateLabel(session)} ({episode.Candidate + 1}/{job.CandidateCount}), " +
                             $"seed {episode.SeedIndex + 1}/{job.SeedCount}");
             text.AppendLine($"Episódio {episode.Tick * (double)episode.Simulation.World.Config.TickDuration:0.0} s " +
-                            $"de {plan.EpisodeSeconds:0} s  ·  episódios {job.CompletedEpisodes}/{job.TotalEpisodes}");
+                            $"de {episode.EpisodeSeconds:0} s  ·  episódios {job.CompletedEpisodes}/{job.TotalEpisodes}");
             AppendSpeed(text, clock);
             text.AppendLine($"Preset {PresetLabel(preset)}  ·  Seed do experimento {plan.ExperimentSeed}  ·  " +
                             $"validação a cada {session.ValidationInterval} gerações em {plan.ValidationSeedCount} seeds separadas");
@@ -91,6 +94,9 @@ namespace Eden.Presentation
                 ? "Corpo fixo (controle): todos com o corpo de referência"
                 : "Corpo evolutivo: tamanho, velocidade, sensor e eficiência herdados e mutados, cada um com custo");
 
+            var curriculum = session.Evolution.Settings;
+            if (curriculum.CurriculumEnabled)
+                text.AppendLine($"Curr\u00edculo: {Curriculum.Names[curriculum.CurriculumStage]} | dom\u00ednio {curriculum.CurriculumStreak}/20 gera\u00e7\u00f5es | valida\u00e7\u00e3o na arena final");
             var last = session.LastTraining?.Summary;
             var structure = session.LastTraining?.Neat;
             if (last != null && structure != null)
@@ -143,9 +149,10 @@ namespace Eden.Presentation
             var episode = job.Current;
             return $"Episódio isolado: {PhaseLabel(session.Phase)} · geração {job.Generation} · " +
                    $"seed {episode.SeedIndex + 1} de {job.SeedCount}\n" +
-                   $"{episode.Tick * (double)config.TickDuration:0.0} s de {session.Plan.EpisodeSeconds:0} s · " +
+                   $"{episode.Tick * (double)config.TickDuration:0.0} s de {episode.EpisodeSeconds:0} s · " +
                    (session.CurrentIndividual == null
                        ? "cérebro de referência"
+                       : session.Plan.CurriculumEnabled ? "Sele\u00e7\u00e3o: compet\u00eancia, alimenta\u00e7\u00e3o sustent\u00e1vel e efici\u00eancia"
                        : "fitness = comida ingerida / duração do episódio");
         }
 

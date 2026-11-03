@@ -55,6 +55,8 @@ namespace Eden.Domain
 
         /// <summary>Total food energy eaten during this life, before clamping to the energy maximum.</summary>
         public float FoodEnergyEaten { get; set; }
+        public float UsefulFoodEnergy { get; set; }
+        public int FoodItemsEaten { get; set; }
 
         /// <summary>Parent of a creature born in the world; null for a creature the run started with.</summary>
         public CreatureId? Parent { get; set; }

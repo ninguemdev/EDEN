@@ -10,8 +10,8 @@ namespace Eden.Application
     /// Runs candidates in isolated episodes: each candidate is the only creature of a world built from the episode
     /// seed, so every candidate meets the same arena, food, start position, heading and brain stream, and nobody can
     /// take food from anybody else. A genome's body genes shape its creature as the plan expresses them; reference
-    /// brains always have the reference body. Episodes run sequentially, either all at once or as an <see cref="EvaluationJob"/>
-    /// advanced a few ticks at a time; both give the same results.
+    /// brains always have the reference body. An <see cref="EvaluationJob"/> can run sequentially or on CPU workers,
+    /// either all at once or a few ticks at a time; all paths give the same ordered results.
     /// </summary>
     public sealed class IsolatedEvaluator
     {

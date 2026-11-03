@@ -10,7 +10,7 @@ namespace Eden.Presentation
     public readonly struct LabChoice
     {
         public LabChoice(LabMode mode, int preset, int seed, LabBrainKind brain, bool evolvingBody = false,
-            bool neat = false, bool eyes = false, bool evolvingEyes = false)
+            bool neat = false, bool eyes = false, bool evolvingEyes = false, bool parallelTraining = false)
         {
             Eyes = eyes || evolvingEyes;
             EvolvingEyes = evolvingEyes;
@@ -20,6 +20,7 @@ namespace Eden.Presentation
             Brain = brain;
             EvolvingBody = evolvingBody;
             Neat = neat;
+            ParallelTraining = parallelTraining;
         }
 
         public LabMode Mode { get; }
@@ -38,6 +39,7 @@ namespace Eden.Presentation
 
         /// <summary>The eyes' orientation, aperture and range are inherited with mutation.</summary>
         public bool EvolvingEyes { get; }
+        public bool ParallelTraining { get; }
     }
 
     /// <summary>
@@ -49,9 +51,10 @@ namespace Eden.Presentation
     public sealed class LabHud : MonoBehaviour
     {
         public static readonly string[] ModeChoices = { "Mundo compartilhado", "Evolução (avaliação isolada)" };
-        public static readonly string[] PresetChoices = { "Mínimo (32)", "Padrão (64)", "Estresse (128)" };
+        public static readonly string[] PresetChoices = { "Mínimo (32)", "Padrão (64)", "Estresse (128)", "Mil (1000)" };
         public static readonly string[] BodyChoices = { "Fixo (controle)", "Evolutivo (4 genes)" };
         public static readonly string[] AlgorithmChoices = { "MLP fixa (controle)", "NEAT (topologia evolui)" };
+        public static readonly string[] TrainingChoices = { "Sequencial", "Paralelo (CPU)" };
         public static readonly string[] SensesChoices =
             { "Legados (círculo + radar)", "Olhos fixos (requer NEAT)", "Olhos evolutivos (requer NEAT)" };
 
@@ -79,6 +82,7 @@ namespace Eden.Presentation
         private DropdownField bodyField;
         private DropdownField algorithmField;
         private DropdownField sensesField;
+        private DropdownField trainingField;
         private Label networkTitle;
         private Label networkLegend;
         private IntegerField seedField;
@@ -259,6 +263,7 @@ namespace Eden.Presentation
             bodyField.SetValueWithoutNotify(BodyChoices[choice.EvolvingBody ? 1 : 0]);
             algorithmField.SetValueWithoutNotify(AlgorithmChoices[choice.Neat || choice.Eyes ? 1 : 0]);
             sensesField.SetValueWithoutNotify(SensesChoices[choice.EvolvingEyes ? 2 : choice.Eyes ? 1 : 0]);
+            trainingField.SetValueWithoutNotify(TrainingChoices[choice.ParallelTraining ? 1 : 0]);
             seedField.SetValueWithoutNotify(choice.Seed);
             UpdateBrainField();
             resumeButton.style.display = evolutionAvailable && choice.Mode == LabMode.SharedWorld
@@ -282,7 +287,7 @@ namespace Eden.Presentation
             var brain = Math.Max(0, brainField.index);
             return new LabChoice((LabMode)Math.Max(0, modeField.index), Math.Max(0, presetField.index),
                 Math.Max(0, seedField.value), (LabBrainKind)brain, bodyField.index == 1, algorithmField.index == 1,
-                sensesField.index >= 1, sensesField.index == 2);
+                sensesField.index >= 1, sensesField.index == 2, trainingField.index == 1);
         }
 
         /// <summary>True while the user types into a text field, so key shortcuts must be ignored.</summary>
@@ -342,6 +347,7 @@ namespace Eden.Presentation
             bodyField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             algorithmField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             sensesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
+            trainingField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
             seedGenomesField.SetEnabled(modeField.index == (int)LabMode.IsolatedEvolution);
         }
 
@@ -409,6 +415,9 @@ namespace Eden.Presentation
             sensesField = root.Q<DropdownField>("senses-field");
             sensesField.choices = new List<string>(SensesChoices);
             sensesField.index = 0;
+            trainingField = root.Q<DropdownField>("training-field");
+            trainingField.choices = new List<string>(TrainingChoices);
+            trainingField.index = 0;
             // Eyes need NEAT: choosing eyes picks NEAT, and choosing the MLP control goes back to the legacy senses.
             sensesField.RegisterValueChangedCallback(change =>
             {

@@ -33,7 +33,8 @@ namespace Eden.Evolution
     public readonly struct EpisodeResult
     {
         public EpisodeResult(EvaluationMode mode, int generation, int candidate, int seedIndex, ulong episodeSeed,
-            long episodeTicks, float episodeSeconds, float foodEnergy, long survivedTicks, bool survived, float finalEnergy)
+            long episodeTicks, float episodeSeconds, float foodEnergy, long survivedTicks, bool survived, float finalEnergy,
+            bool competence = false, int foodItems = 0, float usefulFoodEnergy = 0, float approach = 0)
         {
             Mode = mode;
             Generation = generation;
@@ -46,6 +47,12 @@ namespace Eden.Evolution
             Survived = survived;
             FinalEnergy = finalEnergy;
             Fitness = Evolution.Fitness.FromFood(foodEnergy, episodeSeconds);
+            EpisodeSeconds = episodeSeconds;
+            Competence = competence;
+            FoodItems = competence ? foodItems : 0;
+            UsefulFoodEnergy = competence ? usefulFoodEnergy : 0;
+            Approach = competence ? approach : 0;
+            if (competence) Fitness = CompetenceFitness.Score(new[] { this });
         }
 
         public EvaluationMode Mode { get; }
@@ -60,6 +67,11 @@ namespace Eden.Evolution
         /// <summary>Configured episode length; the same for every result of a plan.</summary>
         public long EpisodeTicks { get; }
 
+        public float EpisodeSeconds { get; }
+        public bool Competence { get; }
+        public int FoodItems { get; }
+        public float UsefulFoodEnergy { get; }
+        public float Approach { get; }
         public float FoodEnergy { get; }
         public float Fitness { get; }
 
@@ -70,7 +82,9 @@ namespace Eden.Evolution
         public bool Survived { get; }
 
         public float FinalEnergy { get; }
-        public bool IsValid => Evolution.Fitness.IsValid(Fitness);
+        public bool IsValid => Evolution.Fitness.IsValid(Fitness) && (!Competence ||
+            (EpisodeTicks > 0 && SurvivedTicks >= 0 && SurvivedTicks <= EpisodeTicks && FoodItems >= 0 &&
+             UsefulFoodEnergy >= 0 && UsefulFoodEnergy <= FoodEnergy && Approach >= 0 && Approach <= 1));
     }
 
     /// <summary>Aggregate of one candidate over its seeds; keeps the per-seed results it was computed from.</summary>
@@ -98,7 +112,7 @@ namespace Eden.Evolution
             }
 
             var count = episodes.Count;
-            MeanFitness = valid ? (float)(fitness / count) : Fitness.Worst;
+            MeanFitness = valid ? (episodes[0].Competence ? CompetenceFitness.Score(episodes) : (float)(fitness / count)) : Fitness.Worst;
             MeanFoodEnergy = (float)(food / count);
             SurvivalRate = (float)survivors / count;
             MeanSurvivedSeconds = (float)(survivedSeconds / count);

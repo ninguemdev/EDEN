@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Eden.Brains;
 using Eden.Domain;
 using Eden.Evolution;
@@ -34,12 +35,40 @@ namespace Eden.Application
             if (createBrain == null)
                 throw new ArgumentNullException(nameof(createBrain));
 
+            plan = plan.ForEpisode(mode, seedIndex);
+            this.plan = plan;
             var config = plan.EpisodeConfig(episodeSeed);
             var expressed = plan.ExpressedGenes(body);
+            if (plan.CurriculumEnabled && mode == EvaluationMode.Training && plan.CurriculumStage == 0 && eyes != null)
+                eyes = EyeSet.Founder;
             if (savedWorld == null)
             {
                 Simulation = new WorldSimulation(WorldFactory.CreateInitial(config, _ => expressed));
                 Simulation.World.Creatures[0].Eyes = eyes;
+                if (plan.CurriculumEnabled && mode == EvaluationMode.Training && plan.CurriculumStage < 2)
+                {
+                    var world = Simulation.World;
+                    var creature = world.Creatures[0];
+                    creature.Position = new Float2(config.ArenaWidth / 2, config.ArenaHeight / 2);
+                    var random = world.SpawnRandom;
+                    var angle = creature.Heading + (random.NextFloat() * 2 - 1) * (plan.CurriculumStage == 0 ? 0.25f : MathF.PI);
+                    var distance = plan.CurriculumStage == 0 ? 1.5f + random.NextFloat() : 3f + random.NextFloat() * 2;
+                    world.Food[0].MoveTo(new Float2(creature.Position.X + MathF.Cos(angle) * distance,
+                        creature.Position.Y + MathF.Sin(angle) * distance));
+                }
+                else if (plan.CurriculumEnabled && mode == EvaluationMode.Training && plan.CurriculumStage == 2)
+                {
+                    var world = Simulation.World;
+                    var creature = world.Creatures[0];
+                    creature.Position = new Float2(config.ArenaWidth / 2, config.ArenaHeight / 2);
+                    var distance = Math.Min(23f, Math.Max(12f, creature.Body.SensorRange + 2f));
+                    foreach (var item in world.Food)
+                    {
+                        var angle = world.SpawnRandom.NextFloat() * 2 * MathF.PI;
+                        item.MoveTo(new Float2(creature.Position.X + MathF.Cos(angle) * distance,
+                            creature.Position.Y + MathF.Sin(angle) * distance));
+                    }
+                }
             }
             else
             {
@@ -78,6 +107,7 @@ namespace Eden.Application
 
         /// <summary>Ticks simulated so far (the episode world starts at tick 0).</summary>
         public long Tick => Simulation.World.Tick;
+        public float EpisodeSeconds => plan.EpisodeSeconds;
 
         public bool IsFinished => Tick >= plan.EpisodeTicks || Simulation.IsExtinct;
 
@@ -94,22 +124,44 @@ namespace Eden.Application
             return ran;
         }
 
+        private float Approach()
+        {
+            var nearest = float.MaxValue;
+            foreach (var item in Simulation.World.Food)
+            {
+                var dx = item.Position.X - Creature.Position.X;
+                var dy = item.Position.Y - Creature.Position.Y;
+                nearest = Math.Min(nearest, MathF.Sqrt(dx * dx + dy * dy));
+            }
+            return nearest == float.MaxValue ? 0 : 1f / (1f + nearest / 5f);
+        }
+
         public EpisodeResult Result()
         {
             if (!IsFinished)
                 throw new InvalidOperationException("The episode is still running.");
             return new EpisodeResult(mode, generation, Candidate, SeedIndex, EpisodeSeed, plan.EpisodeTicks,
-                plan.EpisodeSeconds, Creature.FoodEnergyEaten, Creature.AgeTicks, Creature.IsAlive, Creature.Energy);
+                plan.EpisodeSeconds, Creature.FoodEnergyEaten, Creature.AgeTicks, Creature.IsAlive, Creature.Energy,
+                plan.CurriculumEnabled, Creature.FoodItemsEaten, Math.Min(Creature.FoodEnergyEaten, Creature.UsefulFoodEnergy), Approach());
         }
     }
 
     /// <summary>
-    /// Every candidate × seed episode of one evaluation, run in order (candidate-major, seed-minor) a bounded number
-    /// of ticks at a time, so that a frame-driven caller never blocks. How the ticks are split never changes the
+    /// Every candidate × seed episode of one evaluation, committed in order (candidate-major, seed-minor) a bounded number
+    /// of ticks at a time. Independent episodes can run on CPU workers. How the ticks are split never changes the
     /// result: it is the same <see cref="GenerationEvaluation"/> as running the job to the end in one call.
     /// </summary>
     public sealed class EvaluationJob
     {
+        public const int MaxWorkers = 64;
+        public static int AutomaticWorkerCount => Math.Max(1, Math.Min(MaxWorkers, Environment.ProcessorCount - 1));
+
+        private readonly List<EpisodeSlot> active = new List<EpisodeSlot>();
+        private readonly long[] allowances = new long[MaxWorkers];
+        private readonly long[] advanced = new long[MaxWorkers];
+        private readonly ParallelOptions parallelOptions = new ParallelOptions();
+        private readonly Action<int> advanceSlot;
+        private int workerCount = 1;
         private readonly EvaluationPlan plan;
         private readonly IReadOnlyList<Func<IBrain>> candidates;
         private readonly BodyGenes[] bodies;
@@ -161,7 +213,8 @@ namespace Eden.Application
             aggregates = new CandidateEvaluation[candidates.Count];
             perSeed = new EpisodeResult[seeds.Count];
             ticksPerSecond = plan.EpisodeConfig(this.seeds[0]).TicksPerSecond;
-            Current = CreateEpisode(0, 0);
+            active.Add(new EpisodeSlot(CreateEpisode(0, 0)));
+            advanceSlot = i => advanced[i] = active[i].IsFinished ? 0 : active[i].Episode.Advance(allowances[i]);
         }
 
         public int Generation { get; }
@@ -172,7 +225,25 @@ namespace Eden.Application
         public int CompletedEpisodes { get; private set; }
 
         /// <summary>Episode being simulated; null once every episode is done.</summary>
-        public IsolatedEpisode Current { get; private set; }
+        public IsolatedEpisode Current => active.Count == 0 ? null : active[0].Episode;
+
+        /// <summary>
+        /// Execution setting only; it does not change seeds, scores or reproduction. Cannot shrink below the number
+        /// of episodes already in flight. Call between Advance invocations; candidates must create independent brains.
+        /// </summary>
+        public int WorkerCount
+        {
+            get => workerCount;
+            set
+            {
+                if (value < 1 || value > MaxWorkers || value < active.Count)
+                    throw new ArgumentOutOfRangeException(nameof(value));
+                workerCount = value;
+                parallelOptions.MaxDegreeOfParallelism = value;
+            }
+        }
+
+        public int ActiveEpisodes => active.Count;
 
         public bool IsComplete => result != null;
 
@@ -189,19 +260,50 @@ namespace Eden.Application
             if (maxTicks < 0)
                 throw new ArgumentOutOfRangeException(nameof(maxTicks));
             var ran = 0L;
-            while (Current != null)
+            while (ran < maxTicks && !IsComplete)
             {
-                ran += Current.Advance(maxTicks - ran);
-                if (!Current.IsFinished)
-                    break;
-                CompleteEpisode();
+                var target = (int)Math.Min(workerCount, maxTicks - ran);
+                while (active.Count < target && CompletedEpisodes + active.Count < TotalEpisodes)
+                {
+                    var index = CompletedEpisodes + active.Count;
+                    active.Add(new EpisodeSlot(CreateEpisode(index / seeds.Length, index % seeds.Length)));
+                }
+
+                var remaining = maxTicks - ran;
+                var unfinished = 0;
+                for (var i = 0; i < active.Count; i++)
+                    if (!active[i].IsFinished) unfinished++;
+                for (var i = 0; i < active.Count; i++)
+                {
+                    allowances[i] = active[i].IsFinished ? 0 : Math.Min(256, remaining / unfinished +
+                        (remaining % unfinished > 0 ? 1 : 0));
+                    if (!active[i].IsFinished)
+                    {
+                        remaining -= allowances[i];
+                        unfinished--;
+                    }
+                }
+
+                // Join before touching results, saving, rendering, or invoking any application callbacks.
+                if (active.Count > 1 && maxTicks - ran > 1)
+                    Parallel.For(0, active.Count, parallelOptions, advanceSlot);
+                else
+                    for (var i = 0; i < active.Count; i++) advanceSlot(i);
+                for (var i = 0; i < active.Count; i++) ran += advanced[i];
+                while (active.Count > 0 && active[0].IsFinished)
+                {
+                    CompleteEpisode(active[0].Result());
+                    active.RemoveAt(0);
+                }
+                if (active.Count == 0 && !IsComplete)
+                    active.Add(new EpisodeSlot(CreateEpisode(CompletedEpisodes / seeds.Length, CompletedEpisodes % seeds.Length)));
             }
 
             return ran;
         }
 
         /// <summary>
-        /// Saved progress between ticks: the finished episodes in run order and the episode being simulated. Only a
+        /// Saved progress between ticks: ordered results, the displayed episode, and all parallel episodes. Only a
         /// running job has progress to save.
         /// </summary>
         public EvaluationProgress Capture()
@@ -211,7 +313,13 @@ namespace Eden.Application
             var completed = new List<EpisodeResult>(episodes);
             for (var s = 0; s < Current.SeedIndex; s++)
                 completed.Add(perSeed[s]);
-            return new EvaluationProgress(completed, Current.Simulation.Capture(), Current.Controller.Capture());
+            var ahead = new EvaluationAhead[active.Count - 1];
+            for (var i = 1; i < active.Count; i++)
+                ahead[i - 1] = active[i].IsFinished
+                    ? new EvaluationAhead(active[i].Result())
+                    : new EvaluationAhead(active[i].Episode.Simulation.Capture(), active[i].Episode.Controller.Capture());
+            return new EvaluationProgress(completed, Current.Simulation.Capture(), Current.Controller.Capture(),
+                workerCount, ahead);
         }
 
         /// <summary>
@@ -240,6 +348,25 @@ namespace Eden.Application
             var running = new IsolatedEpisode(plan, candidates[candidate], seeds[seedIndex], candidate, seedIndex,
                 Generation, Mode, bodies[candidate], eyes[candidate], progress.CurrentWorld, progress.CurrentBrains);
 
+            if (completed.Count + 1 + progress.Ahead.Count > TotalEpisodes)
+                throw new ArgumentException("Saved parallel episodes exceed this evaluation.", nameof(progress));
+            var restored = new List<EpisodeSlot> { new EpisodeSlot(running) };
+            for (var i = 0; i < progress.Ahead.Count; i++)
+            {
+                var index = completed.Count + 1 + i;
+                var c = index / seeds.Length;
+                var s = index % seeds.Length;
+                var saved = progress.Ahead[i];
+                if (saved.Completed.HasValue)
+                {
+                    CheckResult(saved.Completed.Value, c, s, maxEnergy);
+                    restored.Add(new EpisodeSlot(saved.Completed.Value));
+                }
+                else
+                    restored.Add(new EpisodeSlot(new IsolatedEpisode(plan, candidates[c], seeds[s], c, s,
+                        Generation, Mode, bodies[c], eyes[c], saved.World, saved.Brains)));
+            }
+
             for (var i = 0; i < completed.Count; i++)
             {
                 perSeed[i % seeds.Length] = completed[i];
@@ -251,7 +378,9 @@ namespace Eden.Application
             }
 
             CompletedEpisodes = completed.Count;
-            Current = running;
+            WorkerCount = progress.WorkerCount;
+            active.Clear();
+            active.AddRange(restored);
         }
 
         /// <summary>Runs every remaining episode and returns the evaluation.</summary>
@@ -262,42 +391,44 @@ namespace Eden.Application
             return result;
         }
 
-        private void CompleteEpisode()
+        private void CompleteEpisode(EpisodeResult episode)
         {
-            var episode = Current;
-            perSeed[episode.SeedIndex] = episode.Result();
+            perSeed[episode.SeedIndex] = episode;
             CompletedEpisodes++;
             var nextSeed = episode.SeedIndex + 1;
             var candidate = episode.Candidate;
             if (nextSeed < seeds.Length)
-            {
-                Current = CreateEpisode(candidate, nextSeed);
                 return;
-            }
 
             var results = (EpisodeResult[])perSeed.Clone();
             episodes.AddRange(results);
             aggregates[candidate] = new CandidateEvaluation(candidate, results, ticksPerSecond);
             if (candidate + 1 < candidates.Count)
-            {
-                Current = CreateEpisode(candidate + 1, 0);
                 return;
-            }
 
-            Current = null;
             result = new GenerationEvaluation(Generation, Mode, (ulong[])seeds.Clone(), episodes, aggregates);
+        }
+
+        private sealed class EpisodeSlot
+        {
+            private readonly EpisodeResult? completed;
+            public EpisodeSlot(IsolatedEpisode episode) => Episode = episode;
+            public EpisodeSlot(EpisodeResult result) => completed = result;
+            public IsolatedEpisode Episode { get; }
+            public bool IsFinished => completed.HasValue || Episode.IsFinished;
+            public EpisodeResult Result() => completed ?? Episode.Result();
         }
 
         private void CheckResult(EpisodeResult result, int candidate, int seedIndex, float maxEnergy)
         {
             if (result.Mode != Mode || result.Generation != Generation || result.Candidate != candidate ||
                 result.SeedIndex != seedIndex || result.EpisodeSeed != seeds[seedIndex] ||
-                result.EpisodeTicks != plan.EpisodeTicks)
+                result.EpisodeTicks != plan.ForEpisode(Mode, seedIndex).EpisodeTicks)
                 throw new ArgumentException($"Saved episode {candidate}×{seedIndex} does not belong to this evaluation.",
                     nameof(result));
             if (!(result.FoodEnergy >= 0f) || float.IsInfinity(result.FoodEnergy) || result.SurvivedTicks < 1 ||
-                result.SurvivedTicks > plan.EpisodeTicks || !(result.FinalEnergy >= 0f && result.FinalEnergy <= maxEnergy) ||
-                result.Survived && (result.FinalEnergy <= 0f || result.SurvivedTicks != plan.EpisodeTicks))
+                result.SurvivedTicks > result.EpisodeTicks || !(result.FinalEnergy >= 0f && result.FinalEnergy <= maxEnergy) ||
+                result.Survived && (result.FinalEnergy <= 0f || result.SurvivedTicks != result.EpisodeTicks))
                 throw new ArgumentException($"Saved episode {candidate}×{seedIndex} has impossible values.", nameof(result));
         }
 
@@ -310,8 +441,15 @@ namespace Eden.Application
     public sealed class EvaluationProgress
     {
         public EvaluationProgress(IReadOnlyList<EpisodeResult> completed, SimulationSnapshot currentWorld,
-            IReadOnlyList<BrainSlotState> currentBrains)
+            IReadOnlyList<BrainSlotState> currentBrains, int workerCount = 1, IReadOnlyList<EvaluationAhead> ahead = null)
         {
+            if (workerCount < 1 || workerCount > EvaluationJob.MaxWorkers || (ahead?.Count ?? 0) >= workerCount)
+                throw new ArgumentOutOfRangeException(nameof(workerCount));
+            WorkerCount = workerCount;
+            var pending = new EvaluationAhead[ahead?.Count ?? 0];
+            for (var i = 0; i < pending.Length; i++)
+                pending[i] = ahead[i] ?? throw new ArgumentException("A parallel episode is missing.", nameof(ahead));
+            Ahead = pending;
             if (completed == null)
                 throw new ArgumentNullException(nameof(completed));
             var copy = new EpisodeResult[completed.Count];
@@ -335,5 +473,27 @@ namespace Eden.Application
 
         /// <summary>Brain state of that episode's creature (empty before its first decision).</summary>
         public IReadOnlyList<BrainSlotState> CurrentBrains { get; }
+
+        public int WorkerCount { get; }
+        /// <summary>Consecutive episodes after Current, including results waiting for earlier episodes to finish.</summary>
+        public IReadOnlyList<EvaluationAhead> Ahead { get; }
+    }
+
+    public sealed class EvaluationAhead
+    {
+        public EvaluationAhead(EpisodeResult completed) => Completed = completed;
+
+        public EvaluationAhead(SimulationSnapshot world, IReadOnlyList<BrainSlotState> brains)
+        {
+            World = world ?? throw new ArgumentNullException(nameof(world));
+            if (brains == null) throw new ArgumentNullException(nameof(brains));
+            var copy = new BrainSlotState[brains.Count];
+            for (var i = 0; i < copy.Length; i++) copy[i] = brains[i];
+            Brains = copy;
+        }
+
+        public EpisodeResult? Completed { get; }
+        public SimulationSnapshot World { get; }
+        public IReadOnlyList<BrainSlotState> Brains { get; }
     }
 }

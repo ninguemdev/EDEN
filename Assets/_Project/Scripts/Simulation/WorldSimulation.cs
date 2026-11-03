@@ -240,6 +240,7 @@ namespace Eden.Simulation
                 item.MarkEaten();
                 foodGains[winner] += item.Energy;
                 creatures[winner].FoodEnergyEaten += item.Energy;
+                creatures[winner].FoodItemsEaten++;
                 LastFoodEaten++;
                 agenda.Schedule(tick + World.Config.FoodRespawnTicks, FoodRespawn);
             }
@@ -274,6 +275,7 @@ namespace Eden.Simulation
 
                 // Kept as one expression: splitting it would round the intermediate sum and change every run.
                 var left = creature.Energy + foodGains[i] - cost;
+                creature.UsefulFoodEnergy += Math.Max(0f, foodGains[i] - Math.Max(0f, left - body.MaxEnergy));
                 // A creature pays at most what it holds; food that does not fit is lost.
                 energy.Food += foodGains[i];
                 energy.Spent += left < 0f ? (double)creature.Energy + foodGains[i] : cost;

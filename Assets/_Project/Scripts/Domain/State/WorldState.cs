@@ -84,6 +84,7 @@ namespace Eden.Domain
                     saved.Body)
                 {
                     Velocity = saved.Velocity, AgeTicks = saved.AgeTicks, FoodEnergyEaten = saved.FoodEnergyEaten,
+                    UsefulFoodEnergy = saved.UsefulFoodEnergy, FoodItemsEaten = saved.FoodItemsEaten,
                     Parent = saved.Parent, Generation = saved.Generation,
                     ReproductionCooldownTicks = saved.ReproductionCooldownTicks, Eyes = saved.Eyes
                 });
@@ -232,7 +233,7 @@ namespace Eden.Domain
                     errors.Add($"{name} energy {creature.Energy} is outside (0, {creature.Body.MaxEnergy}]");
                 if (creature.AgeTicks < 0 || creature.AgeTicks >= config.MaxAgeTicks)
                     errors.Add($"{name} age {creature.AgeTicks} is outside [0, {config.MaxAgeTicks})");
-                if (!(creature.FoodEnergyEaten >= 0f) || !IsFinite(creature.FoodEnergyEaten))
+                if (creature.FoodItemsEaten < 0 || !(creature.UsefulFoodEnergy >= 0f) || creature.UsefulFoodEnergy > creature.FoodEnergyEaten || !(creature.FoodEnergyEaten >= 0f) || !IsFinite(creature.FoodEnergyEaten))
                     errors.Add($"{name} eaten food energy {creature.FoodEnergyEaten} must be finite and not negative");
             }
         }

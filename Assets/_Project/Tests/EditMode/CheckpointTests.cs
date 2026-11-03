@@ -19,6 +19,73 @@ namespace Eden.Tests.EditMode
     {
         private static readonly DateTime SavedAt = new DateTime(2026, 10, 26, 12, 0, 0, DateTimeKind.Utc);
 
+        [TestCase(false, false)]
+        [TestCase(true, false)]
+        [TestCase(true, true)]
+        public void ParallelCheckpoint_PreservesEveryWorldAndResumesExactly(bool neat, bool eyes)
+        {
+            var settings = Small(42);
+            settings.Algorithm = neat ? EvolutionAlgorithm.Neat : EvolutionAlgorithm.Mlp;
+            settings.Senses = eyes ? Senses.Eyes : Senses.Legacy;
+            settings.EvolvingEyes = eyes;
+            foreach (var phase in new[] { EvolutionPhase.Training, EvolutionPhase.Baselines, EvolutionPhase.Validation })
+            {
+                var original = new EvolutionSession(settings, 2, evaluationWorkers: 4);
+                AdvanceUntil(original, () => original.Phase == phase, 13);
+                original.Advance(17);
+                var saved = original.Capture();
+                Assert.That(saved.Job.Ahead.Count, Is.GreaterThan(0));
+                var checkpoint = new Checkpoint("evolution", "minimal", 42, "neural", saved, null);
+                var text = CheckpointCodec.Encode(checkpoint, "test", "test", SavedAt);
+                var decoded = CheckpointCodec.Decode(text, out var info);
+                Assert.That(info.SchemaVersion, Is.EqualTo(7));
+                Assert.That(CheckpointCodec.Encode(decoded, "test", "test", SavedAt), Is.EqualTo(text));
+                var restored = EvolutionSession.Restore(decoded.Evolution);
+                Assert.That(restored.EvaluationWorkers, Is.EqualTo(4));
+                Assert.That(restored.Job.WorkerCount, Is.EqualTo(4));
+                AssertSameSession(restored, original);
+                for (var i = 0; i < 30; i++)
+                {
+                    original.Advance(113);
+                    restored.Advance(113);
+                }
+                var originalText = CheckpointCodec.Encode(new Checkpoint("evolution", "minimal", 42, "neural",
+                    original.Capture(), null), "test", "test", SavedAt);
+                var restoredText = CheckpointCodec.Encode(new Checkpoint("evolution", "minimal", 42, "neural",
+                    restored.Capture(), null), "test", "test", SavedAt);
+                Assert.That(restoredText, Is.EqualTo(originalText), "all worlds, brains and lineage resume exactly");
+            }
+        }
+
+        [Test]
+        public void ParallelCheckpoint_KeepsAnEpisodeThatFinishedAheadOfTheDisplayedWorld()
+        {
+            var session = new EvolutionSession(Small(42), 2, evaluationWorkers: 4);
+            var expected = new IsolatedEvaluator(session.Plan).TrainingJob(session.Evolution.Population, 0).RunToEnd();
+            session.Advance(4);
+            var saved = session.Capture();
+            var ahead = saved.Job.Ahead.ToArray();
+            ahead[0] = new EvaluationAhead(expected.Episodes[1]);
+            var progress = new EvaluationProgress(saved.Job.Completed, saved.Job.CurrentWorld, saved.Job.CurrentBrains,
+                4, ahead);
+            var snapshot = new EvolutionSnapshot(saved.Settings, saved.ValidationInterval, saved.Generation,
+                saved.Population, saved.Lineage, saved.LastTrainingIndividuals, saved.LastTrainingEpisodes,
+                saved.BaselineEpisodes, saved.Training, saved.Validation,
+                saved.TotalTicks + expected.Episodes[1].SurvivedTicks - 1, saved.Phase, progress, saved.Neat);
+            var text = CheckpointCodec.Encode(new Checkpoint("evolution", "minimal", 42, "neural", snapshot, null),
+                "test", "test", SavedAt);
+            var decoded = CheckpointCodec.Decode(text, out _);
+            Assert.That(decoded.Evolution.Job.Ahead[0].Completed, Is.EqualTo(expected.Episodes[1]));
+            var restored = EvolutionSession.Restore(decoded.Evolution);
+            Assert.That(restored.Job.RunToEnd().Episodes, Is.EqualTo(expected.Episodes));
+
+            ahead[0] = new EvaluationAhead(expected.Episodes[2]);
+            var invalid = new EvaluationProgress(saved.Job.Completed, saved.Job.CurrentWorld, saved.Job.CurrentBrains, 4, ahead);
+            var job = new IsolatedEvaluator(session.Plan).TrainingJob(session.Evolution.Population, 0);
+            Assert.Throws<ArgumentException>(() => job.Resume(invalid));
+            Assert.That(job.Current.Tick, Is.Zero, "an invalid resume leaves the job unchanged");
+        }
+
         [Test]
         public void Codec_RoundTrip_IsExactUnderAnotherCulture()
         {
@@ -119,7 +186,7 @@ namespace Eden.Tests.EditMode
             AssertRefused(text.Substring(0, text.Length / 2), "Invalid JSON");
             AssertRefused("not json", "Invalid JSON");
             AssertRefused("{\"format\": \"something-else\"}", "Not an EDEN checkpoint");
-            AssertRefused(text.Replace("\"schemaVersion\": 5,", "\"schemaVersion\": 7,"), "newer");
+            AssertRefused(text.Replace("\"schemaVersion\": 5,", $"\"schemaVersion\": {CheckpointCodec.SchemaVersion + 1},"), "newer");
             AssertRefused(text.Replace(Pcg32.AlgorithmName, "xorshift128"), "random");
             AssertRefused(ChangeFirstWeight(text, "0.5"), "State hash mismatch");
             AssertRefused(text.Replace("\"maxSpeed\": 5,", "\"maxSpeed\": 6,"), "Config hash mismatch");

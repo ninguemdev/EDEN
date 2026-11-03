@@ -29,13 +29,15 @@ namespace Eden.Persistence
     /// weights), the innovation counters, the species and the species of the last trained generation are written only
     /// for a NEAT experiment, and only such a file says schema 6, so a build without NEAT refuses it as newer while MLP
     /// files stay schema 5, byte for byte.
+    /// Parallel evaluation (schema 7) additionally stores the worker count and all episodes ahead of the displayed
+    /// world, including finished results awaiting ordered aggregation. Sequential files retain their old schemas.
     /// </summary>
     public static class CheckpointCodec
     {
         public const string Format = "eden-checkpoint";
 
-        /// <summary>Newest schema this build reads and writes (for NEAT experiments).</summary>
-        public const int SchemaVersion = 6;
+        /// <summary>Newest schema: parallel evaluation progress. Sequential NEAT stays schema 6, MLP schema 5.</summary>
+        public const int SchemaVersion = 8;
 
         /// <summary>Schema of every checkpoint without NEAT, unchanged since plasticity.</summary>
         public const int SchemaWithoutNeat = 5;
@@ -56,7 +58,9 @@ namespace Eden.Persistence
         {
             if (checkpoint == null)
                 throw new ArgumentNullException(nameof(checkpoint));
-            var schema = checkpoint.Evolution?.Neat != null ? SchemaVersion : SchemaWithoutNeat;
+            var schema = checkpoint.Evolution?.Settings.CurriculumEnabled == true ? SchemaVersion
+                : checkpoint.Evolution?.Job.WorkerCount > 1 ? 7
+                : checkpoint.Evolution?.Neat != null ? 6 : SchemaWithoutNeat;
             var config = EncodeConfig(checkpoint);
             var state = EncodeState(checkpoint);
             var configHash = Hash(config.ToCompactString());
@@ -189,6 +193,9 @@ namespace Eden.Persistence
                 settings.Add("senses", JsonValue.Of("eyes"));
             if (s.EvolvingEyes)
                 settings.Add("evolvingEyes", JsonValue.Of(true));
+            if (s.CurriculumEnabled)
+                settings.Add("curriculum", JsonValue.NewObject().Add("stage", JsonValue.Of(s.CurriculumStage))
+                    .Add("streak", JsonValue.Of(s.CurriculumStreak)));
             return settings;
         }
 
@@ -313,6 +320,13 @@ namespace Eden.Persistence
                 ExpressedBodyGenes = DecodeGeneSet(saved.TryGet("expressedBodyGenes")),
                 Plasticity = DecodePlasticityOption(saved.TryGet("plasticity"))
             };
+            var curriculum = saved.TryGet("curriculum");
+            if (curriculum != null)
+            {
+                settings.CurriculumEnabled = true;
+                settings.CurriculumStage = curriculum["stage"].Int(0, 4);
+                settings.CurriculumStreak = curriculum["streak"].Int(0, 19);
+            }
             var algorithm = saved.TryGet("algorithm");
             if (algorithm != null)
             {
@@ -651,13 +665,25 @@ namespace Eden.Persistence
                 .Add("baselines", evolution.BaselineEpisodes == null ? JsonValue.Null() : EncodeEpisodes(evolution.BaselineEpisodes))
                 .Add("training", training)
                 .Add("validation", validation)
-                .Add("job", JsonValue.NewObject()
-                    .Add("completed", EncodeEpisodes(evolution.Job.Completed))
-                    .Add("world", EncodeWorld(evolution.Job.CurrentWorld))
-                    .Add("brains", EncodeBrains(evolution.Job.CurrentBrains)));
+                .Add("job", EncodeProgress(evolution.Job));
             if (evolution.Neat != null)
                 encoded.Add("neat", EncodeNeatState(evolution.Neat));
             return encoded;
+        }
+
+        private static JsonValue EncodeProgress(EvaluationProgress progress)
+        {
+            var job = JsonValue.NewObject()
+                .Add("completed", EncodeEpisodes(progress.Completed))
+                .Add("world", EncodeWorld(progress.CurrentWorld))
+                .Add("brains", EncodeBrains(progress.CurrentBrains));
+            if (progress.WorkerCount == 1) return job;
+            var ahead = JsonValue.NewArray();
+            foreach (var episode in progress.Ahead)
+                ahead.Add(episode.Completed.HasValue
+                    ? JsonValue.NewObject().Add("result", EncodeEpisodes(new[] { episode.Completed.Value }))
+                    : JsonValue.NewObject().Add("world", EncodeWorld(episode.World)).Add("brains", EncodeBrains(episode.Brains)));
+            return job.Add("workers", JsonValue.Of(progress.WorkerCount)).Add("ahead", ahead);
         }
 
         private static JsonValue EncodeNeatState(NeatEvolutionState neat)
@@ -804,10 +830,36 @@ namespace Eden.Persistence
 
             var baselines = saved["baselines"];
             var job = saved["job"];
+            var completedEpisodes = DecodeEpisodes(job["completed"], plan);
+            var mode = ParsePhase(saved["phase"]) == EvolutionPhase.Training ? EvaluationMode.Training : EvaluationMode.Validation;
+            var seedCount = mode == EvaluationMode.Training ? plan.TrainingSeedsPerGeneration : plan.ValidationSeedCount;
+            SimulationConfig EpisodeConfigAt(int index) => plan.ForEpisode(mode, index % seedCount).EpisodeConfig(0);
+            var workers = job.TryGet("workers")?.Int(1, EvaluationJob.MaxWorkers) ?? 1;
+            var ahead = new List<EvaluationAhead>();
+            var pending = job.TryGet("ahead");
+            if (pending != null)
+            {
+                var values = pending.ArrayOf(workers - 1);
+                for (var i = 0; i < values.Count; i++)
+                {
+                    var episode = values[i];
+                    var completed = episode.TryGet("result");
+                    if (completed != null)
+                    {
+                        if (completed.ArrayOf(1).Count != 1)
+                            throw new CheckpointException("A finished parallel episode needs exactly one result.");
+                        ahead.Add(new EvaluationAhead(DecodeEpisodes(completed, plan)[0]));
+                    }
+                    else
+                        ahead.Add(new EvaluationAhead(
+                            DecodeWorld(episode["world"], 1, EpisodeConfigAt(completedEpisodes.Length + 1 + i).InitialFood, EpisodeConfigAt(completedEpisodes.Length + 1 + i)),
+                            DecodeBrains(episode["brains"])));
+                }
+            }
             // Bodies do not depend on the episode seed.
-            var progress = new EvaluationProgress(DecodeEpisodes(job["completed"], plan),
-                DecodeWorld(job["world"], 1, settings.World.InitialFood, plan.EpisodeConfig(0)),
-                DecodeBrains(job["brains"]));
+            var progress = new EvaluationProgress(completedEpisodes,
+                DecodeWorld(job["world"], 1, EpisodeConfigAt(completedEpisodes.Length).InitialFood, EpisodeConfigAt(completedEpisodes.Length)),
+                DecodeBrains(job["brains"]), workers, ahead);
             var neat = settings.Algorithm == EvolutionAlgorithm.Neat
                 ? DecodeNeatState(saved["neat"], settings.PopulationSize)
                 : null;
@@ -942,7 +994,7 @@ namespace Eden.Persistence
             var values = JsonValue.NewArray();
             foreach (var episode in episodes)
             {
-                values.Add(JsonValue.NewObject()
+                var encoded = JsonValue.NewObject()
                     .Add("mode", JsonValue.Of(EvaluationCsv.ModeName(episode.Mode)))
                     .Add("generation", JsonValue.Of(episode.Generation))
                     .Add("candidate", JsonValue.Of(episode.Candidate))
@@ -951,7 +1003,12 @@ namespace Eden.Persistence
                     .Add("foodEnergy", JsonValue.Of(episode.FoodEnergy))
                     .Add("survivedTicks", JsonValue.Of(episode.SurvivedTicks))
                     .Add("survived", JsonValue.Of(episode.Survived))
-                    .Add("finalEnergy", JsonValue.Of(episode.FinalEnergy)));
+                    .Add("finalEnergy", JsonValue.Of(episode.FinalEnergy));
+                if (episode.Competence)
+                    encoded.Add("competence", JsonValue.Of(true)).Add("episodeTicks", JsonValue.Of(episode.EpisodeTicks))
+                        .Add("episodeSeconds", JsonValue.Of(episode.EpisodeSeconds)).Add("foodItems", JsonValue.Of(episode.FoodItems))
+                        .Add("usefulFoodEnergy", JsonValue.Of(episode.UsefulFoodEnergy)).Add("approach", JsonValue.Of(episode.Approach));
+                values.Add(encoded);
             }
 
             return values;
@@ -965,9 +1022,11 @@ namespace Eden.Persistence
             {
                 var value = values[i];
                 episodes[i] = new EpisodeResult(ParseMode(value["mode"]), value["generation"].Int(0),
-                    value["candidate"].Int(0), value["seedIndex"].Int(0), value["seed"].ULong(), plan.EpisodeTicks,
-                    plan.EpisodeSeconds, value["foodEnergy"].Float(), value["survivedTicks"].Long(0),
-                    value["survived"].Boolean(), value["finalEnergy"].Float());
+                    value["candidate"].Int(0), value["seedIndex"].Int(0), value["seed"].ULong(), value.TryGet("episodeTicks")?.Long(1) ?? plan.EpisodeTicks,
+                    value.TryGet("episodeSeconds")?.Float() ?? plan.EpisodeSeconds, value["foodEnergy"].Float(), value["survivedTicks"].Long(0),
+                    value["survived"].Boolean(), value["finalEnergy"].Float(), value.TryGet("competence")?.Boolean() ?? false,
+                    value.TryGet("foodItems")?.Int(0) ?? 0, value.TryGet("usefulFoodEnergy")?.Float() ?? 0,
+                    value.TryGet("approach")?.Float() ?? 0);
             }
 
             return episodes;
@@ -1021,6 +1080,9 @@ namespace Eden.Persistence
                     .Add("energy", JsonValue.Of(creature.Energy))
                     .Add("ageTicks", JsonValue.Of(creature.AgeTicks))
                     .Add("foodEnergyEaten", JsonValue.Of(creature.FoodEnergyEaten));
+                if (creature.FoodItemsEaten != 0 || creature.UsefulFoodEnergy != 0)
+                    saved.Add("foodItemsEaten", JsonValue.Of(creature.FoodItemsEaten))
+                        .Add("usefulFoodEnergy", JsonValue.Of(creature.UsefulFoodEnergy));
                 if (creature.Parent.HasValue)
                     saved.Add("parent", JsonValue.Of(creature.Parent.Value.Value));
                 if (creature.Generation != 0)
@@ -1084,6 +1146,8 @@ namespace Eden.Persistence
                     Velocity = ReadPair(value["velocity"]),
                     AgeTicks = value["ageTicks"].Long(0),
                     FoodEnergyEaten = value["foodEnergyEaten"].Float(),
+                    FoodItemsEaten = value.TryGet("foodItemsEaten")?.Int(0) ?? 0,
+                    UsefulFoodEnergy = value.TryGet("usefulFoodEnergy")?.Float() ?? 0,
                     Parent = value.TryGet("parent") is JsonValue parent ? new CreatureId(parent.Int(1)) : (CreatureId?)null,
                     Generation = value.TryGet("generation")?.Int(0) ?? 0,
                     ReproductionCooldownTicks = value.TryGet("reproductionCooldownTicks")?.Long(0) ?? 0L,

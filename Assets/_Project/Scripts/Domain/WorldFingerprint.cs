@@ -32,6 +32,8 @@ namespace Eden.Domain
                 hash.Add(creature.Energy);
                 hash.Add(creature.AgeTicks);
                 hash.Add(creature.FoodEnergyEaten);
+                hash.Add(creature.UsefulFoodEnergy);
+                hash.Add((ulong)creature.FoodItemsEaten);
                 hash.Add((ulong)creature.DeathCause);
                 // The body follows from the genes and the config.
                 hash.Add(creature.Genes.Size);

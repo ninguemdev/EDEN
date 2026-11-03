@@ -9,6 +9,9 @@ namespace Eden.Evolution
     public sealed class EvolutionSettings
     {
         public ulong ExperimentSeed;
+        public bool CurriculumEnabled;
+        public int CurriculumStage;
+        public int CurriculumStreak;
 
         /// <summary>Simulated length of every evaluation episode (proposed 120 s).</summary>
         public float EpisodeSeconds = 120f;
@@ -141,6 +144,7 @@ namespace Eden.Evolution
         private const ulong ValidationTag = 0x76616C69UL; // "vali"
 
         private readonly SimulationSettings world;
+        private readonly EvolutionSettings source;
         private readonly ulong trainingRoot;
         private readonly ulong[] validationSeeds;
 
@@ -151,7 +155,12 @@ namespace Eden.Evolution
             if (settings.World == null)
                 throw new ArgumentException("A world template is required.", nameof(settings));
 
+            source = settings.WithExperimentSeed(settings.ExperimentSeed);
             var errors = new List<string>();
+            if (settings.CurriculumEnabled && settings.TrainingSeedsPerGeneration < 2)
+                errors.Add("Curriculum requires at least two training seeds");
+            if (settings.CurriculumStage < 0 || settings.CurriculumStage > 4 || settings.CurriculumStreak < 0 || settings.CurriculumStreak >= 20)
+                errors.Add("Invalid curriculum progress");
             if (float.IsNaN(settings.EpisodeSeconds) || settings.EpisodeSeconds <= 0f || settings.EpisodeSeconds > MaxEpisodeSeconds)
                 errors.Add($"{nameof(settings.EpisodeSeconds)} must be in (0, {MaxEpisodeSeconds}] (was {settings.EpisodeSeconds})");
             if (settings.TrainingSeedsPerGeneration < 1 || settings.TrainingSeedsPerGeneration > MaxTrainingSeeds)
@@ -197,6 +206,27 @@ namespace Eden.Evolution
             validationSeeds = new ulong[settings.ValidationSeedCount];
             for (var i = 0; i < validationSeeds.Length; i++)
                 validationSeeds[i] = SplitMix64.Output(validationRoot, (ulong)i + 1);
+        }
+
+        public bool CurriculumEnabled => source.CurriculumEnabled;
+        public string FitnessProfile => CurriculumEnabled ? CompetenceFitness.Profile : Fitness.Profile;
+        public int CurriculumStage => source.CurriculumStage;
+        public EvaluationPlan ForEpisode(EvaluationMode mode, int seedIndex)
+        {
+            if (!CurriculumEnabled || mode != EvaluationMode.Training) return this;
+            var stage = Curriculum.StageForSeed(CurriculumStage, seedIndex);
+            var settings = source.WithExperimentSeed(source.ExperimentSeed);
+            settings.CurriculumStage = stage;
+            if (stage == 0) settings.ExpressedBodyGenes = BodyGeneSet.None;
+            settings.EpisodeSeconds = Math.Min(source.EpisodeSeconds, stage == 0 ? 15 : stage == 1 ? 20 : stage == 2 ? 60 : source.EpisodeSeconds);
+            if (stage < 4)
+            {
+                settings.World.ArenaWidth = settings.World.ArenaHeight = stage < 2 ? 20 : 50;
+                settings.World.InitialFood = stage < 2 ? 1 : stage == 2 ? 3 : Math.Max(8, source.World.InitialFood);
+                settings.World.FoodShiftSeconds = 0;
+                if (stage < 3) settings.World.FoodRespawnSeconds = settings.EpisodeSeconds + 1;
+            }
+            return new EvaluationPlan(settings);
         }
 
         public ulong ExperimentSeed { get; }

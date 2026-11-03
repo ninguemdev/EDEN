@@ -44,9 +44,10 @@ namespace Eden.Presentation
     /// budget), handles lab controls and selection, and writes logs under persistentDataPath. Frame rate never
     /// reaches the simulation. In evolution mode the world shown is the isolated episode being evaluated. The run can
     /// be saved to and loaded from a checkpoint between ticks.
-    /// Command line (builds): -eden-mode shared|evolution, -eden-preset minimal|standard|stress,
+    /// Command line (builds): -eden-mode shared|evolution, -eden-preset minimal|standard|stress|thousand,
     /// -eden-brain heuristic|random|neural, -eden-body fixed|evolving, -eden-algorithm mlp|neat, -eden-senses legacy|eyes,
     /// -eden-eyes fixed|evolving,
+    /// -eden-training sequential|parallel,
     /// -eden-reproduction on|off,
     /// -eden-seed N,
     /// -eden-select ID, -eden-max, and for a measured run
@@ -64,7 +65,7 @@ namespace Eden.Presentation
         [SerializeField] private SimulationSettings settings = new SimulationSettings();
         [SerializeField, Min(0)] private int seed = 1;
         [SerializeField] private LabMode mode = LabMode.SharedWorld;
-        [SerializeField, Range(0, 2)] private int preset = 1;
+        [SerializeField, Range(0, 3)] private int preset = 1;
         [SerializeField] private LabBrainKind brain = LabBrainKind.Heuristic;
 
         [Tooltip("A new evolution expresses and mutates all body genes; off keeps the fixed reference body (control).")]
@@ -72,6 +73,7 @@ namespace Eden.Presentation
         [SerializeField] private bool neat;
         [SerializeField] private bool eyes;
         [SerializeField] private bool evolvingEyes;
+        [SerializeField] private bool parallelTraining;
         [SerializeField] private bool writeMetrics = true;
         [SerializeField] private WorldView worldView;
         [SerializeField] private LabHud hud;
@@ -111,6 +113,7 @@ namespace Eden.Presentation
 
         /// <summary>Whether the next evolution's eyes evolve (see <see cref="LabChoice.EvolvingEyes"/>).</summary>
         public bool EvolvingEyes => evolvingEyes;
+        public bool ParallelTraining => parallelTraining;
 
         /// <summary>
         /// World rules of the lab, as edited in the Inspector (or by -eden-reproduction); a preset sets the population and
@@ -181,6 +184,7 @@ namespace Eden.Presentation
             neat = choice.Neat || choice.Eyes;
             eyes = choice.Eyes;
             evolvingEyes = choice.EvolvingEyes;
+            parallelTraining = choice.ParallelTraining;
             StartRun();
         }
 
@@ -199,7 +203,7 @@ namespace Eden.Presentation
                 StartSharedWorld();
             ResetClock(Simulation.World.Config.TicksPerSecond);
             worldView.Bind(Simulation.World);
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes), Evolution != null);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes, parallelTraining), Evolution != null);
             RefreshHud();
         }
 
@@ -211,9 +215,10 @@ namespace Eden.Presentation
             CloseMetricsLog();
             mode = LabMode.IsolatedEvolution;
             sharedGenomes = null;
+            parallelTraining = Evolution.EvaluationWorkers > 1;
             ClearSelection();
             ShowEpisode();
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes), true);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes, parallelTraining), true);
             RefreshHud();
         }
 
@@ -325,6 +330,7 @@ namespace Eden.Presentation
             neat = session != null && session.Evolution.Plan.Algorithm == EvolutionAlgorithm.Neat;
             eyes = session != null && session.Evolution.Plan.Senses == Senses.Eyes;
             evolvingEyes = session != null && session.Evolution.Plan.EvolvingEyes;
+            parallelTraining = session != null && session.EvaluationWorkers > 1;
             Evolution = session;
             EvolutionDirectory = null;
             MetricsDirectory = null;
@@ -354,7 +360,7 @@ namespace Eden.Presentation
             if (mode == LabMode.SharedWorld && world.IsExtinct)
                 Clock.Pause();
             worldView.Bind(world.World);
-            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes), Evolution != null);
+            hud?.ShowChoice(new LabChoice(mode, preset, seed, brain, evolvingBody, neat, eyes, evolvingEyes, parallelTraining), Evolution != null);
             ShowCheckpointStatus(LabText.CheckpointLoaded(CheckpointPath, world.World.Tick, EvolutionShown, problem));
             return true;
         }
@@ -426,7 +432,7 @@ namespace Eden.Presentation
             var source = Evolution == null
                 ? (GenomeSource?)null
                 : new GenomeSource(Evolution.Plan.ExperimentSeed, sharedGeneration, individualId);
-            return new GenomeRecord(genome, fitness, source);
+            return new GenomeRecord(genome, fitness, source, Evolution?.Plan.FitnessProfile ?? Fitness.Profile);
         }
 
         /// <summary>Switches the brain kind of the shared world and restarts it with the same seed.</summary>
@@ -694,7 +700,7 @@ namespace Eden.Presentation
         // Whole ticks in chunks until the frame budget is used; checking the watch per chunk keeps its cost low.
         private int RunWithinBudget()
         {
-            var chunk = mode == LabMode.IsolatedEvolution ? 256 : 8;
+            var chunk = mode == LabMode.IsolatedEvolution ? 256 * Evolution.EvaluationWorkers : 8;
             var ran = 0;
             budgetWatch.Restart();
             do
@@ -798,7 +804,7 @@ namespace Eden.Presentation
         {
             var directory = hud?.SeedGenomesDirectory;
             if (string.IsNullOrEmpty(directory))
-                return new EvolutionSession(evolutionSettings);
+                return new EvolutionSession(evolutionSettings, evaluationWorkers: TrainingWorkers);
             try
             {
                 var pool = GenomeFile.LoadPool(directory);
@@ -807,18 +813,20 @@ namespace Eden.Presentation
                 for (var i = 0; i < pool.Length; i++)
                 {
                     genomes[i] = pool[i].Genome;
-                    fitness[i] = pool[i].FitnessFor(Fitness.Profile) ?? 0f;
+                    fitness[i] = evolutionSettings.CurriculumEnabled ? 0f : pool[i].FitnessFor(Fitness.Profile) ?? 0f;
                 }
 
-                return EvolutionSession.FromSeedPool(evolutionSettings, genomes, fitness);
+                return EvolutionSession.FromSeedPool(evolutionSettings, genomes, fitness, evaluationWorkers: TrainingWorkers);
             }
             catch (Exception error) when (error is CheckpointException || error is ArgumentException)
             {
                 Debug.LogWarning($"EDEN: genome pool not used ({error.Message})");
                 ShowGenomeExportStatus(LabText.GenomePoolFailed(error.Message));
-                return new EvolutionSession(evolutionSettings);
+                return new EvolutionSession(evolutionSettings, evaluationWorkers: TrainingWorkers);
             }
         }
+
+        private int TrainingWorkers => parallelTraining ? EvaluationJob.AutomaticWorkerCount : 1;
 
         // Evolution mode: follows the episode being evaluated; a selection moves on to the new episode's creature.
         private void ShowEpisode()
@@ -1051,6 +1059,9 @@ namespace Eden.Presentation
                         break;
                     case "-eden-reproduction" when value == "on" || value == "off":
                         settings.Reproduction = value == "on";
+                        break;
+                    case "-eden-training" when value == "sequential" || value == "parallel":
+                        parallelTraining = value == "parallel";
                         break;
                     case "-eden-preset":
                         for (var p = 0; p < ExperimentPreset.All.Count; p++)

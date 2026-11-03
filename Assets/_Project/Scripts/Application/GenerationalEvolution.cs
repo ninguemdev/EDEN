@@ -128,7 +128,7 @@ namespace Eden.Application
         /// <summary>Copy of the settings this evolution was created with.</summary>
         public EvolutionSettings Settings => settings.WithExperimentSeed(settings.ExperimentSeed);
 
-        public EvaluationPlan Plan { get; }
+        public EvaluationPlan Plan { get; private set; }
         public ReproductionRules Rules { get; }
 
         /// <summary>NEAT parameters, or null for the MLP.</summary>
@@ -150,8 +150,8 @@ namespace Eden.Application
                 : new NeatEvolutionState(innovations.Capture(), speciation.Capture(), speciation.NextSpeciesId, lastSpecies);
 
         private BodyMutation BodyMutationRules =>
-            new BodyMutation(Plan.ExpressedBodyGenes, Rules.MutationProbability, Rules.MutationSigma,
-                Plan.EvolvingEyes ? neatRules.EyeMutation : default);
+            new BodyMutation(settings.CurriculumEnabled && settings.CurriculumStage == 0 ? BodyGeneSet.None : Plan.ExpressedBodyGenes, Rules.MutationProbability, Rules.MutationSigma,
+                Plan.EvolvingEyes && !(settings.CurriculumEnabled && settings.CurriculumStage == 0) ? neatRules.EyeMutation : default);
 
         /// <summary>Ids, parents and birth generations of every individual created so far.</summary>
         public Lineage Lineage { get; }
@@ -171,7 +171,7 @@ namespace Eden.Application
         public GenerationReport Advance() => Advance(BeginTraining().RunToEnd());
 
         /// <summary>Training evaluation of the current generation, to be advanced a few ticks at a time.</summary>
-        public EvaluationJob BeginTraining() => evaluator.TrainingJob(population, Generation);
+        public EvaluationJob BeginTraining() => new IsolatedEvaluator(new EvaluationPlan(settings)).TrainingJob(population, Generation);
 
         /// <summary>
         /// Replaces the current generation with its offspring, bred from <paramref name="evaluation"/>: the completed
@@ -193,7 +193,14 @@ namespace Eden.Application
             if (neatRules == null)
             {
                 report = new GenerationReport(evaluation, individuals);
-                origins = Reproduction.Breed(Rules, population, fitness, Generation + 1);
+                var breedingRules = Rules;
+                if (settings.CurriculumEnabled && settings.CurriculumStage == 0)
+                {
+                    var motorSettings = settings.WithExperimentSeed(settings.ExperimentSeed);
+                    motorSettings.ExpressedBodyGenes = BodyGeneSet.None;
+                    breedingRules = new ReproductionRules(motorSettings);
+                }
+                origins = Reproduction.Breed(breedingRules, population, fitness, Generation + 1);
             }
             else
             {
@@ -204,6 +211,14 @@ namespace Eden.Application
 
             individuals = Lineage.Descend(individuals, origins, Generation + 1);
             population = GenomesOf(individuals);
+            var oldStage = settings.CurriculumStage;
+            Curriculum.Observe(settings, evaluation);
+            if (settings.CurriculumStage != oldStage)
+            {
+                speciation?.ResetProgress(Generation);
+                Plan = new EvaluationPlan(settings);
+            }
+
             Generation++;
             return report;
         }

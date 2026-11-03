@@ -71,6 +71,7 @@ namespace Eden.Simulation
                     Velocity = creature.Velocity,
                     AgeTicks = creature.AgeTicks,
                     FoodEnergyEaten = creature.FoodEnergyEaten,
+                    UsefulFoodEnergy = creature.UsefulFoodEnergy, FoodItemsEaten = creature.FoodItemsEaten,
                     DeathCause = creature.DeathCause,
                     Parent = creature.Parent,
                     Generation = creature.Generation,

@@ -174,6 +174,15 @@ namespace Eden.Evolution
             return speciesOf;
         }
 
+        public void ResetProgress(int generation)
+        {
+            foreach (var current in species)
+            {
+                current.BestFitness = Fitness.Worst;
+                current.LastImprovedGeneration = generation;
+            }
+        }
+
         /// <summary>
         /// Next generation (<paramref name="populationSize"/> children) from the generation last passed to
         /// <see cref="Assign"/> and its fitness. Updates every species' best fitness and drops stagnant species.

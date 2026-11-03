@@ -99,7 +99,7 @@ namespace Eden.Persistence
             {
                 var columns = JsonValue.NewObject();
                 foreach (var column in file.Value)
-                    columns.Add(column.Key, JsonValue.Of(column.Value));
+                    columns.Add(column.Key, JsonValue.Of(header.Plan.CurriculumEnabled && column.Value == FitnessUnit ? "competence-rank" : column.Value));
                 files.Add(file.Key, columns);
             }
 
@@ -118,8 +118,8 @@ namespace Eden.Persistence
                 .Add("settings", header.SettingsJson())
                 .Add("episodeTicks", JsonValue.Of(header.Plan.EpisodeTicks))
                 .Add("validationSeeds", validationSeeds)
-                .Add("fitnessUnit", JsonValue.Of(FitnessUnit))
-                .Add("fitnessProfile", JsonValue.Of(Fitness.Profile))
+                .Add("fitnessUnit", JsonValue.Of(header.Plan.CurriculumEnabled ? "competence-rank" : FitnessUnit))
+                .Add("fitnessProfile", JsonValue.Of(header.Plan.FitnessProfile))
                 .Add("neuralContract", JsonValue.Of(header.Plan.Contract.Id))
                 .Add("network", JsonValue.Of(neat ? NeatNetwork.Kind : Genome.MlpNetwork))
                 .Add("topology", neat
@@ -140,7 +140,7 @@ namespace Eden.Persistence
                 .Add("format", JsonValue.Of(SummaryFormat))
                 .Add("schemaVersion", JsonValue.Of(SchemaVersion))
                 .Add("configHash", JsonValue.Of(CheckpointCodec.Hex(header.ConfigHash)))
-                .Add("fitnessUnit", JsonValue.Of(FitnessUnit))
+                .Add("fitnessUnit", JsonValue.Of(header.Plan.CurriculumEnabled ? "competence-rank" : FitnessUnit))
                 .Add("resumed", JsonValue.Of(header.ResumedFrom != null))
                 .Add("training", JsonValue.NewObject()
                     .Add("generations", JsonValue.Of(tally.TrainingGenerations))
