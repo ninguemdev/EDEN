@@ -57,6 +57,7 @@ namespace Eden.Persistence
                     File.Replace(temporary, path, BackupPath(path), true);
                 else
                     File.Move(temporary, path);
+                CheckpointCatalog.Record(path, checkpoint, info);
                 return info;
             }
             catch (CheckpointException error)

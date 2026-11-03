@@ -20,6 +20,47 @@ namespace Eden.Tests.EditMode
         private static readonly DateTime SavedAt = new DateTime(2026, 10, 26, 12, 0, 0, DateTimeKind.Utc);
 
         [TestCase(false, false)]
+        [TestCase(false, true)]
+        [TestCase(true, false)]
+        [TestCase(true, true)]
+        public void RandomNetworkCheckpoint_PreservesFoundersAndDecisions(bool retainEvolution, bool eyes)
+        {
+            var settings = SharedSettings();
+            var config = new SimulationConfig(settings);
+            var options = new RandomNetworkSettings(evolvingBody: true, neat: true, eyes: eyes, evolvingEyes: eyes);
+            var genomes = options.CreateGenomes(config);
+            var world = new WorldSimulation(options.CreateWorld(config)) { Heredity = genomes };
+            var brains = new BrainController(config, id => GenomeBrains.Create(genomes.GenomeOf(id)));
+            Run(world, brains, 10);
+            var checkpoint = new Checkpoint("shared", "minimal", 3, "neural",
+                retainEvolution ? new EvolutionSession(Small(3), 2).Capture() : null,
+                new SharedWorldSnapshot(settings, world.Capture(), brains.Capture(), genomes.Capture(),
+                    randomNetwork: options));
+            var text = CheckpointCodec.Encode(checkpoint, "test", "test", SavedAt);
+            var decoded = CheckpointCodec.Decode(text, out var info);
+            Assert.That(info.SchemaVersion, Is.EqualTo(11));
+            Assert.That(CheckpointCodec.Encode(decoded, "test", "test", SavedAt), Is.EqualTo(text));
+            var restored = WorldSimulation.Restore(config, decoded.SharedWorld.World);
+            var restoredGenomes = decoded.SharedWorld.RandomNetwork.CreateGenomes(config);
+            restoredGenomes.Restore(decoded.SharedWorld.BornGenomes, restored.World);
+            restored.Heredity = restoredGenomes;
+            var restoredBrains = new BrainController(config, id => GenomeBrains.Create(restoredGenomes.GenomeOf(id)));
+            restoredBrains.Restore(decoded.SharedWorld.Brains);
+            foreach (var creature in restored.World.Creatures)
+            {
+                var genome = restoredGenomes.GenomeOf(creature.Id);
+                Assert.That(genome.HasSameContent(genomes.GenomeOf(creature.Id)), Is.True);
+                Assert.That(genome.Body, Is.EqualTo(creature.Genes));
+                Assert.That(genome.Eyes, Is.EqualTo(creature.Eyes));
+            }
+            for (var i = 0; i < 40; i++)
+            {
+                Run(world, brains, 1); Run(restored, restoredBrains, 1);
+                Assert.That(restored.ComputeFingerprint(), Is.EqualTo(world.ComputeFingerprint()));
+            }
+        }
+
+        [TestCase(false, false)]
         [TestCase(true, false)]
         [TestCase(true, true)]
         public void ParallelCheckpoint_PreservesEveryWorldAndResumesExactly(bool neat, bool eyes)

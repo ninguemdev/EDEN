@@ -21,6 +21,26 @@ namespace Eden.Tests.EditMode
         private const float Tolerance = 1e-4f;
 
         [Test]
+        public void DrinkingEventsIdentifyEachActualSourceAndActor()
+        {
+            var settings = new SimulationSettings { InitialPopulation = 1, InitialFood = 0, SolidBodies = true,
+                Water = new[] { new WaterSource(new Obstacle(5, 5, 7, 7), 0.2f, 0),
+                    new WaterSource(new Obstacle(8.2f, 5, 10.2f, 7), 100, 0, true) } };
+            var config = new SimulationConfig(settings); var world = new WorldState(config);
+            var actor = world.AddCreature(new Float2(7.6f, 6), 0, 50); actor.Hydration = 50;
+            var simulation = new WorldSimulation(world);
+            simulation.Step(new Eden.Application.BrainController(config, _ => new Eden.Brains.HeuristicBrain()));
+            Assert.That(simulation.LastWaterConsumption.Count, Is.EqualTo(2));
+            Assert.That(simulation.LastWaterConsumption[0].Source, Is.EqualTo(0));
+            Assert.That(simulation.LastWaterConsumption[1].Source, Is.EqualTo(1));
+            Assert.That(simulation.LastWaterConsumption[0].Creature, Is.EqualTo(actor.Id));
+            Assert.That(simulation.LastWaterConsumption[1].Creature, Is.EqualTo(actor.Id));
+            Assert.That(simulation.LastWaterConsumption[0].Useful, Is.EqualTo(0.2f).Within(1e-5));
+            Assert.That(simulation.LastWaterConsumption[0].Useful + simulation.LastWaterConsumption[1].Useful,
+                Is.EqualTo(simulation.LastHydration.Drunk));
+        }
+
+        [Test]
         public void WithoutWater_NothingHasHydration_AndTheBarriersAreTheObstacles()
         {
             var settings = new SimulationSettings { SolidBodies = true };

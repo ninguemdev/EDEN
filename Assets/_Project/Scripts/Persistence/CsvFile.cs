@@ -11,8 +11,9 @@ namespace Eden.Persistence
     internal sealed class CsvFile : IDisposable
     {
         private StreamWriter writer;
+        private readonly bool flushRows;
 
-        public CsvFile(string path, string header)
+        public CsvFile(string path, string header, bool flushEachRow = true)
         {
             if (string.IsNullOrEmpty(path))
                 throw new ArgumentException("A file path is required.", nameof(path));
@@ -21,8 +22,9 @@ namespace Eden.Persistence
             if (!string.IsNullOrEmpty(directory))
                 Directory.CreateDirectory(directory);
 
+            flushRows = flushEachRow;
             FilePath = path;
-            writer = new StreamWriter(path, false, new UTF8Encoding(false)) { NewLine = "\n" };
+            writer = new StreamWriter(path, false, new UTF8Encoding(false), 65536) { NewLine = "\n" };
             writer.WriteLine(header);
             writer.Flush();
         }
@@ -35,9 +37,11 @@ namespace Eden.Persistence
             if (writer == null)
                 throw new ObjectDisposedException(nameof(CsvFile));
             writer.WriteLine(row);
-            writer.Flush();
+            if (flushRows) writer.Flush();
             RowCount++;
         }
+
+        public void Flush() => writer?.Flush();
 
         public void Dispose()
         {

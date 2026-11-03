@@ -18,10 +18,16 @@ namespace Eden.Domain
         private readonly int rows;
 
         public FreeSpace(float width, float height, float bodyRadius, IReadOnlyList<Obstacle> obstacles)
+            : this(width, height, bodyRadius, obstacles, bodyRadius * 0.5f)
+        {
+        }
+
+        /// <summary>A grid of cells <paramref name="cellSize"/> wide (wider in very large arenas), e.g. a coarser one for path lengths.</summary>
+        public FreeSpace(float width, float height, float bodyRadius, IReadOnlyList<Obstacle> obstacles, float cellSize)
         {
             if (obstacles == null)
                 throw new ArgumentNullException(nameof(obstacles));
-            Cell = Math.Max(bodyRadius * 0.5f, MathF.Sqrt(width * height / MaxCells));
+            Cell = Math.Max(cellSize, MathF.Sqrt(width * height / MaxCells));
             columns = Math.Max(1, (int)(width / Cell));
             rows = Math.Max(1, (int)(height / Cell));
             free = new bool[columns * rows];
@@ -76,7 +82,202 @@ namespace Eden.Domain
             return false;
         }
 
+        /// <summary>Index of the cell holding <paramref name="point"/>, or -1 outside the grid.</summary>
+        public int CellAt(Float2 point)
+        {
+            if (!(point.X >= 0f && point.Y >= 0f))
+                return -1;
+            var column = (int)(point.X / Cell);
+            var row = (int)(point.Y / Cell);
+            return column < columns && row < rows ? row * columns + column : -1;
+        }
+
+        public bool IsFree(int cell) => cell >= 0 && cell < free.Length && free[cell];
+
+        public Float2 CentreOf(int cell) => Centre(cell % columns, cell / columns);
+
+        /// <summary>
+        /// Free cells whose centre lies within <paramref name="reach"/> of <paramref name="area"/> with a clear line from
+        /// the centre to the nearest point of the area (the cells a body can eat or drink there from), in index order.
+        /// </summary>
+        public List<int> CellsReaching(Obstacle area, float reach, IReadOnlyList<Obstacle> obstacles)
+        {
+            var cells = new List<int>();
+            var first = Math.Max(0, (int)((area.MinX - reach) / Cell));
+            var last = Math.Min(columns - 1, (int)((area.MaxX + reach) / Cell));
+            var bottom = Math.Max(0, (int)((area.MinY - reach) / Cell));
+            var top = Math.Min(rows - 1, (int)((area.MaxY + reach) / Cell));
+            for (var row = bottom; row <= top; row++)
+            {
+                for (var column = first; column <= last; column++)
+                {
+                    var cell = row * columns + column;
+                    if (!free[cell])
+                        continue;
+                    var centre = Centre(column, row);
+                    if (area.DistanceTo(centre) > reach)
+                        continue;
+                    var nearest = new Float2(Math.Min(area.MaxX, Math.Max(area.MinX, centre.X)),
+                        Math.Min(area.MaxY, Math.Max(area.MinY, centre.Y)));
+                    var clear = true;
+                    for (var i = 0; clear && i < obstacles.Count; i++)
+                        clear = !obstacles[i].Blocks(centre, nearest);
+                    if (clear)
+                        cells.Add(cell);
+                }
+            }
+
+            return cells;
+        }
+
+        /// <summary>
+        /// Length of the shortest path over free cells (8 neighbours; a diagonal step only where both cells beside it are
+        /// free, so paths never cut a corner) from the nearest of <paramref name="sources"/> to every cell; infinity where
+        /// no path leads, such as another region or a blocked cell.
+        /// </summary>
+        public float[] DistanceField(IReadOnlyList<int> sources)
+        {
+            var distance = new float[free.Length];
+            for (var i = 0; i < distance.Length; i++)
+                distance[i] = float.PositiveInfinity;
+            var heap = new CellHeap();
+            foreach (var source in sources)
+            {
+                if (!IsFree(source) || distance[source] == 0f)
+                    continue;
+                distance[source] = 0f;
+                heap.Push(source, 0f);
+            }
+
+            var diagonal = Cell * MathF.Sqrt(2f);
+            while (heap.TryPop(out var cell, out var reached))
+            {
+                if (reached > distance[cell])
+                    continue;
+                var column = cell % columns;
+                var row = cell / columns;
+                for (var dy = -1; dy <= 1; dy++)
+                {
+                    for (var dx = -1; dx <= 1; dx++)
+                    {
+                        if (dx == 0 && dy == 0)
+                            continue;
+                        var c = column + dx;
+                        var r = row + dy;
+                        if (c < 0 || r < 0 || c >= columns || r >= rows || !free[r * columns + c])
+                            continue;
+                        if (dx != 0 && dy != 0 && (!free[row * columns + c] || !free[r * columns + column]))
+                            continue;
+                        var next = r * columns + c;
+                        var through = reached + (dx != 0 && dy != 0 ? diagonal : Cell);
+                        if (through >= distance[next])
+                            continue;
+                        distance[next] = through;
+                        heap.Push(next, through);
+                    }
+                }
+            }
+
+            return distance;
+        }
+
+        /// <summary>
+        /// The distance of <paramref name="field"/> at <paramref name="point"/>: its cell's, or, when that cell is not free
+        /// (a body pressed against a wall), the nearest neighbouring free cell's plus one step; infinity if none.
+        /// </summary>
+        public float DistanceAt(float[] field, Float2 point)
+        {
+            var cell = CellAt(point);
+            if (cell < 0)
+                return float.PositiveInfinity;
+            if (free[cell])
+                return field[cell];
+            var column = cell % columns;
+            var row = cell / columns;
+            var best = float.PositiveInfinity;
+            for (var dy = -1; dy <= 1; dy++)
+            {
+                for (var dx = -1; dx <= 1; dx++)
+                {
+                    var c = column + dx;
+                    var r = row + dy;
+                    if (c >= 0 && r >= 0 && c < columns && r < rows && free[r * columns + c])
+                        best = Math.Min(best, field[r * columns + c] + Cell);
+                }
+            }
+
+            return best;
+        }
+
         private Float2 Centre(int column, int row) => new Float2((column + 0.5f) * Cell, (row + 0.5f) * Cell);
+
+        // Binary min-heap of (cell, distance) in two arrays for the distance field; ties pop in any order, which does
+        // not change the distances found.
+        private sealed class CellHeap
+        {
+            private int[] cells = new int[1024];
+            private float[] distances = new float[1024];
+            private int count;
+
+            public void Push(int cell, float distance)
+            {
+                if (count == cells.Length)
+                {
+                    Array.Resize(ref cells, count * 2);
+                    Array.Resize(ref distances, count * 2);
+                }
+
+                var i = count++;
+                while (i > 0)
+                {
+                    var parent = (i - 1) >> 1;
+                    if (distances[parent] <= distance)
+                        break;
+                    cells[i] = cells[parent];
+                    distances[i] = distances[parent];
+                    i = parent;
+                }
+
+                cells[i] = cell;
+                distances[i] = distance;
+            }
+
+            public bool TryPop(out int cell, out float distance)
+            {
+                if (count == 0)
+                {
+                    cell = -1;
+                    distance = 0f;
+                    return false;
+                }
+
+                cell = cells[0];
+                distance = distances[0];
+                count--;
+                if (count == 0)
+                    return true;
+                var movedCell = cells[count];
+                var moved = distances[count];
+                var i = 0;
+                while (true)
+                {
+                    var child = 2 * i + 1;
+                    if (child >= count)
+                        break;
+                    if (child + 1 < count && distances[child + 1] < distances[child])
+                        child++;
+                    if (moved <= distances[child])
+                        break;
+                    cells[i] = cells[child];
+                    distances[i] = distances[child];
+                    i = child;
+                }
+
+                cells[i] = movedCell;
+                distances[i] = moved;
+                return true;
+            }
+        }
 
         private int CountRegions()
         {

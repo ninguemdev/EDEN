@@ -72,3 +72,23 @@ namespace Eden.Simulation
         public DeathCause Cause { get; }
     }
 }
+
+namespace Eden.Simulation
+{
+    public readonly struct FoodConsumption
+    {
+        public FoodConsumption(Eden.Domain.CreatureId creature, Eden.Domain.FoodId food, float energy)
+        { Creature = creature; Food = food; Energy = energy; }
+        public Eden.Domain.CreatureId Creature { get; }
+        public Eden.Domain.FoodId Food { get; }
+        public float Energy { get; }
+    }
+    public readonly struct WaterConsumption
+    {
+        public WaterConsumption(Eden.Domain.CreatureId creature, int source, float useful)
+        { Creature = creature; Source = source; Useful = useful; }
+        public Eden.Domain.CreatureId Creature { get; }
+        public int Source { get; }
+        public float Useful { get; }
+    }
+}

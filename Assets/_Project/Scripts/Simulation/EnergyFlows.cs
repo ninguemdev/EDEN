@@ -52,6 +52,12 @@ namespace Eden.Simulation
         /// <summary>Energy held by creatures when they died (0 for starvation), which leaves the world with them.</summary>
         public double CarriedAwayByDeaths;
 
+        /// <summary>
+        /// Costs search rules did not charge (<see cref="WorldSimulation.FrozenNeeds"/>): then the parts above add up to
+        /// this instead of <see cref="Charged"/>, and the food eaten is all <see cref="Overflow"/>.
+        /// </summary>
+        public double Uncharged;
+
         /// <summary>Food energy that stayed in a creature: eaten minus wasted.</summary>
         public double Absorbed => Food - Overflow;
 
@@ -79,6 +85,7 @@ namespace Eden.Simulation
             Transferred += other.Transferred;
             BirthCosts += other.BirthCosts;
             CarriedAwayByDeaths += other.CarriedAwayByDeaths;
+            Uncharged += other.Uncharged;
         }
     }
 }

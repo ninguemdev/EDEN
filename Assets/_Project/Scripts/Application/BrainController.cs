@@ -41,6 +41,8 @@ namespace Eden.Application
         }
 
         public int TrackedCreatures => slots.Count;
+        public bool WillDecide(CreatureId creature) =>
+            !slots.TryGetValue(creature, out var slot) || slot.TicksUntilDecision == 0;
 
         public CreatureAction Decide(CreatureId creature, in Observation observation)
         {

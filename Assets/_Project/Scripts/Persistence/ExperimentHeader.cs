@@ -68,12 +68,12 @@ namespace Eden.Persistence
                 "created_utc=" + Utc(CreatedUtc),
                 "config_hash=" + CheckpointCodec.Hex(ConfigHash),
                 "evaluation_mode=isolated",
-                "fitness_unit=" + ExperimentJson.FitnessUnit,
-                "fitness_profile=" + Fitness.Profile,
+                "fitness_unit=" + (RewardProfiles.IsActive(Plan.Profile) ? "dimensionless" : ExperimentJson.FitnessUnit),
+                "fitness_profile=" + Plan.Profile.Id,
                 "neural_contract=" + Plan.Contract.Id,
                 "network=" + (IsNeat ? NeatNetwork.Kind : NetworkTopology.Mlp12x16x3.ToString()),
                 "evolution_algorithm=" + ExperimentJson.EvolutionAlgorithmOf(Plan.Algorithm),
-                "seed_scheme=" + EvaluationPlan.SeedSchemeVersion.ToString(culture),
+                "seed_scheme=" + Plan.SeedScheme.ToString(culture),
                 "training_seeds_per_generation=" + Plan.TrainingSeedsPerGeneration.ToString(culture),
                 "validation_seed=" + Plan.ValidationSeed.ToString(culture),
                 "validation_seeds=" + string.Join(";", Array.ConvertAll(Plan.ValidationSeeds(), s => s.ToString(culture))),
@@ -86,6 +86,8 @@ namespace Eden.Persistence
                 "episode_food=" + world.InitialFood.ToString(culture),
                 "population=" + Rules.PopulationSize.ToString(culture)
             };
+            lines.AddRange(ProfileLines(Plan.Profile));
+            lines.AddRange(StageLines(Plan));
             if (Plan.Senses == Senses.Eyes)
             {
                 var eye = Eye.Frontal;
@@ -182,6 +184,60 @@ namespace Eden.Persistence
             if (ResumedFrom != null)
                 lines.AddRange(ResumedFrom.Describe());
             return lines;
+        }
+
+        /// <summary>
+        /// The parameter hash, stages and parameters of a profile other than the legacy one, which needs no more than its
+        /// id; nothing for the legacy profile.
+        /// </summary>
+        /// <summary>One line per stage of a profile other than the legacy one: length, seeds, arena and, in a search stage, the arena it was enlarged to.</summary>
+        internal static IEnumerable<string> StageLines(EvaluationPlan plan)
+        {
+            if (plan.Profile.IsLegacy)
+                yield break;
+            var culture = CultureInfo.InvariantCulture;
+            foreach (var stage in plan.Stages)
+            {
+                var world = stage.TemplateConfig;
+                var line = "stage=" + stage.Index.ToString(culture) + ";" + stage.Name + ";episode_seconds " +
+                           stage.EpisodeSeconds.ToString(culture) + ";episode_ticks " + stage.EpisodeTicks.ToString(culture) +
+                           ";training_seeds " + stage.TrainingSeedsPerGeneration.ToString(culture) + ";validation_seeds " +
+                           stage.ValidationSeedCount.ToString(culture) + ";arena " + world.ArenaWidth.ToString(culture) + "x" +
+                           world.ArenaHeight.ToString(culture) + ";obstacles " +
+                           (ObstacleLayouts.Identify(world) is ObstacleLayout layout ? ObstacleLayouts.Name(layout) : "custom");
+                if (stage.IsSearch)
+                    line += (stage.ActiveSearch ? ";rules search (needs active, no respawn, time or death);targets " : ";rules search (needs frozen, no respawn);targets ") + stage.Search.Targets.Food.ToString(culture) +
+                            " food " + stage.Search.Targets.Water.ToString(culture) + " water;min_distance " +
+                            stage.Search.Targets.MinDistance.ToString(culture) + ";arena_used " +
+                            stage.Search.ArenaSide.ToString(culture);
+                else
+                    line += ";food " + world.InitialFood.ToString(culture) + ";water " + world.Water.Count.ToString(culture);
+                yield return line;
+            }
+        }
+
+        internal static IEnumerable<string> ProfileLines(RewardProfile profile)
+        {
+            if (profile.IsLegacy)
+                yield break;
+            var culture = CultureInfo.InvariantCulture;
+            yield return "fitness_profile_hash=" + profile.ParameterHash;
+            foreach (var stage in profile.Stages)
+            {
+                var components = new List<string>();
+                foreach (var component in stage.Components)
+                    components.Add(component.Name + " " + component.Unit);
+                yield return "reward_stage=" + stage.Name + ";weight " + stage.Weight.ToString(culture) + ";scoring " +
+                             stage.Scoring + ";components " + string.Join(",", components);
+            }
+
+            if (profile.Parameters.Count > 0)
+            {
+                var parameters = new List<string>();
+                foreach (var parameter in profile.Parameters)
+                    parameters.Add(parameter.Name + " " + parameter.Value.ToString(culture));
+                yield return "reward_parameters=" + string.Join(";", parameters);
+            }
         }
 
         /// <summary>
