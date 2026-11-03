@@ -122,7 +122,10 @@ namespace Eden.Presentation
             Button("confirm-cancel", () => { replacing = null; waitingSave = false; Display("confirm-modal", false); });
             Button("confirm-discard", CompleteReplacement);
             Button("confirm-save", () => { runner.RequestCheckpoint(); waitingSave = true; Message("Salvando antes de continuar…"); });
-            root.RegisterCallback<ChangeEvent<string>>(_ => DraftChanged()); root.RegisterCallback<ChangeEvent<int>>(_ => DraftChanged()); root.RegisterCallback<ChangeEvent<float>>(_ => DraftChanged());
+            root.RegisterCallback<ChangeEvent<string>>(DraftFieldChanged);
+            root.RegisterCallback<ChangeEvent<int>>(DraftFieldChanged);
+            root.RegisterCallback<ChangeEvent<float>>(DraftFieldChanged);
+            root.RegisterCallback<ChangeEvent<bool>>(DraftFieldChanged);
             SetupResize("side-divider", true); SetupResize("chart-divider", false);
             root.RegisterCallback<GeometryChangedEvent>(_ => ApplyLayout());
             var settings = UnityEngine.Application.isBatchMode ? "observe" : PlayerPrefs.GetString("eden.workspace.layout", "observe");
@@ -187,6 +190,12 @@ namespace Eden.Presentation
         {
             for (var i = 0; i < 5; i++) { Display("config-page-" + i, i == index); root.Q<Button>("config-tab-" + i).EnableInClassList("lab-button--active", i == index); }
             if (index == 4) RefreshPreview();
+        }
+        private void DraftFieldChanged<T>(ChangeEvent<T> change)
+        {
+            // Labels also emit change events. Status updates must not restart the preview debounce.
+            if (change.target is BaseField<T> field && root.Q("experiment-panel").Contains(field))
+                DraftChanged();
         }
         private void DraftChanged()
         {

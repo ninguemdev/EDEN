@@ -181,6 +181,31 @@ namespace Eden.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator StartBecomesAvailableAfterEditingDespiteStatusUpdates()
+        {
+            Press(Root, "new-experiment");
+            var start = Root.Q<Button>("start-button");
+            Root.Q<IntegerField>("seed-field").value = 987;
+            Assert.That(start.enabledInHierarchy, Is.False, "wait for the edited draft's preview");
+            var timeout = Time.realtimeSinceStartup + 2f;
+            var nextStatus = Time.unscaledTime;
+            while (Time.realtimeSinceStartup < timeout)
+            {
+                if (Time.unscaledTime >= nextStatus)
+                {
+                    Root.Q<Label>("session-state").text = "Status " + Time.frameCount;
+                    nextStatus = Time.unscaledTime + 0.1f;
+                }
+                yield return null;
+            }
+            Assert.That(runner.Workspace.Preview.World, Is.Not.Null);
+            Assert.That(start.enabledInHierarchy, Is.True, "status labels must not invalidate the draft");
+            Press(Root, "start-button");
+            Assert.That(runner.Workspace.Screen, Is.EqualTo("simulation"));
+            Assert.That(runner.Seed, Is.EqualTo(987));
+        }
+
+        [UnityTest]
         public IEnumerator NavigationPreservesDraftAndPreviewDoesNotChangeLiveWorldOrRng()
         {
             Assert.That(runner.Workspace.Screen, Is.EqualTo("home")); Assert.That(runner.Clock.IsPaused, Is.True);
