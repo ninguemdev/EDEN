@@ -129,7 +129,7 @@ namespace Eden.Application
             var ran = 0L;
             while (ran < maxTicks && !IsFinished)
             {
-                Tracker?.Active?.BeforeTick(Creature);
+                Tracker?.Active?.BeforeTick(Creature, Layout, Controller.WillDecide(Creature.Id));
                 Simulation.Step(Controller);
                 Tracker?.AfterTick(Simulation, Creature, Layout);
                 ran++;
@@ -191,6 +191,9 @@ namespace Eden.Application
                 if (!double.IsNaN(a.HydrationAtSip[i])) values["hydration_before_sip_" + i] = a.HydrationAtSip[i];
                 if (Layout.IsWater(i)) values["water_useful_" + i] = a.WaterUseful[i - Layout.Food.Count];
             }
+            values["sight"] = a.Sight; values["travel"] = a.Travel; values["sight_coverage"] = a.SightCoverage;
+            values["novelty"] = a.Novelty; values["seen"] = a.SeenUnique; values["sight_goal"] = a.SightGoal;
+            values["sightings"] = a.Sightings;
             values["detected_food"] = detectedFood; values["detected_water"] = detectedWater;
             values["collected_food"] = collectedFood; values["collected_water"] = collectedWater;
             values["initial_energy"] = a.InitialEnergy; values["final_energy"] = Creature.Energy;

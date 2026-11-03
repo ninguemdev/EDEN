@@ -13,14 +13,17 @@ namespace Eden.Tests.EditMode
 {
     public class ActiveSearchTests
     {
-        public static EvolutionSettings Settings(bool only = true)
+        public static EvolutionSettings Settings(bool only = true, ActiveSearchOptions active = null)
         {
             var s = new EvolutionSettings { ExperimentSeed = 1, Algorithm = EvolutionAlgorithm.Neat,
                 Senses = Senses.Eyes, EvolvingEyes = true, PopulationSize = 4, EliteCount = 1,
                 TrainingSeedsPerGeneration = 2, ValidationSeedCount = 1 };
-            RewardProfiles.UseActiveSearch(s, new TwoStageOptions(), new ActiveSearchOptions(), only);
+            RewardProfiles.UseActiveSearch(s, new TwoStageOptions(), active ?? new ActiveSearchOptions(), only);
             return s;
         }
+
+        /// <summary>The rules version 1 options of a run started before exploration was scored by sight.</summary>
+        private static ActiveSearchOptions EnteredCells() => new ActiveSearchOptions { RulesVersion = 1 };
         [TestCase(0, 0, 0, 0)]
         [TestCase(1, 1, 1, 1)]
         [TestCase(1, 0, 0, 0.1857142857)]
@@ -167,7 +170,7 @@ namespace Eden.Tests.EditMode
             var checkpoint = new Checkpoint("evolution", "minimal", 1, "neural", original.Capture(), null);
             var time = new DateTime(2026, 10, 30, 12, 0, 0, DateTimeKind.Utc);
             var json = CheckpointCodec.Encode(checkpoint, "test", "test", time);
-            Assert.That(json, Does.Contain("\"schemaVersion\": 9"));
+            Assert.That(json, Does.Contain("\"schemaVersion\": 12"));
             var resumed = EvolutionSession.Restore(CheckpointCodec.Decode(json, out _).Evolution);
             Assert.That(resumed.Job.Current.Simulation.RespawnFood, Is.False);
             Assert.That(resumed.Job.Current.Simulation.ComputeFingerprint(), Is.EqualTo(original.Job.Current.Simulation.ComputeFingerprint()));
@@ -216,6 +219,188 @@ namespace Eden.Tests.EditMode
                 original.Advance(12000); restored.Advance(12000);
                 Assert.That(Save(restored), Is.EqualTo(Save(original)));
             }
+        }
+
+        // The parameters and hash of the user's own version 1 run (g750 of 20261030-173026-lab-seed1-stress).
+        private static readonly RewardParameter[] PublishedVersion1 =
+        {
+            new RewardParameter("search_weight", 0.3), new RewardParameter("food_targets", 3),
+            new RewardParameter("water_targets", 2), new RewardParameter("min_distance", 30),
+            new RewardParameter("alpha", 0.5), new RewardParameter("beta", 0.30000001192092896),
+            new RewardParameter("water_side", 2), new RewardParameter("max_arena", 200),
+            new RewardParameter("feasible_fraction", 0.5), new RewardParameter("survival_weight", 0.5),
+            new RewardParameter("replenish_weight", 0.3), new RewardParameter("reserves_weight", 0.2),
+            new RewardParameter("active_rules_version", 1), new RewardParameter("mask_version", 1),
+            new RewardParameter("frozen_needs", 0), new RewardParameter("food_respawn", 0),
+            new RewardParameter("finish_all_targets", 0), new RewardParameter("active_CellSide", 2),
+            new RewardParameter("active_Hysteresis", 0.2), new RewardParameter("active_ExplorationGoal", 200),
+            new RewardParameter("active_WaterThreshold", 5), new RewardParameter("active_MaxEnergy", 160),
+            new RewardParameter("active_InitialEnergy", 80), new RewardParameter("active_FoodEnergy", 30),
+            new RewardParameter("active_Metabolism", 0.5), new RewardParameter("active_Movement", 0.5),
+            new RewardParameter("active_Sensor", 0.1), new RewardParameter("active_Turn", 0.25),
+            new RewardParameter("active_MaxHydration", 100), new RewardParameter("active_HydrationLoss", 1.25),
+            new RewardParameter("active_DrinkRate", 20), new RewardParameter("active_MaxAge", 240)
+        };
+
+        [Test]
+        public void PublishedVersion1ProfileRebuildsWithItsOwnHashAndComponents()
+        {
+            var profile = RewardProfiles.Create(RewardProfiles.ActiveSearchId, PublishedVersion1);
+            Assert.That(profile, Is.Not.Null);
+            Assert.That(profile.ParameterHash, Is.EqualTo("08c75ba590043126"));
+            Assert.That(profile.Stages[0].Scoring, Is.EqualTo(StageScoring.ExploreCollectActive));
+            Assert.That(profile.Stages[0].Components.Select(c => c.Name).ToList(), Has.No.Member("seen"));
+            Assert.That(RewardProfiles.IsActive(profile), Is.True);
+            Assert.That(RewardProfiles.IsSight(profile), Is.False);
+            // The same options rebuilt in this build keep that list, parameter for parameter.
+            var rebuilt = RewardProfiles.ActiveSearch(new TwoStageOptions { Beta = 0.30000001192092896 },
+                EnteredCells(), true);
+            Assert.That(rebuilt.Canonical(), Is.EqualTo(profile.Canonical()));
+            Assert.That(rebuilt.ParameterHash, Is.EqualTo(profile.ParameterHash));
+        }
+
+        [Test]
+        public void Version1ScoresByTheCellsEnteredAndKeepsItsSchema()
+        {
+            var settings = Settings(active: EnteredCells());
+            Assert.That(settings.Profile.Id, Is.EqualTo(RewardProfiles.ActiveSearchId));
+            Assert.That(ProfileChoice.Read(settings).Active.Sight, Is.False);
+            var plan = new EvaluationPlan(settings);
+            Assert.That(plan.Stages[0].ActiveSearch, Is.True);
+            var episode = new IsolatedEpisode(plan, () => new StillBrain(), plan.TrainingSeeds(0)[0], 0, 0, 0,
+                EvaluationMode.Training, eyes: EyeSet.Founder);
+            episode.Advance(6);
+            var a = episode.Tracker.Active;
+            Assert.That(a.SeenUnique, Is.Zero); Assert.That(a.Sightings, Is.Zero); Assert.That(a.SightGoal, Is.Zero);
+            Assert.That(a.Sight, Is.Zero); Assert.That(a.Exploration, Is.EqualTo(a.Travel));
+            var session = new EvolutionSession(settings, 5, 2); session.Advance(367);
+            var time = new DateTime(2026, 10, 30, 12, 0, 0, DateTimeKind.Utc);
+            var json = CheckpointCodec.Encode(new Checkpoint("evolution", "minimal", 1, "neural", session.Capture(),
+                null), "test", "test", time);
+            Assert.That(json, Does.Contain("\"schemaVersion\": 9").And.Not.Contain("\"Seen\""));
+            var resumed = EvolutionSession.Restore(CheckpointCodec.Decode(json, out _).Evolution);
+            Assert.That(resumed.Job.Current.Tracker.Active.SightGoal, Is.Zero);
+        }
+
+        [Test]
+        public void SightCreditsEveryCellTheEyeCouldReportAndNothingAnObstacleHides()
+        {
+            var plan = new EvaluationPlan(Settings());
+            var episode = new IsolatedEpisode(plan, () => new StillBrain(), plan.TrainingSeeds(0)[0], 0, 0, 0,
+                EvaluationMode.Training, eyes: EyeSet.Founder);
+            var config = episode.Simulation.World.Config;
+            var pillar = config.Obstacles[4]; // the middle pillar of the nine
+            // Beside its near corner, looking along it: the pillar hides the cells behind it and not the ones below.
+            episode.Creature.Position = new Float2(pillar.MinX - 1.5f, pillar.MinY - 1f);
+            episode.Creature.Heading = 0f;
+            var position = episode.Creature.Position;
+            episode.Advance(1);
+            var a = episode.Tracker.Active;
+            var grid = new ExplorationGrid(config, episode.Layout.Founder, 2);
+            var eye = EyeSet.Founder[0];
+            var origin = Vision.EyePosition(config, episode.Creature, eye);
+            var axisX = MathF.Cos(eye.Orientation);
+            var axisY = MathF.Sin(eye.Orientation);
+            var cosHalf = MathF.Cos(eye.Aperture * 0.5f);
+            var range = episode.Creature.Body.SensorRange * eye.Range;
+            var expected = new System.Collections.Generic.List<int>();
+            var hidden = new System.Collections.Generic.List<int>();
+            for (var cell = 0; cell < grid.Columns * grid.Rows; cell++)
+            {
+                if (!grid.Eligible(cell)) continue;
+                if (!Vision.InCone(origin, axisX, axisY, cosHalf, range, grid.Centre(cell), out _)) continue;
+                if (Vision.LineOfSight(config, origin, grid.Centre(cell))) expected.Add(cell);
+                else hidden.Add(cell);
+            }
+
+            Assert.That(episode.Creature.Position, Is.EqualTo(position), "an idle creature does not move");
+            Assert.That(expected, Is.Not.Empty, "the cone must reach cells the pillar does not hide");
+            Assert.That(hidden, Is.Not.Empty, "the pillar must hide cells of the cone");
+            Assert.That(a.Clone().Seen, Is.EqualTo(expected));
+            Assert.That(a.SeenUnique, Is.EqualTo(expected.Count));
+            Assert.That(a.SightGoal, Is.EqualTo((int)Math.Round(0.75 * a.Eligible)));
+            // Looking again from the same place credits nothing new, and the repetitions lower the novelty.
+            var sightings = a.Sightings;
+            episode.Advance(4);
+            Assert.That(a.SeenUnique, Is.EqualTo(expected.Count));
+            Assert.That(a.Sightings, Is.GreaterThan(sightings));
+            Assert.That(a.Novelty, Is.EqualTo(a.SeenUnique / (double)a.Sightings).Within(1e-12));
+            Assert.That(a.Sight, Is.EqualTo(Math.Min(1.0, (double)expected.Count / a.SightGoal)).Within(1e-12));
+            Assert.That(a.Exploration, Is.EqualTo(0.8 * a.Sight + 0.2 * a.Travel).Within(1e-12));
+            episode.Advance(long.MaxValue);
+            var components = plan.Profile.Stages[0].Components.Select(c => c.Name).ToList();
+            var precise = episode.Result().PreciseComponents;
+            Assert.That(precise[components.IndexOf("seen")], Is.EqualTo(a.SeenUnique));
+            Assert.That(precise[components.IndexOf("sight_goal")], Is.EqualTo(a.SightGoal));
+            Assert.That(precise[components.IndexOf("sightings")], Is.EqualTo(a.Sightings));
+            Assert.That(precise[components.IndexOf("sight")], Is.EqualTo(a.Sight));
+            Assert.That(precise[components.IndexOf("travel")], Is.EqualTo(a.Travel));
+            Assert.That(precise[components.IndexOf("novelty")], Is.EqualTo(a.Novelty));
+            Assert.That(precise[components.IndexOf("exploration")], Is.EqualTo(a.Exploration));
+        }
+
+        [Test]
+        public void CrossingTheInteriorIsWorthMoreThanHuggingTheBorder()
+        {
+            var plan = new EvaluationPlan(Settings());
+            ActiveSearchState Walk(float share)
+            {
+                var episode = new IsolatedEpisode(plan, () => new StillBrain(), plan.TrainingSeeds(0)[0], 0, 0, 0,
+                    EvaluationMode.Training, eyes: EyeSet.Founder);
+                var config = episode.Simulation.World.Config;
+                var first = config.BodyRadius + 0.5f;
+                var last = config.ArenaWidth - first;
+                // The centre of the nearest row of cells, so the entry margin does not swallow the visits.
+                var y = (MathF.Floor(config.ArenaHeight * share / 2f) + 0.5f) * 2f;
+                const int steps = 48;
+                for (var i = 0; i < steps; i++)
+                {
+                    episode.Creature.Position = new Float2(first + (last - first) * i / (steps - 1f), y);
+                    episode.Advance(1);
+                }
+
+                return episode.Tracker.Active;
+            }
+
+            var border = Walk(0.02f);    // a creature that keeps to the wall
+            var interior = Walk(0.375f); // the same path, between two rows of pillars
+            UnityEngine.Debug.Log($"ACTIVE_SIGHT_WALK border={border.SeenUnique}/{border.Unique} " +
+                                  $"interior={interior.SeenUnique}/{interior.Unique} goal={interior.SightGoal} " +
+                                  $"travel_goal={interior.Goal} eligible={interior.Eligible} " +
+                                  $"E={border.Exploration:0.0000}/{interior.Exploration:0.0000}");
+            Assert.That(interior.SeenUnique, Is.GreaterThan(border.SeenUnique));
+            Assert.That(interior.Sight, Is.GreaterThan(border.Sight));
+            Assert.That(interior.Exploration, Is.GreaterThan(border.Exploration));
+            Assert.That(interior.Score, Is.GreaterThan(border.Score));
+        }
+
+        [Test]
+        public void SightStateResumesAndRefusesACellOutsideTheMask()
+        {
+            var original = new EvolutionSession(Settings(), 5, 2);
+            original.Advance(400);
+            var time = new DateTime(2026, 10, 30, 12, 0, 0, DateTimeKind.Utc);
+            string Save(EvolutionSession session) => CheckpointCodec.Encode(new Checkpoint("evolution", "minimal", 1,
+                "neural", session.Capture(), null), "test", "test", time);
+            var saved = Save(original);
+            Assert.That(saved, Does.Contain("\"sightGoal\"").And.Contain("\"sightings\""));
+            var restored = EvolutionSession.Restore(CheckpointCodec.Decode(saved, out var info).Evolution);
+            Assert.That(info.SchemaVersion, Is.EqualTo(12));
+            Assert.That(restored.Job.Current.Tracker.Active.SeenUnique,
+                Is.EqualTo(original.Job.Current.Tracker.Active.SeenUnique).And.GreaterThan(0));
+            Assert.That(Save(restored), Is.EqualTo(saved));
+            original.Advance(900);
+            restored.Advance(900);
+            Assert.That(Save(restored), Is.EqualTo(Save(original)));
+            var first = saved.IndexOf("\"Seen\": [", StringComparison.Ordinal);
+            Assert.That(first, Is.GreaterThan(0));
+            var end = saved.IndexOf(']', first);
+            var cells = saved.Substring(first, end - first);
+            // The initial cell is never eligible, so a state that claims to have seen it is refused.
+            var tampered = saved.Substring(0, first) +
+                           cells.Substring(0, cells.LastIndexOf(',') + 1) + " 0" + saved.Substring(end);
+            Assert.That(tampered, Is.Not.EqualTo(saved));
+            Assert.That(() => CheckpointCodec.Decode(tampered, out _), Throws.Exception);
         }
 
         private static Float2 WaterPlace(Obstacle water) => new Float2(water.MinX - 0.6f, (water.MinY + water.MaxY) / 2);

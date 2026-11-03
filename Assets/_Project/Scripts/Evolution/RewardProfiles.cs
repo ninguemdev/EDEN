@@ -129,8 +129,21 @@ namespace Eden.Evolution
         public const string TwoStageSearchId = "two-stage-search-v1";
         public const string ActiveSearchId = "search-explore-collect-active-v1";
         public const string ActiveTwoStageId = "two-stage-explore-collect-active-v1";
+
+        /// <summary>The same search with exploration measured by the cells the senses saw (rules version 2).</summary>
+        public const string SightSearchId = "search-explore-collect-active-v2";
+
+        public const string SightTwoStageId = "two-stage-explore-collect-active-v2";
         public static bool IsActive(RewardProfile profile) =>
-            profile.Id == ActiveSearchId || profile.Id == ActiveTwoStageId;
+            profile.Id == ActiveSearchId || profile.Id == ActiveTwoStageId || IsSight(profile);
+
+        /// <summary>Whether the profile scores exploration by what the senses saw.</summary>
+        public static bool IsSight(RewardProfile profile) =>
+            profile.Id == SightSearchId || profile.Id == SightTwoStageId;
+
+        /// <summary>Whether a stage scoring is one of the active search's.</summary>
+        public static bool IsActive(StageScoring scoring) =>
+            scoring == StageScoring.ExploreCollectActive || scoring == StageScoring.ExploreSightActive;
 
         public const string ResourcesStage = "resources";
         public const string SearchStage = "search";
@@ -245,7 +258,14 @@ namespace Eden.Evolution
                     return TwoStageSearch(OptionsOf(parameters));
                 case ActiveSearchId:
                 case ActiveTwoStageId:
-                    return ActiveSearch(OptionsOf(parameters), ActiveSearchOptions.Read(parameters), id == ActiveSearchId);
+                case SightSearchId:
+                case SightTwoStageId:
+                {
+                    var active = ActiveSearchOptions.Read(parameters);
+                    // The id names the formula: it decides the rules version, never the other way round.
+                    active.RulesVersion = id == SightSearchId || id == SightTwoStageId ? ActiveSearchOptions.SightRules : 1;
+                    return ActiveSearch(OptionsOf(parameters), active, id == ActiveSearchId || id == SightSearchId);
+                }
                 default:
                     return null;
             }
@@ -340,11 +360,12 @@ namespace Eden.Evolution
             var old = TwoStageSearch(search); // validates shared layout and resource options
             var parameters = new List<RewardParameter>(old.Parameters);
             parameters.AddRange(active.Parameters());
+            var scoring = active.Sight ? StageScoring.ExploreSightActive : StageScoring.ExploreCollectActive;
             var names = new List<string>();
-            foreach (var component in RewardComponent.Of(StageScoring.ExploreCollectActive)) names.Add(component.Name);
-            var stage = new RewardStage(SearchStage, onlySearch ? 1 : search.SearchWeight,
-                StageScoring.ExploreCollectActive, names.ToArray());
-            return new RewardProfile(onlySearch ? ActiveSearchId : ActiveTwoStageId,
+            foreach (var component in RewardComponent.Of(scoring)) names.Add(component.Name);
+            var stage = new RewardStage(SearchStage, onlySearch ? 1 : search.SearchWeight, scoring, names.ToArray());
+            return new RewardProfile(active.Sight ? onlySearch ? SightSearchId : SightTwoStageId
+                    : onlySearch ? ActiveSearchId : ActiveTwoStageId,
                 onlySearch ? new[] { stage } : new[] { old.Stages[0], stage }, parameters);
         }
 

@@ -17,14 +17,14 @@ namespace Eden.Application
             public ulong Seed;
             public float Arena, Seconds, FinalEnergy, FinalHydration;
             public double EnergyBeforeFood = double.PositiveInfinity, HydrationBeforeWater = double.PositiveInfinity;
-            public int Collected, Visited, TargetCount, EyeCount, StageIndex;
+            public int Collected, Visited, Seen, SightGoal, TargetCount, EyeCount, StageIndex;
             public string Role, ProfileHash;
             public string Route, Collections;
             public DeathCause Death;
             public bool Feasible => Collected == TargetCount && Death == DeathCause.None && EnergyBeforeFood >= 0.1 && HydrationBeforeWater >= 0.1;
             public override string ToString() => string.Format(CultureInfo.InvariantCulture,
-                "seed={0};arena={1};seconds={2:R};collected={3};visited={4};energy={5:R};hydration={6:R};min_food_reserve={7:R};min_water_reserve={8:R};death={9};eyes={10};stage={11};role={12};profile_hash={13};collection_ticks={14}",
-                Seed, Arena, Seconds, Collected, Visited, FinalEnergy, FinalHydration, EnergyBeforeFood, HydrationBeforeWater, Death, EyeCount, StageIndex, Role, ProfileHash, Collections);
+                "seed={0};arena={1};seconds={2:R};collected={3};visited={4};seen={15};sight_goal={16};energy={5:R};hydration={6:R};min_food_reserve={7:R};min_water_reserve={8:R};death={9};eyes={10};stage={11};role={12};profile_hash={13};collection_ticks={14}",
+                Seed, Arena, Seconds, Collected, Visited, FinalEnergy, FinalHydration, EnergyBeforeFood, HydrationBeforeWater, Death, EyeCount, StageIndex, Role, ProfileHash, Collections, Seen, SightGoal);
         }
         public static Result Run(EvaluationStage stage, RewardProfile profile, ulong seed, EyeSet eyes, bool explore = true)
         {
@@ -43,7 +43,7 @@ namespace Eden.Application
                 if (world.Tick % 200 == 0) trace.Add(world.Tick + ":" + route.Describe(creature));
                 var energy = creature.Energy / creature.Body.MaxEnergy;
                 var hydration = creature.Hydration / config.MaxHydration;
-                tracker.Active.BeforeTick(creature);
+                tracker.Active.BeforeTick(creature, layout, world.Tick % config.DecisionIntervalTicks == 0);
                 simulation.Step(route);
                 tracker.AfterTick(simulation, creature, layout);
                 if (simulation.LastFoodConsumption.Count > 0) result.EnergyBeforeFood = Math.Min(result.EnergyBeforeFood, energy);
@@ -54,7 +54,9 @@ namespace Eden.Application
             }
             result.Seconds = world.Tick * config.TickDuration; result.FinalEnergy = creature.Energy;
             result.FinalHydration = creature.Hydration; result.Collected = tracker.Collected.Count;
-            result.Collections = string.Join(",", tracker.CollectionTicks); result.Route = route.Describe(creature) + ";collections=" + result.Collections + ";trace=" + string.Join("|", trace); result.Visited = tracker.Active.Unique; result.Death = creature.DeathCause;
+            result.Collections = string.Join(",", tracker.CollectionTicks); result.Route = route.Describe(creature) + ";collections=" + result.Collections + ";trace=" + string.Join("|", trace); result.Visited = tracker.Active.Unique;
+            result.Seen = tracker.Active.SeenUnique; result.SightGoal = tracker.Active.SightGoal;
+            result.Death = creature.DeathCause;
             return result;
         }
         public static void Preflight(EvaluationPlan plan, int generations, Action<Result> report = null)

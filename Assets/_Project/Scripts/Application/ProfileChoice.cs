@@ -44,9 +44,18 @@ namespace Eden.Application
         {
             if (name.StartsWith("-eden-search-", StringComparison.Ordinal))
             {
-                var key = name.Substring("-eden-search-".Length);
-                foreach (var field in typeof(ActiveSearchOptions).GetFields())
-                    if (string.Equals(field.Name, key.Replace("-", ""), StringComparison.OrdinalIgnoreCase))
+                var key = name.Substring("-eden-search-".Length).Replace("-", "");
+                // The rules version and the sight options are properties, outside the reflection over the fields.
+                if (string.Equals(key, "rules", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(key, "rulesversion", StringComparison.OrdinalIgnoreCase))
+                { Active.RulesVersion = Number(name, value); return true; }
+                if (string.Equals(key, "sightweight", StringComparison.OrdinalIgnoreCase))
+                { Active.SightWeight = Number(name, value); return true; }
+                if (string.Equals(key, "sightgoal", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(key, "sightgoalfraction", StringComparison.OrdinalIgnoreCase))
+                { Active.SightGoalFraction = Number(name, value); return true; }
+                foreach (var field in ActiveSearchOptions.Fields)
+                    if (string.Equals(field.Name, key, StringComparison.OrdinalIgnoreCase))
                     { field.SetValue(Active, Number(name, value)); return true; }
                 throw Invalid(name, value, "an active search option");
             }
@@ -145,7 +154,9 @@ namespace Eden.Application
             choice.TwoStage = options;
             if (RewardProfiles.IsActive(profile))
             {
-                choice.Kind = profile.Id == RewardProfiles.ActiveSearchId ? ProfileKind.SearchActive : ProfileKind.TwoStageActive;
+                choice.Kind = profile.Id == RewardProfiles.ActiveSearchId || profile.Id == RewardProfiles.SightSearchId
+                    ? ProfileKind.SearchActive
+                    : ProfileKind.TwoStageActive;
                 choice.Active = ActiveSearchOptions.Read(profile.Parameters);
             }
             else if (profile.Id == RewardProfiles.BalancedResourcesId || profile.Id == RewardProfiles.BalancedResourcesDryId)

@@ -432,6 +432,17 @@ namespace Eden.Presentation
             profileBetaField.style.display = active ? DisplayStyle.None : DisplayStyle.Flex;
         }
         private ActiveSearchOptions activeSearchOptions = new ActiveSearchOptions();
+        private Toggle sightToggle;
+        private FloatField sightWeightField, sightGoalField;
+
+        // The sight weight and goal only mean something while exploration is scored by what the senses saw.
+        private void RefreshSightFields()
+        {
+            var sight = activeSearchOptions.Sight;
+            sightToggle.SetValueWithoutNotify(sight);
+            sightWeightField.style.display = sight ? DisplayStyle.Flex : DisplayStyle.None;
+            sightGoalField.style.display = sight ? DisplayStyle.Flex : DisplayStyle.None;
+        }
 
         private ProfileChoice ReadProfile()
         {
@@ -451,8 +462,11 @@ namespace Eden.Presentation
         private void ShowProfile(ProfileChoice profile)
         {
             activeSearchOptions = profile.Active.Clone();
-            foreach (var field in typeof(ActiveSearchOptions).GetFields())
+            foreach (var field in ActiveSearchOptions.Fields)
                 activeFields[field.Name].SetValueWithoutNotify((float)(double)field.GetValue(activeSearchOptions));
+            sightWeightField.SetValueWithoutNotify((float)activeSearchOptions.SightWeight);
+            sightGoalField.SetValueWithoutNotify((float)activeSearchOptions.SightGoalFraction);
+            RefreshSightFields();
             var options = profile.TwoStage;
             profileField.SetValueWithoutNotify(ProfileChoices[(int)profile.Kind]);
             profileWeightField.SetValueWithoutNotify((float)(options.SearchWeight * 100.0));
@@ -679,8 +693,22 @@ namespace Eden.Presentation
             profileObstaclesField.choices = new List<string>(SearchObstacleChoices);
             profileObstaclesField.index = (int)defaults.SearchObstacles;
             activeFoldout = new Foldout { text = "Fome, sede e exploração", value = false, name = "active-search-options" };
-            activeFoldout.Add(new Label("E = células/meta · D = alvos vistos · C = alvos coletados\nR = (0,65E + 0,35C) × (1 + 0,5D + 2C) / 3,5"));
+            activeFoldout.Add(new Label("E = exploração · D = alvos vistos · C = alvos coletados\nR = (0,65E + 0,35C) × (1 + 0,5D + 2C) / 3,5"));
             profileFoldout.Add(activeFoldout);
+            sightToggle = new Toggle("Explorar = células vistas") { name = "active-sight" };
+            sightToggle.AddToClassList("lab-field");
+            sightToggle.tooltip = "Ligado: E premia as células distintas que os sentidos viram (regras v2). " +
+                                  "Desligado: E conta apenas as células pisadas, como na v1.";
+            sightToggle.RegisterValueChangedCallback(change =>
+            {
+                activeSearchOptions.RulesVersion = change.newValue ? ActiveSearchOptions.SightRules : 1;
+                RefreshSightFields();
+            });
+            activeFoldout.Add(sightToggle);
+            sightWeightField = Share("active-SightWeight", "Peso da visão em E", (float)activeSearchOptions.SightWeight,
+                value => activeSearchOptions.SightWeight = value);
+            sightGoalField = Share("active-SightGoalFraction", "Meta vista (fração da máscara)",
+                (float)activeSearchOptions.SightGoalFraction, value => activeSearchOptions.SightGoalFraction = value);
             var labels = new Dictionary<string, string>
             {
                 { "CellSide", "Lado da célula" }, { "Hysteresis", "Margem de entrada" }, { "ExplorationGoal", "Meta de células" },
@@ -689,7 +717,7 @@ namespace Eden.Presentation
                 { "Sensor", "Sensor de referência/s" }, { "Turn", "Fração de custo do giro" }, { "MaxHydration", "Hidratação máxima" },
                 { "HydrationLoss", "Perda de água/s" }, { "DrinkRate", "Taxa de beber/s" }, { "MaxAge", "Idade máxima (s)" }
             };
-            foreach (var field in typeof(ActiveSearchOptions).GetFields())
+            foreach (var field in ActiveSearchOptions.Fields)
             {
                 var input = new FloatField(labels[field.Name]) { name = "active-" + field.Name };
                 input.AddToClassList("lab-field"); input.SetValueWithoutNotify((float)(double)field.GetValue(activeSearchOptions));
@@ -701,7 +729,23 @@ namespace Eden.Presentation
                 });
                 activeFields.Add(field.Name, input); activeFoldout.Add(input);
             }
+            RefreshSightFields();
             RefreshProfileFields();
+
+            // A share in (0, 1]: anything else keeps the previous value, as the other active fields do.
+            FloatField Share(string name, string label, float initial, Action<double> set)
+            {
+                var field = new FloatField(label) { name = name };
+                field.AddToClassList("lab-field"); field.SetValueWithoutNotify(initial);
+                field.RegisterValueChangedCallback(change =>
+                {
+                    if (float.IsNaN(change.newValue) || change.newValue <= 0 || change.newValue > 1)
+                        field.SetValueWithoutNotify(change.previousValue);
+                    else set(change.newValue);
+                });
+                activeFoldout.Add(field);
+                return field;
+            }
 
 
             FloatField Between(string name, float initial, float min, float max)

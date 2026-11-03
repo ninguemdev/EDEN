@@ -101,7 +101,7 @@ namespace Eden.Tests.EditMode
                 Assert.That(GenerationSegmentWriter.VerifiedSegments(directory).Length, Is.EqualTo(1));
             }
             var loaded = CheckpointFile.Load(checkpointPath, out var info);
-            Assert.That(info.SchemaVersion, Is.EqualTo(10));
+            Assert.That(info.SchemaVersion, Is.EqualTo(12));
             var cursor = MetricsCheckpointCursor.LoadMatching(checkpointPath, info.StateHash);
             Assert.That(cursor, Is.Not.Null); Assert.That(cursor.ThroughSegment, Is.EqualTo("g000000-training"));
             Assert.That(MetricsCheckpointCursor.LoadMatching(checkpointPath, info.StateHash + 1), Is.Null);

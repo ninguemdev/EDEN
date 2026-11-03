@@ -195,7 +195,11 @@ namespace Eden.Presentation
         {
             var evaluated = plan.Stages[stage];
             if (evaluated.IsSearch)
-                return evaluated.ActiveSearch ? "Busca — híbrida (fome e sede ativas)" : "Etapa 1 — busca (sem gasto)";
+                return evaluated.ActiveSearch
+                    ? RewardProfiles.IsSight(plan.Profile)
+                        ? "Busca — híbrida (fome e sede ativas; explorar = células vistas)"
+                        : "Busca — híbrida (fome e sede ativas)"
+                    : "Etapa 1 — busca (sem gasto)";
             if (evaluated.Reward.Scoring == StageScoring.FoodEnergyPerSecond)
                 return null;
             return plan.Stages.Count > 1 ? "Etapa 2 — recursos" : "Recursos equilibrados";
@@ -216,6 +220,9 @@ namespace Eden.Presentation
             {
                 var a = tracker.Active; var c = episode.Creature; var config = episode.Simulation.World.Config;
                 text.AppendLine($"E {a.Exploration:0.000} ({a.Unique}/{a.Goal}; máscara {a.Eligible}) · D {a.Detection:0.000} · C {a.Collection:0.000}");
+                if (a.Options.Sight)
+                    text.AppendLine($"Vistas {a.SeenUnique}/{a.SightGoal} = {a.Sight:0.000} (peso {a.Options.SightWeight:0.00}) · " +
+                                    $"pisadas {a.Travel:0.000} · da máscara {a.SightCoverage:0.0%} · novidade {a.Novelty:0.000}");
                 text.AppendLine($"Base {a.Base:0.000} × {a.Multiplier:0.000} / 3,5 = {a.Score:0.000000}");
                 text.AppendLine($"Energia {c.Energy:0.0}/{c.Body.MaxEnergy:0.0} (inicial {a.InitialEnergy:0.0}); hidratação {c.Hydration:0.0}/{config.MaxHydration:0.0}");
                 text.AppendLine($"Gastos: metabolismo {a.Maintenance:0.0}, movimento {a.Movement:0.0}, giro {a.Turning:0.0}, olhos {a.Eyes:0.0}");

@@ -27,7 +27,14 @@ namespace Eden.Evolution
         /// </summary>
         Search = 3,
 
-        ExploreCollectActive = 4
+        ExploreCollectActive = 4,
+
+        /// <summary>
+        /// The active search of <see cref="ExploreCollectActive"/> with exploration measured by the cells the senses
+        /// saw (rules version 2): same formula, same events, an exploration term of its own and the measurements that
+        /// explain it.
+        /// </summary>
+        ExploreSightActive = 5
     }
 
     /// <summary>A measured quantity a stage reports per episode, with its unit and the range its values must fall in.</summary>
@@ -70,6 +77,8 @@ namespace Eden.Evolution
                     return SearchComponents;
                 case StageScoring.ExploreCollectActive:
                     return ActiveComponents;
+                case StageScoring.ExploreSightActive:
+                    return SightComponents;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(scoring), scoring, "Unknown stage scoring.");
             }
@@ -114,9 +123,13 @@ namespace Eden.Evolution
             new RewardComponent("uncharged_energy", "energy", 0, double.PositiveInfinity)
         };
 
-        private static readonly RewardComponent[] ActiveComponents = BuildActiveComponents();
+        private static readonly RewardComponent[] ActiveComponents = BuildActiveComponents(false);
 
-        private static RewardComponent[] BuildActiveComponents()
+        // The cells seen, their goal and the repeated sightings come after the version 1 components, so the columns of
+        // an older run stay a prefix of these and the version 1 list keeps its canonical text.
+        private static readonly RewardComponent[] SightComponents = BuildActiveComponents(true);
+
+        private static RewardComponent[] BuildActiveComponents(bool sight)
         {
             var result = new List<RewardComponent>();
             foreach (var name in new[] { "exploration", "coverage", "detection", "collection", "base", "score" })
@@ -135,6 +148,14 @@ namespace Eden.Evolution
                 foreach (var name in new[] { "water_useful", "contact_seconds", "sip_seconds", "collection_seconds", "energy_before_collection", "hydration_before_sip" })
                     result.Add(new RewardComponent(name + "_" + i, name.Contains("seconds") ? "simulated_seconds" :
                         name == "energy_before_collection" ? "energy" : "hydration", 0, double.PositiveInfinity));
+            if (sight)
+            {
+                foreach (var name in new[] { "sight", "travel", "sight_coverage", "novelty" })
+                    result.Add(new RewardComponent(name, "fraction", 0, 1));
+                foreach (var name in new[] { "seen", "sight_goal", "sightings" })
+                    result.Add(new RewardComponent(name, "count", 0, double.PositiveInfinity));
+            }
+
             return result.ToArray();
         }
 

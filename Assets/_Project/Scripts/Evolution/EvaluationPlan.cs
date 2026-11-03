@@ -205,7 +205,7 @@ namespace Eden.Evolution
         public SearchWorld Search { get; }
 
         public bool IsSearch => Search != null;
-        public bool ActiveSearch => Reward.Scoring == StageScoring.ExploreCollectActive;
+        public bool ActiveSearch => RewardProfiles.IsActive(Reward.Scoring);
         public bool FrozenNeeds => IsSearch && !ActiveSearch;
         public bool RespawnFood => !IsSearch;
         public bool FinishOnCollection => IsSearch && !ActiveSearch;
@@ -306,7 +306,7 @@ namespace Eden.Evolution
             for (var i = 0; i < templates.Length; i++)
             {
                 var world = i == 0 ? settings.World : further[i - 1].World;
-                if (settings.Profile.Stages[i].Scoring == StageScoring.ExploreCollectActive)
+                if (RewardProfiles.IsActive(settings.Profile.Stages[i].Scoring))
                 {
                     if (settings.Senses != Senses.Eyes || settings.Algorithm != EvolutionAlgorithm.Neat ||
                         settings.Profile.Parameter(RewardProfiles.WaterTargets, 0) < 1)
@@ -314,7 +314,7 @@ namespace Eden.Evolution
                     ActiveSearchOptions.Read(settings.Profile.Parameters).Check(world);
                 }
                 if (settings.Profile.Stages[i].Scoring == StageScoring.Search ||
-                    settings.Profile.Stages[i].Scoring == StageScoring.ExploreCollectActive)
+                    RewardProfiles.IsActive(settings.Profile.Stages[i].Scoring))
                     searches[i] = SearchWorld.Choose(world, RewardProfiles.TargetsOf(settings.Profile),
                         i == 0 ? settings.EpisodeSeconds : further[i - 1].EpisodeSeconds,
                         settings.Profile.Parameter(RewardProfiles.FeasibleFraction, 0.5), $"stage {i + 1}", errors,

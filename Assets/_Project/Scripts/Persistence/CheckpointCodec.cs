@@ -44,7 +44,9 @@ namespace Eden.Persistence
         // Schema 10 adds per-target detection flags to completed episode audits. Files without those flags
         // retain their previous schema (9/8/7/6/5); reward identity, RNG and scoring do not change.
         // Schema 11 records random neural founders' body, algorithm and senses. Older runs retain their schema.
-        public const int SchemaVersion = 11;
+        // Schema 12 records the cells the senses saw, their goal and the swept sightings of a run scored by sight
+        // (a reward profile ...-active-v2). A run scored by the cells entered keeps its own schema, byte for byte.
+        public const int SchemaVersion = 12;
 
         /// <summary>Schema of a legacy-profile run with parallel evaluation progress.</summary>
         public const int SchemaWithParallel = 7;
@@ -68,7 +70,9 @@ namespace Eden.Persistence
         {
             if (checkpoint == null)
                 throw new ArgumentNullException(nameof(checkpoint));
-            var schema = checkpoint.SharedWorld?.RandomNetwork != null ? 11
+            var schema = checkpoint.Evolution?.Settings.Profile != null &&
+                         RewardProfiles.IsSight(checkpoint.Evolution.Settings.Profile) ? 12
+                : checkpoint.SharedWorld?.RandomNetwork != null ? 11
                 : checkpoint.Evolution?.Settings.Profile != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile) ? TargetAuditSchema(checkpoint.Evolution)
                 : checkpoint.Evolution?.Settings.Profile?.IsLegacy == false ? 8
                 : checkpoint.Evolution?.Job.WorkerCount > 1 ? SchemaWithParallel
@@ -147,6 +151,8 @@ namespace Eden.Persistence
                 throw new CheckpointException("The checkpoint does not read back exactly (unknown or non-canonical values).");
             if (checkpoint.Evolution != null && RewardProfiles.IsActive(checkpoint.Evolution.Settings.Profile) && schema < 9)
                 throw new CheckpointException("Active search requires checkpoint schema 9.");
+            if (checkpoint.Evolution != null && RewardProfiles.IsSight(checkpoint.Evolution.Settings.Profile) && schema < 12)
+                throw new CheckpointException("A search scored by the cells seen requires checkpoint schema 12.");
             Guard(() => CheckRestorable(checkpoint));
             return checkpoint;
         }
@@ -979,6 +985,14 @@ namespace Eden.Persistence
             var Visited = JsonValue.NewArray();
             foreach (var item in state.Visited) Visited.Add(JsonValue.Of(item));
             value.Add("Visited", Visited);
+            // Only a state scored by sight writes these, so a run scored by the cells entered reads back unchanged.
+            if (state.SightGoal > 0)
+            {
+                var Seen = JsonValue.NewArray();
+                foreach (var item in state.Seen) Seen.Add(JsonValue.Of(item));
+                value.Add("sightGoal", JsonValue.Of(state.SightGoal)).Add("sightings", JsonValue.Of(state.Sightings))
+                    .Add("Seen", Seen);
+            }
             var Detected = JsonValue.NewArray();
             foreach (var item in state.Detected) Detected.Add(JsonValue.Of(item));
             value.Add("Detected", Detected);
@@ -1016,6 +1030,14 @@ namespace Eden.Persistence
             var Visited = value["Visited"].ArrayOf(1000000);
             state.Visited = new int[Visited.Count];
             for (var i = 0; i < Visited.Count; i++) state.Visited[i] = Visited[i].Int(0, 1000000);
+            if (value.TryGet("Seen") != null)
+            {
+                state.SightGoal = value["sightGoal"].Int(1, 1000000);
+                state.Sightings = value["sightings"].Long(0);
+                var Seen = value["Seen"].ArrayOf(1000000);
+                state.Seen = new int[Seen.Count];
+                for (var i = 0; i < Seen.Count; i++) state.Seen[i] = Seen[i].Int(0, 1000000);
+            }
             var Detected = value["Detected"].ArrayOf(SearchTargets.MaxTargets);
             state.Detected = new bool[Detected.Count];
             for (var i = 0; i < Detected.Count; i++) state.Detected[i] = Detected[i].Boolean();
